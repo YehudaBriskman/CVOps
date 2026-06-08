@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, UTC
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
@@ -136,7 +138,7 @@ async def stream_run_events(
     if proj is None or proj.org_id != current_user.org_id:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    async def generate():
+    async def generate() -> AsyncIterator[str]:
         from cvops_api.db.session import async_session_factory
 
         seen_ids: set[uuid.UUID] = set()
@@ -228,7 +230,7 @@ async def resolve_gate(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     r = await session.execute(select(Run).where(Run.id == id))
     run = r.scalar_one_or_none()
     if run is None:

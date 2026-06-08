@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -56,7 +56,7 @@ class Commit(Base):
     ontology_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ontologies.id"), nullable=False)
     ontology_version: Mapped[int] = mapped_column(Integer, nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
-    stats: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    stats: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Commit id={self.id!r} dataset_id={self.dataset_id!r} message={self.message!r}>"

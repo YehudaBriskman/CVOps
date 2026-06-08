@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -101,7 +102,7 @@ async def get_image_url(
     id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     r = await session.execute(select(Sample).where(Sample.id == id))
     s = r.scalar_one_or_none()
     if s is None:
@@ -116,7 +117,7 @@ async def get_thumbnail_url(
     id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     r = await session.execute(select(Sample).where(Sample.id == id))
     s = r.scalar_one_or_none()
     if s is None:

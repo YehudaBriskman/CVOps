@@ -7,7 +7,7 @@ from redis.asyncio import from_url
 
 from cvops_api.config import settings
 
-_redis: Redis | None = None  # type: ignore[type-arg]
+_redis: Redis | None = None
 
 
 async def init_redis() -> None:
@@ -22,7 +22,7 @@ async def close_redis() -> None:
         _redis = None
 
 
-def get_redis() -> Redis:  # type: ignore[type-arg]
+def get_redis() -> Redis:
     if _redis is None:
         raise RuntimeError("Redis client not initialized — call init_redis() at startup")
     return _redis

@@ -78,7 +78,7 @@ async def list_training_containers(
             TrainingContainer.deleted_at == None,  # noqa: E711
         )
     )
-    return list(r.scalars().all())
+    return [TrainingContainerOut.model_validate(tc) for tc in r.scalars().all()]
 
 
 @router.post(
@@ -104,7 +104,7 @@ async def create_training_container(
     session.add(tc)
     await session.flush()
     await session.commit()
-    return tc
+    return TrainingContainerOut.model_validate(tc)
 
 
 @router.get("/training-containers/{id}", response_model=TrainingContainerOut)
@@ -113,7 +113,7 @@ async def get_training_container(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> TrainingContainerOut:
-    return await _get_tc(id, current_user, session)
+    return TrainingContainerOut.model_validate(await _get_tc(id, current_user, session))
 
 
 @router.patch("/training-containers/{id}", response_model=TrainingContainerOut)
@@ -136,7 +136,7 @@ async def update_training_container(
         tc.icd_schema_version = body.icd_schema_version
     await session.flush()
     await session.commit()
-    return tc
+    return TrainingContainerOut.model_validate(tc)
 
 
 @router.delete("/training-containers/{id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -5,7 +5,9 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, cast
 
 from cvops_api.core.auth import get_current_user
 from cvops_api.db.session import get_session
@@ -237,10 +239,13 @@ async def create_commit(
 
     # Advance or create branch ref via CAS
     if ref:
-        result = await session.execute(
-            update(Ref)
-            .where(Ref.id == ref.id, Ref.target_commit_id == parent_commit_id)
-            .values(target_commit_id=commit.id)
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                update(Ref)
+                .where(Ref.id == ref.id, Ref.target_commit_id == parent_commit_id)
+                .values(target_commit_id=commit.id)
+            ),
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=409, detail="Concurrent branch update — retry")
@@ -394,7 +399,7 @@ async def create_dataset_link(
     body: DatasetLinkCreate,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     await _check_project(project_id, current_user, session)
 
     # Exactly one of pinned_commit_id / ref_id must be non-null
@@ -429,7 +434,7 @@ async def update_dataset_link(
     body: DatasetLinkUpdate,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> dict:
+) -> dict[str, Any]:
     r = await session.execute(select(ProjectDatasetLink).where(ProjectDatasetLink.id == id))
     link = r.scalar_one_or_none()
     if link is None:

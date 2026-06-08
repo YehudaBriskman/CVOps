@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
-from cvops_api.core.storage import get_storage
+from cvops_api.core.storage import get_storage, MinIOBackend
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
@@ -77,10 +77,13 @@ async def create_data_source(
     put_url: str | None = None
     if body.type != "external_uri":
         storage = get_storage()
-        put_url = storage._client.generate_presigned_url(
-            "put_object",
-            Params={"Bucket": storage._bucket, "Key": f"uploads/{ds.id}"},
-            ExpiresIn=3600,
+        assert isinstance(storage, MinIOBackend), "Storage backend must be MinIOBackend"
+        put_url = str(
+            storage._client.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": storage._bucket, "Key": f"uploads/{ds.id}"},
+                ExpiresIn=3600,
+            )
         )
 
     await session.commit()

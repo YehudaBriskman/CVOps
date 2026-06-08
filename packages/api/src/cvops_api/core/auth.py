@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, UTC
-from typing import Any
+from typing import Any, cast
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -25,34 +25,41 @@ _REVOKED_PREFIX = "revoked:"
 
 
 def hash_password(plain: str) -> str:
-    return _pwd_ctx.hash(plain)
+    return str(_pwd_ctx.hash(plain))
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+    return bool(_pwd_ctx.verify(plain, hashed))
 
 
 def create_access_token(subject: str) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode(
-        {"sub": subject, "exp": expire, "type": "access", "jti": uuid.uuid4().hex},
-        settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
+    return str(
+        jwt.encode(
+            {"sub": subject, "exp": expire, "type": "access", "jti": uuid.uuid4().hex},
+            settings.JWT_SECRET,
+            algorithm=settings.JWT_ALGORITHM,
+        )
     )
 
 
 def create_refresh_token(subject: str) -> str:
     expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    return jwt.encode(
-        {"sub": subject, "exp": expire, "type": "refresh", "jti": uuid.uuid4().hex},
-        settings.JWT_SECRET,
-        algorithm=settings.JWT_ALGORITHM,
+    return str(
+        jwt.encode(
+            {"sub": subject, "exp": expire, "type": "refresh", "jti": uuid.uuid4().hex},
+            settings.JWT_SECRET,
+            algorithm=settings.JWT_ALGORITHM,
+        )
     )
 
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        return cast(
+            dict[str, Any],
+            jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]),
+        )
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

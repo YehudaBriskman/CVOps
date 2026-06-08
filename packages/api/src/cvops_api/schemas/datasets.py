@@ -1,6 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel
 
 
@@ -20,7 +21,7 @@ class CommitCreate(BaseModel):
     message: str
     sample_ids: list[uuid.UUID]
     annotation_revision_ids: list[uuid.UUID]
-    split_strategy: dict = {}
+    split_strategy: dict[str, Any] = {}
     ontology_id: uuid.UUID
     branch_name: str = "main"
 
@@ -30,7 +31,7 @@ class CommitOut(BaseModel):
     id: uuid.UUID
     dataset_id: uuid.UUID
     message: str | None = None
-    stats: dict | None = None
+    stats: dict[str, Any] | None = None
     ontology_id: uuid.UUID
     ontology_version: int
     created_at: datetime

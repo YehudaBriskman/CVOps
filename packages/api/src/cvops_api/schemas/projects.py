@@ -1,20 +1,21 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel
 
 
 class ProjectCreate(BaseModel):
     name: str
     task_type: str = "detection"
-    settings: dict | None = None
+    settings: dict[str, Any] | None = None
 
 
 class ProjectUpdate(BaseModel):
     name: str | None = None
     task_type: str | None = None
     default_ontology_id: uuid.UUID | None = None
-    settings: dict | None = None
+    settings: dict[str, Any] | None = None
 
 
 class ProjectOut(BaseModel):

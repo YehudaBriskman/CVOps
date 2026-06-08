@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -14,7 +15,7 @@ class Workflow(Base, EntityBase):
         index=True,
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    definition: Mapped[dict] = mapped_column(
+    definition: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
         comment=("Shape: {name, steps:[{id, type, config, inputs}], edges:[[from,to]]}"),

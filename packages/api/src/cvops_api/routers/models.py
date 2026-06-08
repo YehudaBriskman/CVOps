@@ -58,7 +58,7 @@ async def list_models(
 ) -> list[ModelVersionOut]:
     await _get_project(project_id, current_user, session)
     r = await session.execute(select(ModelVersion).where(ModelVersion.project_id == project_id))
-    return list(r.scalars().all())
+    return [ModelVersionOut.model_validate(mv) for mv in r.scalars().all()]
 
 
 @router.get("/models/{id}", response_model=ModelVersionOut)
@@ -67,7 +67,7 @@ async def get_model(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ModelVersionOut:
-    return await _get_model_version(id, current_user, session)
+    return ModelVersionOut.model_validate(await _get_model_version(id, current_user, session))
 
 
 @router.get("/models/{id}/weights-url")
