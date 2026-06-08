@@ -18,6 +18,9 @@ from cvops_api.db.models.auth import User
 
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _oauth2 = OAuth2PasswordBearer(tokenUrl="/auth/token")
+oauth2_scheme = _oauth2
+
+_REVOKED_PREFIX = "revoked:"
 
 
 def hash_password(plain: str) -> str:
@@ -31,7 +34,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_access_token(subject: str) -> str:
     expire = datetime.now(UTC) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode(
-        {"sub": subject, "exp": expire, "type": "access"},
+        {"sub": subject, "exp": expire, "type": "access", "jti": uuid.uuid4().hex},
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )
@@ -40,7 +43,7 @@ def create_access_token(subject: str) -> str:
 def create_refresh_token(subject: str) -> str:
     expire = datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     return jwt.encode(
-        {"sub": subject, "exp": expire, "type": "refresh"},
+        {"sub": subject, "exp": expire, "type": "refresh", "jti": uuid.uuid4().hex},
         settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )
@@ -57,11 +60,32 @@ def decode_token(token: str) -> dict[str, Any]:
         )
 
 
+async def blacklist_token(jti: str, exp: int) -> None:
+    """Store a token JTI in Redis until it would have expired naturally."""
+    from cvops_api.core.redis_client import get_redis
+    ttl = max(1, exp - int(datetime.now(UTC).timestamp()))
+    await get_redis().setex(f"{_REVOKED_PREFIX}{jti}", ttl, "1")
+
+
+async def is_blacklisted(jti: str) -> bool:
+    from cvops_api.core.redis_client import get_redis
+    return await get_redis().exists(f"{_REVOKED_PREFIX}{jti}") == 1
+
+
 async def get_current_user(
     token: str = Depends(_oauth2),
     session: AsyncSession = Depends(get_session),
 ) -> User:
     payload = decode_token(token)
+
+    jti = payload.get("jti")
+    if jti and await is_blacklisted(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(

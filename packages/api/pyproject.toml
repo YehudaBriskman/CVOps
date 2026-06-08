@@ -29,6 +29,8 @@ dependencies = [
   "pillow>=10.3",
   # Docker dispatch (step.train)
   "docker>=7.1",
+  # Cache / token blacklist
+  "redis[asyncio]>=5.0",
   # Utilities
   "imagehash>=4.3",
 ]

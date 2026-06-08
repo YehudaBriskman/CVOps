@@ -13,10 +13,15 @@ from cvops_api.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[type-arg]
-    # Register all step types into the in-memory registry
-    from cvops_steps import register_all  # type: ignore[import]
-    register_all()
+    from cvops_api.core.redis_client import init_redis, close_redis
+    await init_redis()
+    try:
+        from cvops_steps import register_all  # type: ignore[import]
+        register_all()
+    except ImportError:
+        pass
     yield
+    await close_redis()
     await engine.dispose()
 
 
