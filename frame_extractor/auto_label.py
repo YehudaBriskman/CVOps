@@ -89,7 +89,7 @@ def ask_confidence() -> float:
 
         try:
             value = float(raw)
-            if 0.0 < value <= 1.0:
+            if 0.0 <= value <= 1.0:
                 return value
             print("  [!] Value must be between 0.0 and 1.0.")
         except ValueError:
@@ -105,9 +105,13 @@ def run_auto_label(frames_dir: Path, output_dir: Path, confidence: float):
         output_dir  -> folder where label .txt files will be saved
         confidence  -> minimum confidence threshold for detections
     """
-    # Load the YOLO12 nano model
+    # Load the YOLO12 nano model (auto-downloaded by ultralytics if not present)
     print("\n[*] Loading YOLO12 nano model...")
-    model = YOLO("yolo12n.pt")
+    try:
+        model = YOLO("yolo12n.pt")
+    except Exception as e:
+        print(f"[!] Failed to load YOLO model: {e}")
+        return
 
     # Create output directory if it doesn't exist
     output_dir.mkdir(parents=True, exist_ok=True)
