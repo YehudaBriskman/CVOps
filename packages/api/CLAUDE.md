@@ -88,8 +88,6 @@ open http://localhost:8000/docs
 
 - `POST /internal/cvat/webhook` — stub only; Phase 2 CVAT integration pending
 - `cvops_steps` package — step implementations (extract_frames, auto_label, etc.) live in a separate package, not in this repo; the workflow engine is ready to execute them once registered
-- Refresh token blacklist — `POST /auth/revoke` is a no-op; blacklist logic deferred
-- Redis integration — `REDIS_URL` is in settings but not yet used
 
 ## 10. Adding a New Step Type
 

@@ -1,0 +1,42 @@
+name: API · Lint & Type-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/lint-api.yml'
+  pull_request:
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/lint-api.yml'
+
+jobs:
+  lint:
+    name: ruff + mypy (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packages/api/pyproject.toml
+
+      - name: Install dependencies
+        working-directory: packages/api
+        run: pip install -e ".[dev]"
+
+      - name: Ruff — lint
+        working-directory: packages/api
+        run: ruff check src/ tests/
+
+      - name: Ruff — format check
+        working-directory: packages/api
+        run: ruff format --check src/ tests/
+
+      - name: Mypy — type-check
+        working-directory: packages/api
+        run: mypy src/
