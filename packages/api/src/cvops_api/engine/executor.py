@@ -69,9 +69,9 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
     # 3. Seed step_outputs from already-succeeded child runs (resume support)
     step_outputs: dict[str, dict[str, Any]] = {}
     existing = await session.execute(select(Run).where(Run.parent_run_id == run_id))
-    for child in existing.scalars().all():
-        if child.status == "succeeded" and child.step_id:
-            step_outputs[child.step_id] = child.output_refs or {}
+    for prev in existing.scalars().all():
+        if prev.status == "succeeded" and prev.step_id:
+            step_outputs[prev.step_id] = prev.output_refs or {}
 
     run_params: dict[str, Any] = (parent.input_refs or {}).get("params", {})
 
@@ -79,16 +79,16 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
     for step_id in ordered:
         step_def = steps_by_id[step_id]
         type_key: str = step_def["type"]
-        config: dict = step_def.get("config", {})
+        config: dict[str, Any] = step_def.get("config", {})
 
         # Find or create child Run
         cr = await session.execute(
             select(Run).where(Run.parent_run_id == run_id, Run.step_id == step_id)
         )
-        child = cr.scalar_one_or_none()
+        child_or_none: Run | None = cr.scalar_one_or_none()
 
-        if child is None:
-            child = Run(
+        if child_or_none is None:
+            child_or_none = Run(
                 project_id=parent.project_id,
                 kind="step",
                 parent_run_id=run_id,
@@ -100,8 +100,10 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
                 output_refs={},
                 config=config,
             )
-            session.add(child)
+            session.add(child_or_none)
             await session.flush()
+
+        child: Run = child_or_none
 
         if child.status == "succeeded":
             step_outputs[step_id] = child.output_refs or {}

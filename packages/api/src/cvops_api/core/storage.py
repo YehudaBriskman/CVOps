@@ -79,17 +79,21 @@ class MinIOBackend(StorageBackend):
         return blob_hash
 
     async def get_presigned_get(self, blob_hash: str, ttl_seconds: int = 900) -> str:
-        return self._client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
-            ExpiresIn=ttl_seconds,
+        return str(
+            self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
+                ExpiresIn=ttl_seconds,
+            )
         )
 
     async def get_presigned_put(self, blob_hash: str, ttl_seconds: int = 3600) -> str:
-        return self._client.generate_presigned_url(
-            "put_object",
-            Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
-            ExpiresIn=ttl_seconds,
+        return str(
+            self._client.generate_presigned_url(
+                "put_object",
+                Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
+                ExpiresIn=ttl_seconds,
+            )
         )
 
     async def get_bytes(self, blob_hash: str) -> bytes:

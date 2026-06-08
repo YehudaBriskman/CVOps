@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import Boolean, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -12,7 +12,7 @@ class Org(Base, EntityBase):
     __tablename__ = "orgs"
 
     name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Org id={self.id} name={self.name!r}>"

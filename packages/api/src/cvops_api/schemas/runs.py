@@ -1,11 +1,12 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel
 
 
 class RunCreate(BaseModel):
-    params: dict = {}
+    params: dict[str, Any] = {}
 
 
 class RunOut(BaseModel):
@@ -15,10 +16,10 @@ class RunOut(BaseModel):
     kind: str
     status: str
     attempt: int
-    input_refs: dict | None = None
-    output_refs: dict | None = None
-    config: dict | None = None
-    metrics: dict | None = None
+    input_refs: dict[str, Any] | None = None
+    output_refs: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+    metrics: dict[str, Any] | None = None
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -38,7 +39,7 @@ class EventOut(BaseModel):
     entity_type: str
     entity_id: uuid.UUID
     action: str
-    payload: dict | None = None
+    payload: dict[str, Any] | None = None
     created_at: datetime
 
 

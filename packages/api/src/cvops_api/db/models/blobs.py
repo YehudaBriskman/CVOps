@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -33,14 +34,14 @@ class TypeSchema(Base):
 
     type_key: Mapped[str] = mapped_column(Text, primary_key=True)
     category: Mapped[str] = mapped_column(Text, nullable=False)
-    json_schema: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    json_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     schema_version: Mapped[str] = mapped_column(
         Text,
         nullable=False,
         default="1",
         server_default="1",
     )
-    ui_hints: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    ui_hints: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

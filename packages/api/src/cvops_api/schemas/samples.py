@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
@@ -22,7 +22,7 @@ class SampleOut(BaseModel):
     height: int
     frame_index: int | None = None
     perceptual_hash: str | None = None
-    metadata: dict | None = Field(None, alias="metadata_")
+    metadata: dict[str, Any] | None = Field(None, alias="metadata_")
     created_at: datetime
 
 
@@ -33,12 +33,12 @@ class AnnotationRevisionOut(BaseModel):
     ontology_id: uuid.UUID
     ontology_version: int
     revision_no: int
-    payload: dict
-    provenance: dict | None = None
+    payload: dict[str, Any]
+    provenance: dict[str, Any] | None = None
     created_at: datetime
 
 
 class AnnotationCreate(BaseModel):
     ontology_id: uuid.UUID
-    payload: dict
-    provenance: dict | None = None
+    payload: dict[str, Any]
+    provenance: dict[str, Any] | None = None

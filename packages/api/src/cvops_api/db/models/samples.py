@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -20,7 +20,7 @@ class DataSource(Base, EntityBase):
     status: Mapped[str] = mapped_column(
         Text, nullable=False, default="pending", server_default="pending"
     )
-    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    metadata_: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSONB, nullable=True)
 
     __table_args__ = (Index("ix_data_sources_project_status", "project_id", "status"),)
 
@@ -46,7 +46,7 @@ class Sample(Base, EntityBase):
     frame_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     perceptual_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     thumbnail_hash: Mapped[Optional[str]] = mapped_column(ForeignKey("blobs.hash"), nullable=True)
-    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
+    metadata_: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSONB, nullable=True)
 
     __table_args__ = (UniqueConstraint("project_id", "blob_hash", name="uq_samples_project_blob"),)
 

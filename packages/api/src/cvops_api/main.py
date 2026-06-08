@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,12 +23,12 @@ from cvops_api.routers import (
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # type: ignore[type-arg]
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from cvops_api.core.redis_client import init_redis, close_redis
 
     await init_redis()
     try:
-        from cvops_steps import register_all  # type: ignore[import]
+        from cvops_steps import register_all
 
         register_all()
     except ImportError:

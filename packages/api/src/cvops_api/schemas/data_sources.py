@@ -1,13 +1,14 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
+from typing import Any
 from pydantic import BaseModel, Field
 
 
 class DataSourceCreate(BaseModel):
     type: str
     external_uri: str | None = None
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class DataSourceConfirm(BaseModel):
@@ -22,7 +23,7 @@ class DataSourceOut(BaseModel):
     blob_hash: str | None = None
     external_uri: str | None = None
     status: str
-    metadata: dict | None = Field(None, alias="metadata_")
+    metadata: dict[str, Any] | None = Field(None, alias="metadata_")
     created_at: datetime
 
 

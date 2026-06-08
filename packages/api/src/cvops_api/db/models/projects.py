@@ -1,5 +1,5 @@
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -35,7 +35,7 @@ class Project(Base, EntityBase):
         nullable=True,
     )
 
-    settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
         return (

@@ -45,7 +45,7 @@ async def list_projects(
             Project.deleted_at == None,  # noqa: E711
         )
     )
-    return list(r.scalars().all())
+    return [ProjectOut.model_validate(p) for p in r.scalars().all()]
 
 
 @router.post("/", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -63,7 +63,7 @@ async def create_project(
     session.add(project)
     await session.flush()
     await session.commit()
-    return project
+    return ProjectOut.model_validate(project)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -72,7 +72,7 @@ async def get_project(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ProjectOut:
-    return await _get_project(project_id, current_user, session)
+    return ProjectOut.model_validate(await _get_project(project_id, current_user, session))
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -93,7 +93,7 @@ async def update_project(
         proj.settings = body.settings
     await session.flush()
     await session.commit()
-    return proj
+    return ProjectOut.model_validate(proj)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
