@@ -1,0 +1,27 @@
+from __future__ import annotations
+import uuid
+from datetime import datetime
+from pydantic import BaseModel
+
+
+class ProjectCreate(BaseModel):
+    name: str
+    task_type: str = "detection"
+    settings: dict | None = None
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    task_type: str | None = None
+    default_ontology_id: uuid.UUID | None = None
+    settings: dict | None = None
+
+
+class ProjectOut(BaseModel):
+    model_config = {"from_attributes": True}
+    id: uuid.UUID
+    org_id: uuid.UUID
+    name: str
+    task_type: str
+    default_ontology_id: uuid.UUID | None = None
+    created_at: datetime
