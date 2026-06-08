@@ -20,6 +20,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class RevocationRequest(BaseModel):
+    refresh_token: str | None = None
+
+
 class UserOut(BaseModel):
     model_config = {"from_attributes": True}
     id: uuid.UUID

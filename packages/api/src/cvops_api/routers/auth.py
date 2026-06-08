@@ -10,16 +10,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import (
+    blacklist_token,
     create_access_token,
     create_refresh_token,
     decode_token,
     get_current_user,
     hash_password,
+    oauth2_scheme as _oauth2_scheme,
     verify_password,
 )
 from cvops_api.db.models.auth import Membership, Org, User
 from cvops_api.db.session import get_session
-from cvops_api.schemas.auth import RefreshRequest, RegisterRequest, TokenResponse, UserOut
+from cvops_api.schemas.auth import RefreshRequest, RegisterRequest, RevocationRequest, TokenResponse, UserOut
 
 router = APIRouter()
 
@@ -114,6 +116,12 @@ async def refresh(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Rotate: blacklist the consumed refresh token
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti and exp:
+        await blacklist_token(jti, int(exp))
+
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
@@ -122,9 +130,25 @@ async def refresh(
 
 @router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke(
+    body: RevocationRequest,
     current_user: User = Depends(get_current_user),
+    token: str = Depends(_oauth2_scheme),
 ) -> None:
-    return None
+    access_payload = decode_token(token)
+    jti = access_payload.get("jti")
+    exp = access_payload.get("exp")
+    if jti and exp:
+        await blacklist_token(jti, int(exp))
+
+    if body.refresh_token:
+        try:
+            refresh_payload = decode_token(body.refresh_token)
+            r_jti = refresh_payload.get("jti")
+            r_exp = refresh_payload.get("exp")
+            if r_jti and r_exp:
+                await blacklist_token(r_jti, int(r_exp))
+        except Exception:
+            pass
 
 
 @router.get("/me", response_model=UserOut)
