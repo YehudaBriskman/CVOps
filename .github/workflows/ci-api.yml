@@ -1,0 +1,34 @@
+name: API · Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/ci-api.yml'
+  pull_request:
+    paths:
+      - 'packages/api/**'
+      - '.github/workflows/ci-api.yml'
+
+jobs:
+  test:
+    name: pytest (Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packages/api/pyproject.toml
+
+      - name: Install dependencies
+        working-directory: packages/api
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        working-directory: packages/api
+        run: pytest tests/ -q --tb=short
