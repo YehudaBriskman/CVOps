@@ -1,0 +1,51 @@
+<svg viewBox="0 0 1100 1122" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#06B6D4"/></linearGradient></defs>
+<rect width="1100" height="1122" fill="#FFFFFF"/>
+<rect width="1100" height="10" fill="url(#g)"/>
+<text x="60" y="92" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="40" font-weight="800" fill="#0B1F3A" letter-spacing="-1">CVOps Color Palette</text>
+<text x="60" y="128" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="18" fill="#94A3B8">Modern &amp; approachable · blue → cyan core</text>
+<text x="60" y="200" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2" fill="#2563EB">PRIMARY</text>
+<rect x="60" y="254" width="270" height="92" rx="14" fill="#2563EB"/>
+<text x="78" y="294" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Cobalt Blue</text>
+<text x="78" y="322" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#2563EB</text>
+<rect x="360" y="254" width="270" height="92" rx="14" fill="#06B6D4"/>
+<text x="378" y="294" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Aqua</text>
+<text x="378" y="322" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#06B6D4</text>
+<rect x="660" y="254" width="270" height="92" rx="14" fill="#22D3EE"/>
+<text x="678" y="294" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#0B1F3A">Sky</text>
+<text x="678" y="322" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#0B1F3A" opacity="0.92">#22D3EE</text>
+<text x="60" y="394" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2" fill="#2563EB">NEUTRAL</text>
+<rect x="60" y="448" width="270" height="92" rx="14" fill="#0B1F3A"/>
+<text x="78" y="488" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Ink</text>
+<text x="78" y="516" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#0B1F3A</text>
+<rect x="360" y="448" width="270" height="92" rx="14" fill="#334155"/>
+<text x="378" y="488" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Slate</text>
+<text x="378" y="516" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#334155</text>
+<rect x="660" y="448" width="270" height="92" rx="14" fill="#94A3B8"/>
+<text x="678" y="488" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Mist</text>
+<text x="678" y="516" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#94A3B8</text>
+<rect x="60" y="558" width="270" height="92" rx="14" fill="#E2E8F0"/>
+<text x="78" y="598" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#0B1F3A">Cloud</text>
+<text x="78" y="626" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#0B1F3A" opacity="0.92">#E2E8F0</text>
+<rect x="360" y="558" width="270" height="92" rx="14" fill="#F4F8FF" stroke="#E2E8F0"/>
+<text x="378" y="598" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#0B1F3A">Paper</text>
+<text x="378" y="626" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#0B1F3A" opacity="0.92">#F4F8FF</text>
+<rect x="660" y="558" width="270" height="92" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<text x="678" y="598" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#0B1F3A">White</text>
+<text x="678" y="626" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#0B1F3A" opacity="0.92">#FFFFFF</text>
+<text x="60" y="698" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2" fill="#2563EB">SEMANTIC</text>
+<rect x="60" y="752" width="270" height="92" rx="14" fill="#16A34A"/>
+<text x="78" y="792" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Success</text>
+<text x="78" y="820" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#16A34A</text>
+<rect x="360" y="752" width="270" height="92" rx="14" fill="#F59E0B"/>
+<text x="378" y="792" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#0B1F3A">Warning</text>
+<text x="378" y="820" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#0B1F3A" opacity="0.92">#F59E0B</text>
+<rect x="660" y="752" width="270" height="92" rx="14" fill="#EF4444"/>
+<text x="678" y="792" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Error</text>
+<text x="678" y="820" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#EF4444</text>
+<rect x="60" y="862" width="270" height="92" rx="14" fill="#0EA5E9"/>
+<text x="78" y="902" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="19" font-weight="700" fill="#FFFFFF">Info</text>
+<text x="78" y="930" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF" opacity="0.92">#0EA5E9</text>
+<rect x="60" y="1032" width="980" height="56" rx="14" fill="url(#g)"/>
+<text x="80" y="1066" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="18" font-weight="700" fill="#FFFFFF">Signature gradient</text>
+<text x="1020" y="1066" text-anchor="end" font-family="DejaVu Sans Mono, monospace" font-size="15" fill="#FFFFFF">135°  #2563EB → #06B6D4</text>
+</svg>
