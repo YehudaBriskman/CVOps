@@ -1,10 +1,18 @@
 <div align="center">
 
-# CVOps
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/logo-primary-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="brand/logo-primary-light.svg">
+  <img alt="CVOps" src="brand/logo-primary-dark.svg" width="260">
+</picture>
+
+<br><br>
 
 **The ML lifecycle dashboard that replaces five fragmented tools.**
 
 Track datasets · version models · orchestrate workflows · audit everything — in one place.
+
+<br>
 
 [![API CI](https://github.com/YehudaBriskman/CVOps/actions/workflows/ci-api.yml/badge.svg)](https://github.com/YehudaBriskman/CVOps/actions/workflows/ci-api.yml)
 [![Lint](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml/badge.svg)](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml)
@@ -12,6 +20,10 @@ Track datasets · version models · orchestrate workflows · audit everything �
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+
+<br>
+
+<img src="brand/hero-orbit.svg" alt="CVOps lifecycle overview" width="720">
 
 </div>
 
@@ -49,6 +61,14 @@ raw video / images
 ```
 
 Every node in that graph is a **Step** — composable, versioned, idempotent. Every edge is tracked. Every artifact is a content-addressed blob.
+
+---
+
+## Dashboard
+
+<div align="center">
+<img src="brand/graphic-dashboard.svg" alt="CVOps dashboard preview" width="780">
+</div>
 
 ---
 
@@ -502,6 +522,7 @@ cp .env.example .env
 | [`packages/api/CLAUDE.md`](packages/api/CLAUDE.md) | API developer orientation (shared deps, conventions, auth model) |
 | [`docs/db/`](docs/db/) | Per-model database schema documentation |
 | [Interactive API docs](http://localhost:8000/docs) | Swagger UI — live when stack is running |
+| [`brand/`](brand/) | Logos, color tokens, icons, social assets, brand guide |
 
 ---
 
