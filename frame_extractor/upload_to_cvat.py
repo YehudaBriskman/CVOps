@@ -22,10 +22,9 @@ from cvat_sdk import make_client
 from cvat_sdk.models import TaskWriteRequest
 
 
-# CVAT connection settings
-CVAT_HOST = "http://localhost"
-CVAT_PORT = 8080
-CVAT_USERNAME = "Nati"
+# CVAT connection settings — override via environment variables
+CVAT_HOST = os.environ.get("CVAT_HOST", "http://localhost")
+CVAT_PORT = int(os.environ.get("CVAT_PORT", "8080"))
 
 # COCO class names used by YOLO12n (80 classes)
 COCO_NAMES = {
@@ -106,7 +105,7 @@ def get_classes_from_labels(labels_dir: Path) -> dict[int, str]:
     return {cid: COCO_NAMES.get(cid, f"class_{cid}") for cid in sorted(class_ids)}
 
 
-def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, password: str):
+def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, username: str, password: str):
     """
     Upload frames and labels to CVAT.
 
@@ -114,6 +113,7 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, passwo
         frames_dir   -> folder containing the extracted frame images
         labels_dir   -> folder containing the YOLO .txt label files
         session_name -> name used for the CVAT task
+        username     -> CVAT username
         password     -> CVAT password
     """
     print(f"\n[*] Connecting to CVAT at {CVAT_HOST}:{CVAT_PORT}...")
@@ -121,7 +121,7 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, passwo
     with make_client(
         host=CVAT_HOST,
         port=CVAT_PORT,
-        credentials=(CVAT_USERNAME, password)
+        credentials=(username, password)
     ) as client:
 
         print("[✓] Connected to CVAT")
@@ -174,44 +174,47 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, passwo
             if label_files and class_map:
                 print(f"[*] Uploading {len(label_files)} label files as pre-annotations...")
 
-                with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-                    tmp_path = tmp.name
+                tmp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                        tmp_path = tmp.name
 
-                labeled_stems = {lf.stem for lf in label_files}
+                    labeled_stems = {lf.stem for lf in label_files}
 
-                with zipfile.ZipFile(tmp_path, "w") as zf:
-                    for label_file in label_files:
-                        zf.write(label_file, f"train/labels/{label_file.name}")
+                    with zipfile.ZipFile(tmp_path, "w") as zf:
+                        for label_file in label_files:
+                            zf.write(label_file, f"train/labels/{label_file.name}")
 
-                    # datumaro requires images in the zip to map labels to frames
-                    for img_file in sorted(
-                        list(frames_dir.glob("*.jpg")) +
-                        list(frames_dir.glob("*.jpeg")) +
-                        list(frames_dir.glob("*.png"))
-                    ):
-                        if img_file.stem in labeled_stems:
-                            zf.write(img_file, f"train/images/{img_file.name}")
+                        # datumaro requires images in the zip to map labels to frames
+                        for img_file in sorted(
+                            list(frames_dir.glob("*.jpg")) +
+                            list(frames_dir.glob("*.jpeg")) +
+                            list(frames_dir.glob("*.png"))
+                        ):
+                            if img_file.stem in labeled_stems:
+                                zf.write(img_file, f"train/images/{img_file.name}")
 
-                    # data.yaml must map the exact class IDs used in the .txt files
-                    names_block = "\n".join(
-                        f"  {cid}: {name}" for cid, name in class_map.items()
+                        # data.yaml must map the exact class IDs used in the .txt files
+                        names_block = "\n".join(
+                            f"  {cid}: {name}" for cid, name in class_map.items()
+                        )
+                        yaml_content = (
+                            f"path: .\n"
+                            f"train: train/images\n"
+                            f"val: train/images\n"
+                            f"names:\n"
+                            f"{names_block}\n"
+                        )
+                        zf.writestr("data.yaml", yaml_content)
+
+                    task.import_annotations(
+                        format_name="Ultralytics YOLO Detection 1.0",
+                        filename=tmp_path
                     )
-                    yaml_content = (
-                        f"path: .\n"
-                        f"train: train/images\n"
-                        f"val: train/images\n"
-                        f"names:\n"
-                        f"{names_block}\n"
-                    )
-                    zf.writestr("data.yaml", yaml_content)
-
-                task.import_annotations(
-                    format_name="Ultralytics YOLO Detection 1.0",
-                    filename=tmp_path
-                )
-
-                os.unlink(tmp_path)
-                print("[✓] Labels uploaded as pre-annotations")
+                    print("[✓] Labels uploaded as pre-annotations")
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
             else:
                 print("[!] No label files found — uploading images only")
         else:
@@ -220,7 +223,7 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, passwo
         print(f"\n{'=' * 40}")
         print(f"Task name  : {session_name}")
         print(f"Task ID    : {task.id}")
-        print(f"Open CVAT  : http://localhost:8080/tasks/{task.id}/jobs")
+        print(f"Open CVAT  : {CVAT_HOST}:{CVAT_PORT}/tasks/{task.id}/jobs")
         print(f"{'=' * 40}\n")
 
 
@@ -228,13 +231,14 @@ def main():
     # Step 1: Ask which session to upload
     frames_dir, labels_dir, session_name = ask_session()
 
-    # Step 2: Ask for CVAT password
+    # Step 2: Ask for CVAT credentials (env vars take priority)
+    username = os.environ.get("CVAT_USERNAME", "").strip() or input("Enter your CVAT username: ").strip()
     password = getpass.getpass("Enter your CVAT password: ")
 
     print(f"\n[✓] Session : {session_name}")
 
     # Step 3: Upload to CVAT
-    upload_to_cvat(frames_dir, labels_dir, session_name, password)
+    upload_to_cvat(frames_dir, labels_dir, session_name, username, password)
 
 
 if __name__ == "__main__":
