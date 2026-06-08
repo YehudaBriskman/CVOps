@@ -115,6 +115,9 @@ def extract_frames(
         return 0
 
     fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0:
+        print(f"  [!] Warning: could not read FPS for {video_path.name}, defaulting to 1 fps")
+        fps = 1.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     # Calculate the frame interval based on the chosen mode
@@ -144,8 +147,10 @@ def extract_frames(
             global_idx = frame_counter_start + saved + 1
             filename = f"{session_name}_{global_idx}.jpg"
             out_path = output_dir / filename
-            cv2.imwrite(str(out_path), frame)
-            saved += 1
+            if cv2.imwrite(str(out_path), frame):
+                saved += 1
+            else:
+                print(f"  [!] Warning: failed to write {filename}")
 
         frame_idx += 1
 
