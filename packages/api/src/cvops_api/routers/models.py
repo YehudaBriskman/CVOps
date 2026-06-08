@@ -40,9 +40,7 @@ async def _get_model_version(
     current_user: User,
     session: AsyncSession,
 ) -> ModelVersion:
-    r = await session.execute(
-        select(ModelVersion).where(ModelVersion.id == mv_id)
-    )
+    r = await session.execute(select(ModelVersion).where(ModelVersion.id == mv_id))
     mv = r.scalar_one_or_none()
     if mv is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -59,9 +57,7 @@ async def list_models(
     session: AsyncSession = Depends(get_session),
 ) -> list[ModelVersionOut]:
     await _get_project(project_id, current_user, session)
-    r = await session.execute(
-        select(ModelVersion).where(ModelVersion.project_id == project_id)
-    )
+    r = await session.execute(select(ModelVersion).where(ModelVersion.project_id == project_id))
     return list(r.scalars().all())
 
 

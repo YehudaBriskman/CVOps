@@ -3,14 +3,14 @@ Factory helpers for DB tests.
 Each helper inserts a minimal valid row, flushes (not commits), and returns the ORM object.
 All generated names/emails include a UUID fragment to avoid UNIQUE constraint collisions.
 """
+
 import uuid
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cvops_api.db.models.auth import Membership, Org, User
+from cvops_api.db.models.auth import Org, User
 from cvops_api.db.models.blobs import Blob
-from cvops_api.db.models.ontologies import LabelClass, Ontology
+from cvops_api.db.models.ontologies import Ontology
 from cvops_api.db.models.projects import Project
 from cvops_api.db.models.runs import Run
 from cvops_api.db.models.samples import DataSource, Sample
@@ -185,9 +185,7 @@ async def make_workflow(
     return wf
 
 
-async def make_run(
-    session: AsyncSession, project_id: uuid.UUID | None = None, **kwargs
-) -> Run:
+async def make_run(session: AsyncSession, project_id: uuid.UUID | None = None, **kwargs) -> Run:
     if project_id is None:
         project_id = (await make_project(session)).id
     run = Run(

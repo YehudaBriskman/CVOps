@@ -2,6 +2,7 @@
 G1 — Base entity mixin.
 Every domain table inherits EntityBase to get the standard spine.
 """
+
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -20,9 +21,8 @@ class EntityBase:
     Mix into every domain table class alongside Base.
     Tables that are not project-scoped (e.g. orgs, blobs) omit project_id.
     """
-    id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, default=uuid.uuid4, index=True
-    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

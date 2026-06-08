@@ -67,9 +67,7 @@ class AnnotationRevision(Base):
     # dict: {source, model_version_id, author_user_id, confidence_threshold, review_status}
     provenance: Mapped[Any] = mapped_column(JSONB, nullable=False)
 
-    __table_args__ = (
-        Index("ix_annotation_revisions_sample_revision", "sample_id", "revision_no"),
-    )
+    __table_args__ = (Index("ix_annotation_revisions_sample_revision", "sample_id", "revision_no"),)
 
     def __repr__(self) -> str:
         return (

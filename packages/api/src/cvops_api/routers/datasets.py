@@ -55,6 +55,7 @@ async def _check_project(
 
 # ── Datasets ─────────────────────────────────────────────────────────────────
 
+
 @router.get("/projects/{project_id}/datasets", response_model=list[DatasetOut])
 async def list_datasets(
     project_id: uuid.UUID,
@@ -62,9 +63,7 @@ async def list_datasets(
     session: AsyncSession = Depends(get_session),
 ) -> list[DatasetOut]:
     await _check_project(project_id, current_user, session)
-    r = await session.execute(
-        select(Dataset).where(Dataset.project_id == project_id)
-    )
+    r = await session.execute(select(Dataset).where(Dataset.project_id == project_id))
     return [DatasetOut.model_validate(d) for d in r.scalars().all()]
 
 
@@ -101,6 +100,7 @@ async def get_dataset(
 
 
 # ── Commits ───────────────────────────────────────────────────────────────────
+
 
 @router.get(
     "/datasets/{id}/commits",
@@ -184,9 +184,7 @@ async def create_commit(
     await _check_project(dataset.project_id, current_user, session)
 
     # Resolve ontology version
-    r_ont = await session.execute(
-        select(Ontology.version).where(Ontology.id == body.ontology_id)
-    )
+    r_ont = await session.execute(select(Ontology.version).where(Ontology.id == body.ontology_id))
     ont_version = r_ont.scalar_one_or_none()
     if ont_version is None:
         raise HTTPException(status_code=404, detail="Ontology not found")
@@ -263,6 +261,7 @@ async def create_commit(
 
 # ── Refs ──────────────────────────────────────────────────────────────────────
 
+
 @router.get("/datasets/{id}/refs", response_model=list[RefOut])
 async def list_refs(
     id: uuid.UUID,
@@ -275,9 +274,7 @@ async def list_refs(
         raise HTTPException(status_code=404, detail="Dataset not found")
     await _check_project(dataset.project_id, current_user, session)
 
-    r_refs = await session.execute(
-        select(Ref).where(Ref.dataset_id == id)
-    )
+    r_refs = await session.execute(select(Ref).where(Ref.dataset_id == id))
     return [RefOut.model_validate(ref) for ref in r_refs.scalars().all()]
 
 
@@ -326,9 +323,7 @@ async def delete_ref(
         raise HTTPException(status_code=404, detail="Dataset not found")
     await _check_project(dataset.project_id, current_user, session)
 
-    r_ref = await session.execute(
-        select(Ref).where(Ref.id == ref_id, Ref.dataset_id == id)
-    )
+    r_ref = await session.execute(select(Ref).where(Ref.id == ref_id, Ref.dataset_id == id))
     ref = r_ref.scalar_one_or_none()
     if ref is None:
         raise HTTPException(status_code=404, detail="Ref not found")
@@ -339,6 +334,7 @@ async def delete_ref(
 
 
 # ── Diff ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("/datasets/{id}/diff", response_model=DiffOut)
 async def diff_commits(
@@ -388,6 +384,7 @@ async def diff_commits(
 
 # ── Dataset Links ─────────────────────────────────────────────────────────────
 
+
 @router.post(
     "/projects/{project_id}/dataset-links",
     status_code=status.HTTP_201_CREATED,
@@ -433,9 +430,7 @@ async def update_dataset_link(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    r = await session.execute(
-        select(ProjectDatasetLink).where(ProjectDatasetLink.id == id)
-    )
+    r = await session.execute(select(ProjectDatasetLink).where(ProjectDatasetLink.id == id))
     link = r.scalar_one_or_none()
     if link is None:
         raise HTTPException(status_code=404, detail="Dataset link not found")
@@ -467,9 +462,7 @@ async def delete_dataset_link(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    r = await session.execute(
-        select(ProjectDatasetLink).where(ProjectDatasetLink.id == id)
-    )
+    r = await session.execute(select(ProjectDatasetLink).where(ProjectDatasetLink.id == id))
     link = r.scalar_one_or_none()
     if link is None:
         raise HTTPException(status_code=404, detail="Dataset link not found")

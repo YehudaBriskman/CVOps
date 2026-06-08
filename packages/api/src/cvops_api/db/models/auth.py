@@ -39,9 +39,7 @@ class Membership(Base, EntityBase):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(Text, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("org_id", "user_id", name="uq_memberships_org_user"),
-    )
+    __table_args__ = (UniqueConstraint("org_id", "user_id", name="uq_memberships_org_user"),)
 
     def __repr__(self) -> str:
         return f"<Membership id={self.id} org={self.org_id} user={self.user_id} role={self.role!r}>"

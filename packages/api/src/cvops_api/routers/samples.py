@@ -174,9 +174,7 @@ async def create_annotation(
     max_no: int = r_max.scalar() or 0
 
     # Find ontology version
-    r_ont = await session.execute(
-        select(Ontology.version).where(Ontology.id == body.ontology_id)
-    )
+    r_ont = await session.execute(select(Ontology.version).where(Ontology.id == body.ontology_id))
     ontology_version = r_ont.scalar_one_or_none()
     if ontology_version is None:
         raise HTTPException(status_code=404, detail="Ontology not found")

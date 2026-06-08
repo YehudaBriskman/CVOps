@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.db.models.runs import Event, Run
-from tests.db.conftest import make_project, make_run, make_workflow
+from tests.db.conftest import make_project, make_run
 
 
 # ---------------------------------------------------------------------------

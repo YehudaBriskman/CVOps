@@ -2,6 +2,7 @@
 Workflow executor — runs steps in topological order.
 Called as a BackgroundTask; creates its own DB session.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -67,9 +68,7 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
 
     # 3. Seed step_outputs from already-succeeded child runs (resume support)
     step_outputs: dict[str, dict[str, Any]] = {}
-    existing = await session.execute(
-        select(Run).where(Run.parent_run_id == run_id)
-    )
+    existing = await session.execute(select(Run).where(Run.parent_run_id == run_id))
     for child in existing.scalars().all():
         if child.status == "succeeded" and child.step_id:
             step_outputs[child.step_id] = child.output_refs or {}
@@ -108,9 +107,9 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
             step_outputs[step_id] = child.output_refs or {}
             continue
         if child.status == "waiting":
-            return   # gate not yet resolved
+            return  # gate not yet resolved
         if child.status == "failed":
-            return   # stop propagating
+            return  # stop propagating
 
         # Validate config
         try:
@@ -160,8 +159,12 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
         child.started_at = datetime.now(UTC)
         await session.flush()
         await emit_event(
-            session, actor_id=actor_id, actor_type="system",
-            entity_type="run", entity_id=child.id, action="run.started",
+            session,
+            actor_id=actor_id,
+            actor_type="system",
+            entity_type="run",
+            entity_id=child.id,
+            action="run.started",
         )
 
         # Build context
@@ -183,8 +186,12 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
             child.finished_at = datetime.now(UTC)
             await session.flush()
             await emit_event(
-                session, actor_id=actor_id, actor_type="system",
-                entity_type="run", entity_id=child.id, action="run.waiting",
+                session,
+                actor_id=actor_id,
+                actor_type="system",
+                entity_type="run",
+                entity_id=child.id,
+                action="run.waiting",
             )
             return  # Workflow paused at gate
         except Exception as exc:
@@ -196,8 +203,12 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
         child.finished_at = datetime.now(UTC)
         await session.flush()
         await emit_event(
-            session, actor_id=actor_id, actor_type="system",
-            entity_type="run", entity_id=child.id, action="run.succeeded",
+            session,
+            actor_id=actor_id,
+            actor_type="system",
+            entity_type="run",
+            entity_id=child.id,
+            action="run.succeeded",
         )
         step_outputs[step_id] = output
 
@@ -206,8 +217,12 @@ async def _run(session: AsyncSession, *, run_id: uuid.UUID, actor_id: uuid.UUID)
     parent.finished_at = datetime.now(UTC)
     await session.flush()
     await emit_event(
-        session, actor_id=actor_id, actor_type="system",
-        entity_type="run", entity_id=run_id, action="run.succeeded",
+        session,
+        actor_id=actor_id,
+        actor_type="system",
+        entity_type="run",
+        entity_id=run_id,
+        action="run.succeeded",
     )
 
 
@@ -233,16 +248,18 @@ def _topo_sort(step_ids: list[str], edges: list[dict[str, str]]) -> list[str] | 
     return result if len(result) == len(step_ids) else None
 
 
-async def _fail(
-    session: AsyncSession, run: Run, actor_id: uuid.UUID, error: str
-) -> None:
+async def _fail(session: AsyncSession, run: Run, actor_id: uuid.UUID, error: str) -> None:
     run.status = "failed"
     run.error = error
     run.finished_at = datetime.now(UTC)
     await session.flush()
     await emit_event(
-        session, actor_id=actor_id, actor_type="system",
-        entity_type="run", entity_id=run.id, action="run.failed",
+        session,
+        actor_id=actor_id,
+        actor_type="system",
+        entity_type="run",
+        entity_id=run.id,
+        action="run.failed",
         payload={"error": error},
     )
 

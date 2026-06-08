@@ -85,9 +85,7 @@ async def get_run(
         raise HTTPException(status_code=404, detail="Run not found")
     await _check_project(run.project_id, current_user, session)
 
-    r_steps = await session.execute(
-        select(Run).where(Run.parent_run_id == run.id)
-    )
+    r_steps = await session.execute(select(Run).where(Run.parent_run_id == run.id))
     steps = list(r_steps.scalars().all())
 
     return RunDetail(
@@ -109,9 +107,7 @@ async def list_run_events(
     await _check_project(run.project_id, current_user, session)
 
     # Collect child run ids
-    r_children = await session.execute(
-        select(Run.id).where(Run.parent_run_id == run.id)
-    )
+    r_children = await session.execute(select(Run.id).where(Run.parent_run_id == run.id))
     child_ids = [row for row in r_children.scalars().all()]
     entity_ids = [run.id, *child_ids]
 

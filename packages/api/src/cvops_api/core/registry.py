@@ -3,9 +3,10 @@ Registry — maps type_key → (JSON Schema, Step implementation).
 Backed by the type_schemas DB table for persistence and UI exposure.
 Core never imports concrete step implementations; steps register themselves.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -47,6 +48,7 @@ class Registry:
 
     def validate_config(self, type_key: str, config: dict[str, Any]) -> None:
         import jsonschema
+
         schema = self.resolve(type_key).json_schema
         jsonschema.validate(instance=config, schema=schema)
 

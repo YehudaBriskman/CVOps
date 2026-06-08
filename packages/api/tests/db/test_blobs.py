@@ -1,5 +1,3 @@
-import uuid
-
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -166,9 +164,7 @@ async def test_type_schema_version_default(session: AsyncSession):
     session.add(ts)
     await session.flush()
 
-    result = await session.execute(
-        select(TypeSchema).where(TypeSchema.type_key == ts.type_key)
-    )
+    result = await session.execute(select(TypeSchema).where(TypeSchema.type_key == ts.type_key))
     fetched = result.scalar_one()
 
     assert fetched.schema_version == "1"
@@ -204,9 +200,7 @@ async def test_type_schema_json_schema_stored(session: AsyncSession):
     session.add(ts)
     await session.flush()
 
-    result = await session.execute(
-        select(TypeSchema).where(TypeSchema.type_key == ts.type_key)
-    )
+    result = await session.execute(select(TypeSchema).where(TypeSchema.type_key == ts.type_key))
     fetched = result.scalar_one()
 
     assert fetched.json_schema == complex_schema

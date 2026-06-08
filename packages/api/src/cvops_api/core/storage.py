@@ -2,6 +2,7 @@
 StorageBackend — interface + MinIO implementation (P1/P4/P9).
 All step implementations call exactly these methods; never touch boto3 directly.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -74,9 +75,7 @@ class MinIOBackend(StorageBackend):
         blob_hash = self._sha256(data)
         key = self._bucket_key(blob_hash)
         if not self._exists(key):
-            self._client.put_object(
-                Bucket=self._bucket, Key=key, Body=data, ContentType=media_type
-            )
+            self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=media_type)
         return blob_hash
 
     async def get_presigned_get(self, blob_hash: str, ttl_seconds: int = 900) -> str:
@@ -94,15 +93,11 @@ class MinIOBackend(StorageBackend):
         )
 
     async def get_bytes(self, blob_hash: str) -> bytes:
-        resp = self._client.get_object(
-            Bucket=self._bucket, Key=self._bucket_key(blob_hash)
-        )
+        resp = self._client.get_object(Bucket=self._bucket, Key=self._bucket_key(blob_hash))
         return resp["Body"].read()  # type: ignore[no-any-return]
 
     async def delete_blob(self, blob_hash: str) -> None:
-        self._client.delete_object(
-            Bucket=self._bucket, Key=self._bucket_key(blob_hash)
-        )
+        self._client.delete_object(Bucket=self._bucket, Key=self._bucket_key(blob_hash))
 
 
 _storage: StorageBackend | None = None

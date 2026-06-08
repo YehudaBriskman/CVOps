@@ -1,4 +1,5 @@
 """Async Redis client — initialized at startup, used for token blacklist."""
+
 from __future__ import annotations
 
 from redis.asyncio import Redis

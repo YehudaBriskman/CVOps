@@ -17,9 +17,7 @@ class Workflow(Base, EntityBase):
     definition: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
-        comment=(
-            "Shape: {name, steps:[{id, type, config, inputs}], edges:[[from,to]]}"
-        ),
+        comment=("Shape: {name, steps:[{id, type, config, inputs}], edges:[[from,to]]}"),
     )
     version: Mapped[int] = mapped_column(
         Integer,
@@ -28,9 +26,7 @@ class Workflow(Base, EntityBase):
         server_default="1",
     )
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_workflows_project_name"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_workflows_project_name"),)
 
     def __repr__(self) -> str:
         return (

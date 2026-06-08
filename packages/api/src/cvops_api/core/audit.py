@@ -3,6 +3,7 @@ G4 — Generic append-only event log.
 Every meaningful mutation calls emit_event(). Powers audit trail,
 lineage graph, and the activity feed from one source.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -16,10 +17,10 @@ async def emit_event(
     session: AsyncSession,
     *,
     actor_id: str | uuid.UUID | None,
-    actor_type: str,           # "user" | "service" | "system"
-    entity_type: str,          # "project" | "commit" | "run" | "annotation_revision" | ...
+    actor_type: str,  # "user" | "service" | "system"
+    entity_type: str,  # "project" | "commit" | "run" | "annotation_revision" | ...
     entity_id: str | uuid.UUID,
-    action: str,               # "created" | "run.started" | "branch.advanced" | ...
+    action: str,  # "created" | "run.started" | "branch.advanced" | ...
     payload: dict[str, Any] | None = None,
 ) -> None:
     """

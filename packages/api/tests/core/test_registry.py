@@ -4,6 +4,7 @@ Tests for cvops_api.core.registry.Registry and the module-level `registry` singl
 Registry is a synchronous, in-memory data structure. These tests do NOT use the
 async `session` fixture and are NOT async — plain sync pytest functions throughout.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -16,6 +17,7 @@ from cvops_api.engine.step import Step, StepContext
 # ---------------------------------------------------------------------------
 # Minimal concrete Step implementation used across all tests
 # ---------------------------------------------------------------------------
+
 
 class MockStep(Step):
     type_key = "test.mock"
@@ -34,6 +36,7 @@ class MockStep(Step):
 
 class AnotherMockStep(Step):
     """Second step with same category, used for list_by_category tests."""
+
     type_key = "test.another"
     config_schema = {
         "type": "object",
@@ -50,6 +53,7 @@ class AnotherMockStep(Step):
 
 class OtherCategoryStep(Step):
     """Step in a different category to verify list_by_category filtering."""
+
     type_key = "test.other_category"
     config_schema = {"type": "object"}
     category = "gate"

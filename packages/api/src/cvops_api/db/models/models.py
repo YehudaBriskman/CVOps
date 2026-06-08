@@ -54,9 +54,7 @@ class ModelVersion(Base, EntityBase):
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("projects.id"), nullable=False, index=True
     )
-    blob_hash: Mapped[str] = mapped_column(
-        ForeignKey("blobs.hash"), nullable=False
-    )
+    blob_hash: Mapped[str] = mapped_column(ForeignKey("blobs.hash"), nullable=False)
     trained_on_commit_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("commits.id"), nullable=False
     )

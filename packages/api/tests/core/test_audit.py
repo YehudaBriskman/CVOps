@@ -5,12 +5,12 @@ emit_event inserts one row into the events table via raw SQL within
 the current transaction. The caller owns the commit boundary, so tests
 call session.flush() to make the insert visible inside the same session.
 """
+
 from __future__ import annotations
 
 import uuid
 
-import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.audit import emit_event
@@ -20,6 +20,7 @@ from cvops_api.db.models.runs import Event
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _entity_id() -> str:
     """Return a fresh UUID string suitable for use as an entity_id."""
@@ -75,9 +76,7 @@ async def test_emit_event_payload_stored(session: AsyncSession) -> None:
     )
     await session.flush()
 
-    result = await session.execute(
-        select(Event).where(Event.entity_id == uuid.UUID(entity_id))
-    )
+    result = await session.execute(select(Event).where(Event.entity_id == uuid.UUID(entity_id)))
     row = result.scalar_one()
 
     assert row.payload is not None
@@ -99,9 +98,7 @@ async def test_emit_event_payload_none_defaults_empty(session: AsyncSession) -> 
     )
     await session.flush()
 
-    result = await session.execute(
-        select(Event).where(Event.entity_id == uuid.UUID(entity_id))
-    )
+    result = await session.execute(select(Event).where(Event.entity_id == uuid.UUID(entity_id)))
     row = result.scalar_one()
 
     # Row must exist; payload may be None or an empty dict depending on the
@@ -123,9 +120,7 @@ async def test_emit_event_actor_id_nullable(session: AsyncSession) -> None:
     )
     await session.flush()
 
-    result = await session.execute(
-        select(Event).where(Event.entity_id == uuid.UUID(entity_id))
-    )
+    result = await session.execute(select(Event).where(Event.entity_id == uuid.UUID(entity_id)))
     row = result.scalar_one()
 
     assert row.actor_id is None
@@ -148,9 +143,7 @@ async def test_emit_event_multiple_events(session: AsyncSession) -> None:
         )
     await session.flush()
 
-    result = await session.execute(
-        select(Event).where(Event.entity_id == uuid.UUID(entity_id))
-    )
+    result = await session.execute(select(Event).where(Event.entity_id == uuid.UUID(entity_id)))
     rows = result.scalars().all()
 
     assert len(rows) == 3
