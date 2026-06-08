@@ -1,5 +1,134 @@
-﻿from fastapi import APIRouter
+"""Authentication router — register, token, refresh, revoke, me."""
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cvops_api.core.auth import (
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
+from cvops_api.db.models.auth import Membership, Org, User
+from cvops_api.db.session import get_session
+from cvops_api.schemas.auth import RefreshRequest, RegisterRequest, TokenResponse, UserOut
 
 router = APIRouter()
 
-# Phase 0 skeleton — implement in Phase 1
+
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    body: RegisterRequest,
+    session: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    org_name = body.org_name or body.email.split("@")[0]
+    org = Org(name=org_name)
+    session.add(org)
+    await session.flush()
+
+    user = User(
+        org_id=org.id,
+        email=body.email,
+        password_hash=hash_password(body.password),
+        is_active=True,
+    )
+    session.add(user)
+    await session.flush()
+
+    membership = Membership(org_id=org.id, user_id=user.id, role="owner")
+    session.add(membership)
+
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+
+    return TokenResponse(
+        access_token=create_access_token(str(user.id)),
+        refresh_token=create_refresh_token(str(user.id)),
+    )
+
+
+@router.post("/token", response_model=TokenResponse)
+async def login(
+    form: OAuth2PasswordRequestForm = Depends(),
+    session: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    result = await session.execute(select(User).where(User.email == form.username))
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.password_hash or not verify_password(form.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return TokenResponse(
+        access_token=create_access_token(str(user.id)),
+        refresh_token=create_refresh_token(str(user.id)),
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(
+    body: RefreshRequest,
+    session: AsyncSession = Depends(get_session),
+) -> TokenResponse:
+    payload = decode_token(body.refresh_token)
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    result = await session.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = result.scalar_one_or_none()
+
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return TokenResponse(
+        access_token=create_access_token(str(user.id)),
+        refresh_token=create_refresh_token(str(user.id)),
+    )
+
+
+@router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke(
+    current_user: User = Depends(get_current_user),
+) -> None:
+    return None
+
+
+@router.get("/me", response_model=UserOut)
+async def me(
+    current_user: User = Depends(get_current_user),
+) -> UserOut:
+    return UserOut.model_validate(current_user)
