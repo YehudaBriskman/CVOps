@@ -30,7 +30,7 @@ class Registry:
     def register(self, step: "Step") -> None:
         reg = StepRegistration(
             type_key=step.type_key,
-            category="step",
+            category=getattr(step, "category", "step"),
             json_schema=step.config_schema,
             ui_hints={},
             impl=step,

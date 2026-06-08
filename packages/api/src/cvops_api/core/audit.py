@@ -32,7 +32,7 @@ async def emit_event(
             INSERT INTO events
                 (id, actor_id, actor_type, entity_type, entity_id, action, payload, created_at)
             VALUES
-                (:id, :actor_id, :actor_type, :entity_type, :entity_id, :action, :payload::jsonb, now())
+                (:id, :actor_id, :actor_type, :entity_type, :entity_id, :action, cast(:payload as jsonb), now())
             """
         ),
         {
