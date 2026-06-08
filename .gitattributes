@@ -1,0 +1,54 @@
+# ── line endings ──────────────────────────────────────────────────────────
+* text=auto
+
+# source code — always LF in the repo
+*.py        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.jsx       text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.css       text eol=lf
+*.scss      text eol=lf
+*.html      text eol=lf
+*.json      text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.sql       text eol=lf
+*.env*      text eol=lf
+
+# shell & config — always LF
+*.sh        text eol=lf
+Makefile    text eol=lf
+Dockerfile* text eol=lf
+*.conf      text eol=lf
+*.ini       text eol=lf
+*.cfg       text eol=lf
+
+# ── binary files ──────────────────────────────────────────────────────────
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.svg       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.eot       binary
+*.otf       binary
+*.mp4       binary
+*.webm      binary
+*.zip       binary
+*.tar.gz    binary
+*.tgz       binary
+*.pkl       binary
+*.pt        binary
+*.pth       binary
+*.onnx      binary
+*.h5        binary
+*.weights   binary
