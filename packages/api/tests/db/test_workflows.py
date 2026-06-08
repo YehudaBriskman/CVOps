@@ -1,5 +1,3 @@
-import uuid
-
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

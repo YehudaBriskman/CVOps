@@ -15,20 +15,14 @@ class DataSource(Base, EntityBase):
         ForeignKey("projects.id"), nullable=False, index=True
     )
     type: Mapped[str] = mapped_column(Text, nullable=False)
-    blob_hash: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("blobs.hash"), nullable=True
-    )
+    blob_hash: Mapped[Optional[str]] = mapped_column(ForeignKey("blobs.hash"), nullable=True)
     external_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         Text, nullable=False, default="pending", server_default="pending"
     )
-    metadata_: Mapped[Optional[dict]] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
-    __table_args__ = (
-        Index("ix_data_sources_project_status", "project_id", "status"),
-    )
+    __table_args__ = (Index("ix_data_sources_project_status", "project_id", "status"),)
 
     def __repr__(self) -> str:
         return (
@@ -43,9 +37,7 @@ class Sample(Base, EntityBase):
     project_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("projects.id"), nullable=False, index=True
     )
-    blob_hash: Mapped[str] = mapped_column(
-        ForeignKey("blobs.hash"), nullable=False
-    )
+    blob_hash: Mapped[str] = mapped_column(ForeignKey("blobs.hash"), nullable=False)
     source_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("data_sources.id"), nullable=False, index=True
     )
@@ -53,16 +45,10 @@ class Sample(Base, EntityBase):
     height: Mapped[int] = mapped_column(Integer, nullable=False)
     frame_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     perceptual_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    thumbnail_hash: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("blobs.hash"), nullable=True
-    )
-    metadata_: Mapped[Optional[dict]] = mapped_column(
-        "metadata", JSONB, nullable=True
-    )
+    thumbnail_hash: Mapped[Optional[str]] = mapped_column(ForeignKey("blobs.hash"), nullable=True)
+    metadata_: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, nullable=True)
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "blob_hash", name="uq_samples_project_blob"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "blob_hash", name="uq_samples_project_blob"),)
 
     def __repr__(self) -> str:
         return (

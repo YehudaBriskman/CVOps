@@ -43,7 +43,9 @@ async def test_data_source_project_fk(session: AsyncSession):
 
 async def test_data_source_blob_hash_nullable(session: AsyncSession):
     project = await make_project(session)
-    ds = DataSource(project_id=project.id, type="external_uri", external_uri="https://example.com/data")
+    ds = DataSource(
+        project_id=project.id, type="external_uri", external_uri="https://example.com/data"
+    )
     session.add(ds)
     await session.flush()
 

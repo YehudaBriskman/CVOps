@@ -368,20 +368,14 @@ async def test_ref_cas_pattern(session: AsyncSession):
 
     # CAS succeeds: expected value matches current target_commit_id
     result = await session.execute(
-        text(
-            "UPDATE refs SET target_commit_id=:new"
-            " WHERE id=:id AND target_commit_id=:expected"
-        ),
+        text("UPDATE refs SET target_commit_id=:new WHERE id=:id AND target_commit_id=:expected"),
         {"new": str(commit2.id), "id": str(ref.id), "expected": str(commit1.id)},
     )
     assert result.rowcount == 1
 
     # CAS fails: expected value is stale (commit1 was already replaced by commit2)
     result = await session.execute(
-        text(
-            "UPDATE refs SET target_commit_id=:new"
-            " WHERE id=:id AND target_commit_id=:expected"
-        ),
+        text("UPDATE refs SET target_commit_id=:new WHERE id=:id AND target_commit_id=:expected"),
         {"new": str(commit3.id), "id": str(ref.id), "expected": str(commit1.id)},
     )
     assert result.rowcount == 0

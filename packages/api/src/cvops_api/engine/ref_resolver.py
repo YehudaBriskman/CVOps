@@ -4,13 +4,14 @@ Resolves $-prefixed reference strings in step inputs.
   "$run.params.<name>"               →  run_params[name]
 Recurses into dicts and lists so references can be nested anywhere.
 """
+
 from __future__ import annotations
 
 import re
 from typing import Any
 
-_STEP_REF = re.compile(r'^\$steps\.([^.]+)\.outputs\.(.+)$')
-_PARAM_REF = re.compile(r'^\$run\.params\.(.+)$')
+_STEP_REF = re.compile(r"^\$steps\.([^.]+)\.outputs\.(.+)$")
+_PARAM_REF = re.compile(r"^\$run\.params\.(.+)$")
 
 
 class ResolutionError(Exception):

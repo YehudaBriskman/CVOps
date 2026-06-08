@@ -1,7 +1,6 @@
 import uuid
 from datetime import UTC, datetime
 
-import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.db.models.auth import Org

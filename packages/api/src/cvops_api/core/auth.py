@@ -1,4 +1,5 @@
 """JWT utilities and the get_current_user FastAPI dependency."""
+
 from __future__ import annotations
 
 import uuid
@@ -63,12 +64,14 @@ def decode_token(token: str) -> dict[str, Any]:
 async def blacklist_token(jti: str, exp: int) -> None:
     """Store a token JTI in Redis until it would have expired naturally."""
     from cvops_api.core.redis_client import get_redis
+
     ttl = max(1, exp - int(datetime.now(UTC).timestamp()))
     await get_redis().setex(f"{_REVOKED_PREFIX}{jti}", ttl, "1")
 
 
 async def is_blacklisted(jti: str) -> bool:
     from cvops_api.core.redis_client import get_redis
+
     return await get_redis().exists(f"{_REVOKED_PREFIX}{jti}") == 1
 
 

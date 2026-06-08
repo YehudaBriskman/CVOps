@@ -27,9 +27,7 @@ class Dataset(Base, EntityBase):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_datasets_project_name"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_datasets_project_name"),)
 
     def __repr__(self) -> str:
         return f"<Dataset id={self.id!r} project_id={self.project_id!r} name={self.name!r}>"
@@ -38,9 +36,7 @@ class Dataset(Base, EntityBase):
 class Commit(Base):
     __tablename__ = "commits"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, default=uuid.uuid4, index=True
-    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -57,39 +53,26 @@ class Commit(Base):
     second_parent_commit_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("commits.id"), nullable=True
     )
-    ontology_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("ontologies.id"), nullable=False
-    )
+    ontology_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ontologies.id"), nullable=False)
     ontology_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    message: Mapped[str] = mapped_column(
-        Text, nullable=False, default="", server_default=""
-    )
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     stats: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:
-        return (
-            f"<Commit id={self.id!r} dataset_id={self.dataset_id!r}"
-            f" message={self.message!r}>"
-        )
+        return f"<Commit id={self.id!r} dataset_id={self.dataset_id!r} message={self.message!r}>"
 
 
 class CommitSample(Base):
     __tablename__ = "commit_samples"
 
-    commit_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("commits.id"), primary_key=True
-    )
-    sample_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("samples.id"), primary_key=True
-    )
+    commit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("commits.id"), primary_key=True)
+    sample_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("samples.id"), primary_key=True)
     annotation_revision_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("annotation_revisions.id"), nullable=False
     )
     split: Mapped[str] = mapped_column(Text, nullable=False)
 
-    __table_args__ = (
-        Index("ix_commit_samples_commit_id", "commit_id"),
-    )
+    __table_args__ = (Index("ix_commit_samples_commit_id", "commit_id"),)
 
     def __repr__(self) -> str:
         return (
@@ -106,15 +89,11 @@ class Ref(Base, EntityBase):
     )
     ref_type: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    target_commit_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("commits.id"), nullable=False
-    )
+    target_commit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("commits.id"), nullable=False)
     is_mutable: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "dataset_id", "ref_type", "name", name="uq_refs_dataset_type_name"
-        ),
+        UniqueConstraint("dataset_id", "ref_type", "name", name="uq_refs_dataset_type_name"),
     )
 
     def __repr__(self) -> str:
@@ -136,9 +115,7 @@ class ProjectDatasetLink(Base, EntityBase):
     pinned_commit_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("commits.id"), nullable=True
     )
-    ref_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("refs.id"), nullable=True
-    )
+    ref_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("refs.id"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint(

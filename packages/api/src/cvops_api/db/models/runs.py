@@ -16,9 +16,7 @@ class Run(Base, EntityBase):
         ForeignKey("projects.id"), nullable=False, index=True
     )
     kind: Mapped[str] = mapped_column(Text, nullable=False)
-    parent_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        ForeignKey("runs.id"), nullable=True
-    )
+    parent_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("runs.id"), nullable=True)
     workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("workflows.id"), nullable=True
     )
@@ -42,19 +40,11 @@ class Run(Base, EntityBase):
         JSONB, nullable=False, default=dict, server_default="{}"
     )
     metrics: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    logs_blob_hash: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("blobs.hash"), nullable=True
-    )
-    attempt: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
-    )
+    logs_blob_hash: Mapped[Optional[str]] = mapped_column(ForeignKey("blobs.hash"), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    started_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    finished_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return (
@@ -66,9 +56,7 @@ class Run(Base, EntityBase):
 class Event(Base):
     __tablename__ = "events"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -79,9 +67,7 @@ class Event(Base):
     action: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
-    __table_args__ = (
-        Index("ix_events_entity", "entity_type", "entity_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_events_entity", "entity_type", "entity_id", "created_at"),)
 
     def __repr__(self) -> str:
         return (

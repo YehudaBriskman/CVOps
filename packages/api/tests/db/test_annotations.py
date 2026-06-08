@@ -13,6 +13,7 @@ from tests.db.conftest import make_ontology, make_project, make_sample
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _base_payload() -> list:
     return [
         {
@@ -127,9 +128,7 @@ async def test_annotation_revision_provenance_jsonb(session: AsyncSession):
     ontology = await make_ontology(session, project_id=project.id)
 
     provenance = {"source": "model", "review_status": "unreviewed"}
-    rev = await _make_revision(
-        session, project.id, sample.id, ontology.id, provenance=provenance
-    )
+    rev = await _make_revision(session, project.id, sample.id, ontology.id, provenance=provenance)
     await session.flush()
 
     result = await session.execute(
@@ -186,7 +185,7 @@ async def test_annotation_revision_invalid_parent_fk(session: AsyncSession):
     sample = await make_sample(session, project_id=project.id)
     ontology = await make_ontology(session, project_id=project.id)
 
-    rev = await _make_revision(
+    _rev = await _make_revision(
         session,
         project.id,
         sample.id,

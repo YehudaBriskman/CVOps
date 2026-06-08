@@ -9,14 +9,13 @@ mounts only the internal router against the test database.
 asyncio_mode = "auto" in pyproject.toml means async test functions and
 async fixtures are collected and driven by pytest-asyncio automatically.
 """
+
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import text
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from cvops_api.routers import internal
 
@@ -24,6 +23,7 @@ from cvops_api.routers import internal
 # ---------------------------------------------------------------------------
 # Minimal test app — avoids cvops_steps import in main.py lifespan
 # ---------------------------------------------------------------------------
+
 
 def _build_test_app() -> FastAPI:
     """

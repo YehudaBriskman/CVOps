@@ -1,4 +1,5 @@
 """Authentication router — register, token, refresh, revoke, me."""
+
 from __future__ import annotations
 
 import uuid
@@ -21,7 +22,13 @@ from cvops_api.core.auth import (
 )
 from cvops_api.db.models.auth import Membership, Org, User
 from cvops_api.db.session import get_session
-from cvops_api.schemas.auth import RefreshRequest, RegisterRequest, RevocationRequest, TokenResponse, UserOut
+from cvops_api.schemas.auth import (
+    RefreshRequest,
+    RegisterRequest,
+    RevocationRequest,
+    TokenResponse,
+    UserOut,
+)
 
 router = APIRouter()
 
@@ -71,7 +78,11 @@ async def login(
     result = await session.execute(select(User).where(User.email == form.username))
     user = result.scalar_one_or_none()
 
-    if user is None or not user.password_hash or not verify_password(form.password, user.password_hash):
+    if (
+        user is None
+        or not user.password_hash
+        or not verify_password(form.password, user.password_hash)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

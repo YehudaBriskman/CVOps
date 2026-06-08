@@ -8,6 +8,7 @@ A LabelClass is a single entry in that vocabulary.  The sort_order column
 doubles as the YOLO class_id at export time and must therefore never be
 reused or reordered once a class has been used in an annotation.
 """
+
 import uuid
 
 from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint
@@ -32,9 +33,7 @@ class Ontology(Base, EntityBase):
         server_default="1",
     )
 
-    __table_args__ = (
-        UniqueConstraint("project_id", "name", name="uq_ontologies_project_name"),
-    )
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_ontologies_project_name"),)
 
     def __repr__(self) -> str:
         return (
@@ -62,12 +61,8 @@ class LabelClass(Base, EntityBase):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint(
-            "ontology_id", "class_key", name="uq_label_classes_ontology_key"
-        ),
-        UniqueConstraint(
-            "ontology_id", "sort_order", name="uq_label_classes_ontology_order"
-        ),
+        UniqueConstraint("ontology_id", "class_key", name="uq_label_classes_ontology_key"),
+        UniqueConstraint("ontology_id", "sort_order", name="uq_label_classes_ontology_order"),
     )
 
     def __repr__(self) -> str:

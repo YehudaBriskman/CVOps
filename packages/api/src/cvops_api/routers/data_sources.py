@@ -47,9 +47,7 @@ async def list_data_sources(
     session: AsyncSession = Depends(get_session),
 ) -> list[DataSourceOut]:
     await _check_project(project_id, current_user, session)
-    r = await session.execute(
-        select(DataSource).where(DataSource.project_id == project_id)
-    )
+    r = await session.execute(select(DataSource).where(DataSource.project_id == project_id))
     return [DataSourceOut.model_validate(ds) for ds in r.scalars().all()]
 
 
