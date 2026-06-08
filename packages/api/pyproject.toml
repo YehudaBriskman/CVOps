@@ -50,6 +50,10 @@ packages = ["src/cvops_api"]
 line-length = 100
 target-version = "py312"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
