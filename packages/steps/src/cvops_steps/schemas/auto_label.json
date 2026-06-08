@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Auto Label Config",
+  "type": "object",
+  "properties": {
+    "model_version_id": {
+      "type": "string", "format": "uuid",
+      "description": "UUID of the model_version whose weights are used for inference"
+    },
+    "confidence_threshold": {
+      "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35,
+      "description": "Detections below this confidence are discarded"
+    }
+  },
+  "required": ["model_version_id"],
+  "additionalProperties": false
+}

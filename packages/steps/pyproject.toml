@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cvops-steps"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "cvops-api",          # Step contract, StorageBackend, registry
+  "ffmpeg-python>=0.2",
+  "imagehash>=4.3",
+  "pillow>=10.3",
+  "ultralytics>=8.2",   # auto_label: YOLOv8 inference
+  "docker>=7.1",        # train: Docker container dispatch
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cvops_steps"]

@@ -1,1 +1,54 @@
+# ── Claude Code ──────────────────────────────────────────────────────────
 /.claude
+
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*.local
+*.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# ── Node / Frontend ───────────────────────────────────────────────────────
+node_modules/
+.next/
+dist/
+build/
+*.tsbuildinfo
+.eslintcache
+.parcel-cache
+
+# ── Docker / Local data volumes ───────────────────────────────────────────
+minio_data/
+postgres_data/
+redis_data/
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Secrets ───────────────────────────────────────────────────────────────
+*.pem
+*.key
+secrets/
