@@ -1,0 +1,25 @@
+<svg viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#06B6D4"/></linearGradient><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0B1F3A"/><stop offset="1" stop-color="#103A6B"/></linearGradient></defs>
+<rect width="1200" height="630" fill="url(#bg)"/>
+<circle cx="980" cy="315" r="120" fill="none" stroke="#22D3EE" stroke-width="1.3" opacity="0.18"/>
+<circle cx="980" cy="315" r="180" fill="none" stroke="#22D3EE" stroke-width="1.3" opacity="0.18"/>
+<circle cx="980" cy="315" r="240" fill="none" stroke="#22D3EE" stroke-width="1.3" opacity="0.18"/>
+<circle cx="980" cy="135" r="9" fill="#22D3EE" opacity="0.55"/>
+<line x1="980" y1="315" x2="980" y2="135" stroke="#22D3EE" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.3"/>
+<circle cx="1151" cy="259" r="9" fill="#22D3EE" opacity="0.55"/>
+<line x1="980" y1="315" x2="1151" y2="259" stroke="#22D3EE" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.3"/>
+<circle cx="1086" cy="461" r="9" fill="#22D3EE" opacity="0.55"/>
+<line x1="980" y1="315" x2="1086" y2="461" stroke="#22D3EE" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.3"/>
+<circle cx="874" cy="461" r="9" fill="#22D3EE" opacity="0.55"/>
+<line x1="980" y1="315" x2="874" y2="461" stroke="#22D3EE" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.3"/>
+<circle cx="809" cy="259" r="9" fill="#22D3EE" opacity="0.55"/>
+<line x1="980" y1="315" x2="809" y2="259" stroke="#22D3EE" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.3"/>
+<circle cx="980" cy="315" r="52" fill="url(#g)"/>
+<path d="M 993.19 296.16 A 23 23 0 1 1 961.16 301.81" fill="none" stroke="#FFFFFF" stroke-width="5.5" stroke-linecap="round"/><path d="M 961.16 301.81 L 949.53 306.42 L 960.80 314.31 Z" fill="#FFFFFF"/><circle cx="980" cy="315" r="6.05" fill="#FFFFFF"/>
+<g transform="translate(90,150)"><rect width="64" height="64" rx="16" fill="url(#g)"/></g>
+<path d="M 131.18 168.89 A 16 16 0 1 1 108.89 172.82" fill="none" stroke="#FFFFFF" stroke-width="4.6" stroke-linecap="round"/><path d="M 108.89 172.82 L 99.17 176.68 L 108.59 183.28 Z" fill="#FFFFFF"/><circle cx="122" cy="182" r="5.06" fill="#FFFFFF"/>
+<text x="170" y="198" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="40" font-weight="800" fill="#FFFFFF" letter-spacing="-1">CV<tspan fill="#22D3EE">Ops</tspan></text>
+<text x="92" y="320" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="62" font-weight="800" fill="#FFFFFF" letter-spacing="-2">The ML lifecycle,</text>
+<text x="92" y="388" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="62" font-weight="800" fill="#22D3EE" letter-spacing="-2">in one place.</text>
+<text x="94" y="448" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="25" font-weight="500" fill="#CBD9EE">Datasets · models · workflows · audit — one platform</text>
+<text x="94" y="500" font-family="Inter, 'DejaVu Sans', Arial, sans-serif" font-size="20" font-weight="600" fill="#22D3EE">Replaces five fragmented tools.</text>
+</svg>

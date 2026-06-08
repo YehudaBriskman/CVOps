@@ -1,0 +1,66 @@
+<svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#06B6D4"/></linearGradient>
+<filter id="s" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#1E293B" flood-opacity="0.12"/></filter></defs>
+<rect width="900" height="560" rx="28" fill="#F4F8FF"/>
+<g filter="url(#s)"><rect x="70" y="60" width="760" height="440" rx="18" fill="#FFFFFF"/></g>
+<rect x="70" y="60" width="760" height="56" rx="18" fill="#FFFFFF"/>
+<rect x="70" y="98" width="760" height="18" fill="#FFFFFF"/>
+<g transform="translate(94,72)"><rect width="32" height="32" rx="9" fill="url(#g)"/></g>
+<path d="M 114.30 81.86 A 7.5 7.5 0 1 1 103.86 83.70" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/><path d="M 103.86 83.70 L 99.21 85.54 L 103.71 88.70 Z" fill="#FFFFFF"/><circle cx="110" cy="88" r="2.42" fill="#FFFFFF"/>
+<text x="138" y="93" font-family="Inter,Arial,sans-serif" font-size="17" font-weight="700" fill="#0B1F3A">CV<tspan fill="#2563EB">Ops</tspan></text>
+<text x="300" y="93" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#2563EB">Overview</text>
+<text x="410" y="93" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#94A3B8">Datasets</text>
+<text x="520" y="93" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#94A3B8">Models</text>
+<text x="630" y="93" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#94A3B8">Runs</text>
+<circle cx="800" cy="88" r="13" fill="#EAF2FF"/>
+<rect x="70" y="116" width="170" height="384" fill="#F8FAFC"/>
+<rect x="94" y="150" width="18" height="18" rx="5" fill="#2563EB"/>
+<rect x="122" y="154" width="90" height="10" rx="5" fill="#334155"/>
+<rect x="94" y="196" width="18" height="18" rx="5" fill="#CBD5E1"/>
+<rect x="122" y="200" width="70" height="10" rx="5" fill="#CBD5E1"/>
+<rect x="94" y="242" width="18" height="18" rx="5" fill="#CBD5E1"/>
+<rect x="122" y="246" width="70" height="10" rx="5" fill="#CBD5E1"/>
+<rect x="94" y="288" width="18" height="18" rx="5" fill="#CBD5E1"/>
+<rect x="122" y="292" width="70" height="10" rx="5" fill="#CBD5E1"/>
+<rect x="94" y="334" width="18" height="18" rx="5" fill="#CBD5E1"/>
+<rect x="122" y="338" width="70" height="10" rx="5" fill="#CBD5E1"/>
+<rect x="266" y="140" width="160" height="86" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<rect x="282" y="158" width="10" height="10" rx="3" fill="#2563EB"/>
+<text x="300" y="167" font-family="Inter,Arial,sans-serif" font-size="12" fill="#94A3B8">Datasets</text>
+<text x="282" y="208" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#0B1F3A">128</text>
+<rect x="446" y="140" width="160" height="86" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<rect x="462" y="158" width="10" height="10" rx="3" fill="#06B6D4"/>
+<text x="480" y="167" font-family="Inter,Arial,sans-serif" font-size="12" fill="#94A3B8">Models</text>
+<text x="462" y="208" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#0B1F3A">342</text>
+<rect x="626" y="140" width="160" height="86" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<rect x="642" y="158" width="10" height="10" rx="3" fill="#22D3EE"/>
+<text x="660" y="167" font-family="Inter,Arial,sans-serif" font-size="12" fill="#94A3B8">Active runs</text>
+<text x="642" y="208" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#0B1F3A">17</text>
+<rect x="266" y="242" width="340" height="240" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<text x="284" y="272" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#334155">Model performance</text>
+<path d="M 290 357 L 320 317 L 350 298 L 380 294 L 410 315 L 440 358 L 470 394 L 500 405 L 530 414 L 560 393 L 590 348 L 590 450 L 290 450 Z" fill="url(#g)" opacity="0.10"/>
+<path d="M 290 357 L 320 317 L 350 298 L 380 294 L 410 315 L 440 358 L 470 394 L 500 405 L 530 414 L 560 393 L 590 348" fill="none" stroke="url(#g)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="290" cy="357" r="3.5" fill="#2563EB"/>
+<circle cx="350" cy="298" r="3.5" fill="#2563EB"/>
+<circle cx="410" cy="315" r="3.5" fill="#2563EB"/>
+<circle cx="470" cy="394" r="3.5" fill="#2563EB"/>
+<circle cx="530" cy="414" r="3.5" fill="#2563EB"/>
+<circle cx="590" cy="348" r="3.5" fill="#2563EB"/>
+<rect x="626" y="242" width="180" height="240" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+<text x="644" y="272" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="600" fill="#334155">Recent runs</text>
+<circle cx="652" cy="298" r="5" fill="#2563EB"/>
+<rect x="668" y="292" width="80" height="9" rx="4" fill="#475569"/>
+<rect x="668" y="306" width="50" height="7" rx="4" fill="#CBD5E1"/>
+<circle cx="652" cy="334" r="5" fill="#06B6D4"/>
+<rect x="668" y="328" width="80" height="9" rx="4" fill="#475569"/>
+<rect x="668" y="342" width="50" height="7" rx="4" fill="#CBD5E1"/>
+<circle cx="652" cy="370" r="5" fill="#16A34A"/>
+<rect x="668" y="364" width="80" height="9" rx="4" fill="#475569"/>
+<rect x="668" y="378" width="50" height="7" rx="4" fill="#CBD5E1"/>
+<circle cx="652" cy="406" r="5" fill="#22D3EE"/>
+<rect x="668" y="400" width="80" height="9" rx="4" fill="#475569"/>
+<rect x="668" y="414" width="50" height="7" rx="4" fill="#CBD5E1"/>
+<circle cx="652" cy="442" r="5" fill="#16A34A"/>
+<rect x="668" y="436" width="80" height="9" rx="4" fill="#475569"/>
+<rect x="668" y="450" width="50" height="7" rx="4" fill="#CBD5E1"/>
+</svg>

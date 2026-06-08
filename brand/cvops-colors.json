@@ -1,0 +1,24 @@
+{
+  "primary": {
+    "cobalt-blue": "#2563EB",
+    "aqua": "#06B6D4",
+    "sky": "#22D3EE"
+  },
+  "neutral": {
+    "ink": "#0B1F3A",
+    "slate": "#334155",
+    "mist": "#94A3B8",
+    "cloud": "#E2E8F0",
+    "paper": "#F4F8FF",
+    "white": "#FFFFFF"
+  },
+  "semantic": {
+    "success": "#16A34A",
+    "warning": "#F59E0B",
+    "error": "#EF4444",
+    "info": "#0EA5E9"
+  },
+  "gradient": {
+    "signature": "linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)"
+  }
+}

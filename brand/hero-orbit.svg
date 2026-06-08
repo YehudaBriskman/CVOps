@@ -1,0 +1,23 @@
+<svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2563EB"/><stop offset="1" stop-color="#06B6D4"/></linearGradient>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#EAF2FF"/><stop offset="1" stop-color="#E6FBFF"/></linearGradient>
+<filter id="sh" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#2563EB" flood-opacity="0.18"/></filter>
+</defs>
+<rect width="900" height="560" rx="28" fill="url(#bg)"/>
+<line x1="450" y1="280" x2="450.0" y2="95.0" stroke="#06B6D4" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round" opacity="0.5"/>
+<line x1="450" y1="280" x2="625.9" y2="222.8" stroke="#06B6D4" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round" opacity="0.5"/>
+<line x1="450" y1="280" x2="558.7" y2="429.7" stroke="#06B6D4" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round" opacity="0.5"/>
+<line x1="450" y1="280" x2="341.3" y2="429.7" stroke="#06B6D4" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round" opacity="0.5"/>
+<line x1="450" y1="280" x2="274.1" y2="222.8" stroke="#06B6D4" stroke-width="2" stroke-dasharray="2 6" stroke-linecap="round" opacity="0.5"/>
+<circle cx="450" cy="280" r="185" fill="none" stroke="#2563EB" stroke-width="1.5" stroke-dasharray="1 8" opacity="0.35"/>
+<g transform="translate(450.0,95.0)"><circle r="34" fill="#FFFFFF" filter="url(#sh)"/><circle r="34" fill="none" stroke="#2563EB" stroke-width="1.5" opacity="0.25"/><g transform="scale(1.15)"><rect x="-9" y="-7" width="18" height="14" rx="3" fill="none" stroke="#2563EB" stroke-width="2.2"/><line x1="-9" y1="-1" x2="9" y2="-1" stroke="#2563EB" stroke-width="2.2"/></g><text y="54" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="600" fill="#334155">Datasets</text></g>
+<g transform="translate(625.9,222.8)"><circle r="34" fill="#FFFFFF" filter="url(#sh)"/><circle r="34" fill="none" stroke="#2563EB" stroke-width="1.5" opacity="0.25"/><g transform="scale(1.15)"><circle cx="0" cy="-5" r="2.6" fill="#2563EB"/><circle cx="-6" cy="5" r="2.6" fill="#2563EB"/><circle cx="6" cy="5" r="2.6" fill="#2563EB"/><path d="M0 -3 L-5 4 M0 -3 L5 4" stroke="#2563EB" stroke-width="2"/></g><text y="54" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="600" fill="#334155">Models</text></g>
+<g transform="translate(558.7,429.7)"><circle r="34" fill="#FFFFFF" filter="url(#sh)"/><circle r="34" fill="none" stroke="#2563EB" stroke-width="1.5" opacity="0.25"/><g transform="scale(1.15)"><rect x="-9" y="-8" width="7" height="7" rx="2" fill="#2563EB"/><rect x="2" y="1" width="7" height="7" rx="2" fill="#2563EB"/><path d="M-5 -1 v4 h7" fill="none" stroke="#2563EB" stroke-width="2"/></g><text y="54" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="600" fill="#334155">Workflows</text></g>
+<g transform="translate(341.3,429.7)"><circle r="34" fill="#FFFFFF" filter="url(#sh)"/><circle r="34" fill="none" stroke="#2563EB" stroke-width="1.5" opacity="0.25"/><g transform="scale(1.15)"><path d="M-7 -8 h11 l3 3 v13 h-14 z" fill="none" stroke="#2563EB" stroke-width="2.2"/><path d="M-3 2 l2 2 4 -5" fill="none" stroke="#2563EB" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></g><text y="54" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="600" fill="#334155">Audit</text></g>
+<g transform="translate(274.1,222.8)"><circle r="34" fill="#FFFFFF" filter="url(#sh)"/><circle r="34" fill="none" stroke="#2563EB" stroke-width="1.5" opacity="0.25"/><g transform="scale(1.15)"><circle cx="-5" cy="-5" r="2.4" fill="#2563EB"/><circle cx="-5" cy="6" r="2.4" fill="#2563EB"/><circle cx="6" cy="0" r="2.4" fill="#2563EB"/><path d="M-5 -3 v6 M-5 0 h8" fill="none" stroke="#2563EB" stroke-width="2"/></g><text y="54" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="15" font-weight="600" fill="#334155">Versioning</text></g>
+<circle cx="450" cy="280" r="68" fill="url(#g)" filter="url(#sh)"/>
+<path d="M 467.21 255.43 A 30 30 0 1 1 425.43 262.79" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round"/><path d="M 425.43 262.79 L 410.63 268.67 L 424.96 278.71 Z" fill="#FFFFFF"/><circle cx="450" cy="280" r="7.70" fill="#FFFFFF"/>
+<text x="450" y="372" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="18" font-weight="700" fill="#0B1F3A">CVOps</text>
+<text x="450" y="392" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="500" fill="#334155">one platform, whole lifecycle</text>
+</svg>

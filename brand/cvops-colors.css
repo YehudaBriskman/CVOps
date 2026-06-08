@@ -1,0 +1,16 @@
+:root {
+  --cv-cobalt-blue: #2563EB;
+  --cv-aqua: #06B6D4;
+  --cv-sky: #22D3EE;
+  --cv-ink: #0B1F3A;
+  --cv-slate: #334155;
+  --cv-mist: #94A3B8;
+  --cv-cloud: #E2E8F0;
+  --cv-paper: #F4F8FF;
+  --cv-white: #FFFFFF;
+  --cv-success: #16A34A;
+  --cv-warning: #F59E0B;
+  --cv-error: #EF4444;
+  --cv-info: #0EA5E9;
+  --cv-gradient: linear-gradient(135deg, #2563EB 0%, #06B6D4 100%);
+}
