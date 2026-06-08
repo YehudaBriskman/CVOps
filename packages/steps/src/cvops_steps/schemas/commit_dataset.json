@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Commit Dataset Config",
+  "type": "object",
+  "properties": {
+    "dataset_name":    { "type": "string", "minLength": 1 },
+    "branch_name":     { "type": "string", "minLength": 1, "default": "main" },
+    "split_strategy":  { "type": "string", "enum": ["by_source_group", "random_seeded"], "default": "by_source_group" },
+    "train_ratio":     { "type": "number", "minimum": 0.1, "maximum": 0.9, "default": 0.8 },
+    "val_ratio":       { "type": "number", "minimum": 0.05, "maximum": 0.5, "default": 0.2 },
+    "ontology_id":     { "type": "string", "format": "uuid" },
+    "message":         { "type": "string", "default": "" }
+  },
+  "required": ["dataset_name", "ontology_id"],
+  "additionalProperties": false
+}
