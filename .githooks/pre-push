@@ -1,0 +1,72 @@
+#!/bin/sh
+# ── pre-push hook ──────────────────────────────────────────────────────────
+# 1. Blocks direct push to protected branches
+# 2. Validates branch naming convention before any push
+#
+# Branch format: [Claude-Bot/]<Type>/<3-8-kebab-word-title>
+# Types: Feat  Fix  Chore  Docs  Refactor  Style  Test  Lint
+
+REMOTE="$1"
+CURRENT_BRANCH=$(git symbolic-ref HEAD 2>/dev/null | sed 's!refs/heads/!!')
+
+PROTECTED_BRANCHES="main develop master"
+VALID_TYPES="Feat|Fix|Chore|Docs|Refactor|Style|Test|Lint"
+BRANCH_PATTERN="^(Claude-Bot\/)?($VALID_TYPES)\/[a-z][a-z0-9]*(-[a-z0-9]+){2,7}$"
+
+# ── block push to protected branches ──────────────────────────────────────
+for branch in $PROTECTED_BRANCHES; do
+  if [ "$CURRENT_BRANCH" = "$branch" ]; then
+    printf '\n'
+    printf '  \033[31mGIT HOOK: pre-push — protected branch\033[0m\n'
+    printf '  ──────────────────────────────────────────────────────\n'
+    printf '  Direct push to \033[1m%s\033[0m is not allowed.\n' "$branch"
+    printf '\n'
+    printf '  Workflow:\n'
+    printf '    git checkout -b Feat/your-5-to-8-word-title\n'
+    printf '    git push origin Feat/your-5-to-8-word-title\n'
+    printf '    gh pr create\n'
+    printf '  ──────────────────────────────────────────────────────\n'
+    printf '\n'
+    exit 1
+  fi
+done
+
+# ── validate branch naming convention ─────────────────────────────────────
+if ! printf '%s' "$CURRENT_BRANCH" | grep -qE "$BRANCH_PATTERN"; then
+  printf '\n'
+  printf '  \033[31mGIT HOOK: pre-push — branch name invalid\033[0m\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '  Branch: \033[1m%s\033[0m\n' "$CURRENT_BRANCH"
+  printf '\n'
+  printf '  Format:  [Claude-Bot/]<Type>/<3-8-kebab-word-title>\n'
+  printf '  Types:   Feat  Fix  Chore  Docs  Refactor  Style  Test  Lint\n'
+  printf '\n'
+  printf '  Examples:\n'
+  printf '    Feat/add-jwt-auth-middleware\n'
+  printf '    Fix/resolve-token-refresh-race-condition\n'
+  printf '    Claude-Bot/Refactor/extract-celery-worker-base-class\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '\n'
+  exit 1
+fi
+
+# ── check for force-push markers in refspecs ──────────────────────────────
+while read local_ref local_sha remote_ref remote_sha; do
+  # If remote sha exists and local is not a descendant, it's a force push
+  if [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+      printf '\n'
+      printf '  \033[31mGIT HOOK: pre-push — force push detected\033[0m\n'
+      printf '  ──────────────────────────────────────────────────────\n'
+      printf '  Non-fast-forward push rejected on: %s\n' "$remote_ref"
+      printf '\n'
+      printf '  Use --force-with-lease only if you know what you are doing.\n'
+      printf '  Never force push to shared branches.\n'
+      printf '  ──────────────────────────────────────────────────────\n'
+      printf '\n'
+      exit 1
+    fi
+  fi
+done
+
+exit 0

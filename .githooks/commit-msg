@@ -1,0 +1,63 @@
+#!/bin/sh
+# ── commit-msg hook ────────────────────────────────────────────────────────
+# Enforces: <type>: <title>
+# Types: feat  fix  chore  docs  refactor  style  test  lint
+# Title: imperative, 3-10 words
+# Skips: Merge, Revert, fixup!, squash!, WIP
+
+COMMIT_MSG_FILE="$1"
+FIRST_LINE=$(head -1 "$COMMIT_MSG_FILE")
+
+# ── skip special commits ───────────────────────────────────────────────────
+case "$FIRST_LINE" in
+  Merge\ *|Revert\ *|fixup!*|squash!*|WIP*|wip*|Initial\ commit)
+    exit 0
+    ;;
+esac
+
+# ── validate type prefix ───────────────────────────────────────────────────
+VALID_TYPES="feat|fix|chore|docs|refactor|style|test|lint"
+if ! printf '%s' "$FIRST_LINE" | grep -qE "^($VALID_TYPES): .+$"; then
+  printf '\n'
+  printf '  \033[31mGIT HOOK: commit-msg — invalid format\033[0m\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '  Required: <type>: <title>\n'
+  printf '  Types:    feat  fix  chore  docs  refactor  style  test  lint\n'
+  printf '\n'
+  printf '  Got: %s\n' "$FIRST_LINE"
+  printf '\n'
+  printf '  Example: feat: add jwt authentication middleware\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '\n'
+  exit 1
+fi
+
+# ── validate title word count ──────────────────────────────────────────────
+TITLE=$(printf '%s' "$FIRST_LINE" | sed 's/^[^:]*: //')
+WORD_COUNT=$(printf '%s' "$TITLE" | wc -w | tr -d '[:space:]')
+
+if [ "$WORD_COUNT" -lt 3 ] || [ "$WORD_COUNT" -gt 10 ]; then
+  printf '\n'
+  printf '  \033[31mGIT HOOK: commit-msg — title word count\033[0m\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '  Title should be 5-8 words (got %s).\n' "$WORD_COUNT"
+  printf '  Got: %s\n' "$FIRST_LINE"
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '\n'
+  exit 1
+fi
+
+# ── enforce blank line after subject ──────────────────────────────────────
+LINE_COUNT=$(wc -l < "$COMMIT_MSG_FILE" | tr -d '[:space:]')
+if [ "$LINE_COUNT" -gt 1 ]; then
+  SECOND_LINE=$(sed -n '2p' "$COMMIT_MSG_FILE")
+  if [ -n "$SECOND_LINE" ]; then
+    printf '\n'
+    printf '  \033[33mGIT HOOK: commit-msg — missing blank line after subject\033[0m\n'
+    printf '  Add a blank line between the subject and description.\n'
+    printf '\n'
+    exit 1
+  fi
+fi
+
+exit 0

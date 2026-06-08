@@ -1,0 +1,116 @@
+#!/bin/sh
+# ── pre-commit hook ────────────────────────────────────────────────────────
+# Runs available linters on staged files only.
+# Fails fast on first linter error.
+# Skips gracefully if tools are not installed.
+
+PASS=true
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# ── Python ─────────────────────────────────────────────────────────────────
+PY_FILES=$(printf '%s\n' $STAGED | grep -E '\.py$' || true)
+
+if [ -n "$PY_FILES" ]; then
+  # black — formatting check
+  if command -v black >/dev/null 2>&1; then
+    printf '%s\n' $PY_FILES | xargs black --check --quiet 2>&1
+    if [ $? -ne 0 ]; then
+      printf '\n  \033[31mpre-commit: black formatting failed\033[0m\n'
+      printf '  Run: black .\n\n'
+      PASS=false
+    fi
+  fi
+
+  # flake8 — style + errors
+  if command -v flake8 >/dev/null 2>&1; then
+    printf '%s\n' $PY_FILES | xargs flake8 --max-line-length=100 2>&1
+    if [ $? -ne 0 ]; then
+      printf '\n  \033[31mpre-commit: flake8 check failed\033[0m\n\n'
+      PASS=false
+    fi
+  fi
+
+  # mypy — type check (non-blocking warning if config missing)
+  if command -v mypy >/dev/null 2>&1; then
+    if [ -f "mypy.ini" ] || [ -f "setup.cfg" ] || [ -f "pyproject.toml" ]; then
+      printf '%s\n' $PY_FILES | xargs mypy --ignore-missing-imports 2>&1
+      if [ $? -ne 0 ]; then
+        printf '\n  \033[31mpre-commit: mypy type check failed\033[0m\n\n'
+        PASS=false
+      fi
+    fi
+  fi
+fi
+
+# ── TypeScript / JavaScript ────────────────────────────────────────────────
+TS_FILES=$(printf '%s\n' $STAGED | grep -E '\.(ts|tsx|js|jsx)$' || true)
+
+if [ -n "$TS_FILES" ]; then
+  # ESLint
+  if command -v npx >/dev/null 2>&1 && [ -f "package.json" ]; then
+    ESLINT_CONFIG=$(ls .eslintrc* eslint.config.* 2>/dev/null | head -1)
+    if [ -n "$ESLINT_CONFIG" ] || grep -q '"eslint"' package.json 2>/dev/null; then
+      printf '%s\n' $TS_FILES | xargs npx eslint --max-warnings 0 2>&1
+      if [ $? -ne 0 ]; then
+        printf '\n  \033[31mpre-commit: ESLint check failed\033[0m\n\n'
+        PASS=false
+      fi
+    fi
+  fi
+
+  # TypeScript compiler check (tsc --noEmit)
+  if command -v npx >/dev/null 2>&1 && [ -f "tsconfig.json" ]; then
+    npx tsc --noEmit 2>&1
+    if [ $? -ne 0 ]; then
+      printf '\n  \033[31mpre-commit: TypeScript type check failed\033[0m\n\n'
+      PASS=false
+    fi
+  fi
+fi
+
+# ── YAML / JSON ────────────────────────────────────────────────────────────
+YML_FILES=$(printf '%s\n' $STAGED | grep -E '\.(yaml|yml)$' || true)
+
+if [ -n "$YML_FILES" ] && command -v python3 >/dev/null 2>&1; then
+  for f in $YML_FILES; do
+    python3 -c "import yaml, sys; yaml.safe_load(open('$f'))" 2>&1
+    if [ $? -ne 0 ]; then
+      printf '\n  \033[31mpre-commit: YAML parse error in %s\033[0m\n\n' "$f"
+      PASS=false
+    fi
+  done
+fi
+
+JSON_FILES=$(printf '%s\n' $STAGED | grep -E '\.json$' | grep -v 'package-lock.json' || true)
+
+if [ -n "$JSON_FILES" ] && command -v python3 >/dev/null 2>&1; then
+  for f in $JSON_FILES; do
+    python3 -m json.tool "$f" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
+      printf '\n  \033[31mpre-commit: JSON parse error in %s\033[0m\n\n' "$f"
+      PASS=false
+    fi
+  done
+fi
+
+# ── trailing whitespace & debug artifacts ──────────────────────────────────
+if printf '%s\n' $STAGED | grep -qE '\.(py|ts|tsx|js|jsx|yaml|yml|md)$'; then
+  BAD=$(git diff --cached --check 2>&1 || true)
+  if [ -n "$BAD" ]; then
+    printf '\n  \033[33mpre-commit: trailing whitespace detected\033[0m\n'
+    printf '%s\n' "$BAD"
+    printf '\n'
+    PASS=false
+  fi
+fi
+
+if [ "$PASS" = "false" ]; then
+  printf '\n  \033[31mGIT HOOK: pre-commit — fix errors above before committing.\033[0m\n\n'
+  exit 1
+fi
+
+exit 0
