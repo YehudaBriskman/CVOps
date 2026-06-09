@@ -1,13 +1,15 @@
 """
 upload_to_cvat.py
 -----------------
-Step 3 in the YOLO workflow: upload extracted frames and auto-generated labels to CVAT.
+Step 3 in the YOLO workflow: upload extracted frames to CVAT and trigger
+auto-annotation using a model deployed inside CVAT (via Nuclio/Lambda).
 
 What this script does:
     1. Connects to the local CVAT instance
     2. Creates a new Task with the session name
     3. Uploads all images from the session folder
-    4. Uploads YOLO labels as pre-annotations
+    4. Lists available auto-annotation models deployed in CVAT
+    5. Asks the user to choose a model and triggers auto-annotation
 
 Usage:
     python upload_to_cvat.py
@@ -15,46 +17,25 @@ Usage:
 
 import os
 import getpass
-import zipfile
-import tempfile
+import time
 from pathlib import Path
 from cvat_sdk import make_client
 from cvat_sdk.models import TaskWriteRequest
+from cvat_sdk.api_client.apis import LambdaApi
+from cvat_sdk.api_client.models import FunctionCallRequest
 
 
 # CVAT connection settings — override via environment variables
 CVAT_HOST = os.environ.get("CVAT_HOST", "http://localhost")
 CVAT_PORT = int(os.environ.get("CVAT_PORT", "8080"))
 
-# COCO class names used by YOLO12n (80 classes)
-COCO_NAMES = {
-    0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 4: "airplane",
-    5: "bus", 6: "train", 7: "truck", 8: "boat", 9: "traffic light",
-    10: "fire hydrant", 11: "stop sign", 12: "parking meter", 13: "bench",
-    14: "bird", 15: "cat", 16: "dog", 17: "horse", 18: "sheep", 19: "cow",
-    20: "elephant", 21: "bear", 22: "zebra", 23: "giraffe", 24: "backpack",
-    25: "umbrella", 26: "handbag", 27: "tie", 28: "suitcase", 29: "frisbee",
-    30: "skis", 31: "snowboard", 32: "sports ball", 33: "kite", 34: "baseball bat",
-    35: "baseball glove", 36: "skateboard", 37: "surfboard", 38: "tennis racket",
-    39: "bottle", 40: "wine glass", 41: "cup", 42: "fork", 43: "knife",
-    44: "spoon", 45: "bowl", 46: "banana", 47: "apple", 48: "sandwich",
-    49: "orange", 50: "broccoli", 51: "carrot", 52: "hot dog", 53: "pizza",
-    54: "donut", 55: "cake", 56: "chair", 57: "couch", 58: "potted plant",
-    59: "bed", 60: "dining table", 61: "toilet", 62: "tv", 63: "laptop",
-    64: "mouse", 65: "remote", 66: "keyboard", 67: "cell phone", 68: "microwave",
-    69: "oven", 70: "toaster", 71: "sink", 72: "refrigerator", 73: "book",
-    74: "clock", 75: "vase", 76: "scissors", 77: "teddy bear", 78: "hair drier",
-    79: "toothbrush",
-}
-
 
 def ask_session() -> tuple:
     """
     Ask the user which session to upload.
-    Returns (frames_dir, labels_dir, session_name)
+    Returns (frames_dir, session_name)
     """
     frames_base = Path("./frames")
-    labels_base = Path("./labels")
 
     if not frames_base.exists():
         print("[!] No 'frames' folder found. Run extract_frames.py first.")
@@ -72,10 +53,8 @@ def ask_session() -> tuple:
     print("Available sessions:")
 
     for i, session in enumerate(sessions):
-        images = len(list(session.glob("*.jpg")) + list(session.glob("*.png")))
-        labels_dir = labels_base / session.name
-        labels = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
-        print(f"  {i + 1}. {session.name} ({images} images, {labels} labels)")
+        images = len(list(session.glob("*.jpg")) + list(session.glob("*.jpeg")) + list(session.glob("*.png")))
+        print(f"  {i + 1}. {session.name} ({images} images)")
 
     print("========================================")
 
@@ -84,37 +63,92 @@ def ask_session() -> tuple:
             choice = int(input(f"Enter number (1-{len(sessions)}): ").strip())
             if 1 <= choice <= len(sessions):
                 session = sessions[choice - 1]
-                return session, labels_base / session.name, session.name
+                return session, session.name
             print(f"  [!] Please enter a number between 1 and {len(sessions)}.")
         except ValueError:
             print("  [!] Please enter a valid number.")
 
 
-def get_classes_from_labels(labels_dir: Path) -> dict[int, str]:
+def ask_model(lambda_api: LambdaApi) -> str | None:
     """
-    Read all label files and return a mapping of {class_id: class_name}
-    using COCO class names. Falls back to 'class_N' for unknown IDs.
+    List all auto-annotation models deployed in CVAT and ask the user to choose one.
+    Returns the selected function ID, or None to skip auto-annotation.
     """
-    class_ids = set()
-    for label_file in labels_dir.glob("*.txt"):
-        for line in label_file.read_text().splitlines():
-            parts = line.strip().split()
-            if parts:
-                class_ids.add(int(parts[0]))
+    print("\n[*] Fetching available auto-annotation models from CVAT...")
 
-    return {cid: COCO_NAMES.get(cid, f"class_{cid}") for cid in sorted(class_ids)}
+    try:
+        functions, _ = lambda_api.list_functions()
+    except Exception as e:
+        print(f"[!] Could not fetch models: {e}")
+        print("    Make sure Nuclio is running and models are deployed in CVAT.")
+        return None
+
+    if not functions:
+        print("[!] No auto-annotation models found in CVAT.")
+        print("    Deploy a model via Nuclio first (see CVAT serverless docs).")
+        return None
+
+    print("\n========================================")
+    print("  Auto-Annotation - Select Model        ")
+    print("========================================")
+    print("Available models:")
+
+    for i, fn in enumerate(functions):
+        name = getattr(fn, "name", fn.id)
+        kind = getattr(fn, "kind", "")
+        description = getattr(fn, "description", "")
+        label = f"{name}"
+        if kind:
+            label += f" [{kind}]"
+        if description:
+            label += f" — {description}"
+        print(f"  {i + 1}. {label}")
+
+    print(f"  {len(functions) + 1}. Skip auto-annotation")
+    print("========================================")
+
+    while True:
+        try:
+            choice = int(input(f"Enter number (1-{len(functions) + 1}): ").strip())
+            if choice == len(functions) + 1:
+                return None
+            if 1 <= choice <= len(functions):
+                return functions[choice - 1].id
+            print(f"  [!] Please enter a number between 1 and {len(functions) + 1}.")
+        except ValueError:
+            print("  [!] Please enter a valid number.")
 
 
-def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, username: str, password: str):
+def wait_for_annotation_job(lambda_api: LambdaApi, request_id: str, timeout: int = 300):
     """
-    Upload frames and labels to CVAT.
+    Poll until the auto-annotation job finishes or times out.
+    """
+    print("[*] Waiting for auto-annotation to complete", end="", flush=True)
+    start = time.time()
 
-    Args:
-        frames_dir   -> folder containing the extracted frame images
-        labels_dir   -> folder containing the YOLO .txt label files
-        session_name -> name used for the CVAT task
-        username     -> CVAT username
-        password     -> CVAT password
+    while time.time() - start < timeout:
+        try:
+            result, _ = lambda_api.retrieve_requests(id=request_id)
+            status = getattr(result, "status", "").lower()
+            if status == "finished":
+                print(" done.")
+                return True
+            if status in ("failed", "error"):
+                print(f" failed (status: {status}).")
+                return False
+        except Exception:
+            pass
+
+        print(".", end="", flush=True)
+        time.sleep(5)
+
+    print(" timed out.")
+    return False
+
+
+def upload_to_cvat(frames_dir: Path, session_name: str, username: str, password: str):
+    """
+    Upload frames to CVAT, then trigger auto-annotation with a user-selected model.
     """
     print(f"\n[*] Connecting to CVAT at {CVAT_HOST}:{CVAT_PORT}...")
 
@@ -126,28 +160,17 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, userna
 
         print("[✓] Connected to CVAT")
 
-        # Detect which classes appear in the label files
-        class_map = {}
-        if labels_dir.exists():
-            class_map = get_classes_from_labels(labels_dir)
-
-        if class_map:
-            print(f"[✓] Detected classes: {class_map}")
-        else:
-            print("[!] No annotations found — task will have no pre-defined labels")
-
         print(f"[*] Creating task: {session_name}...")
 
         task = client.tasks.create(
             TaskWriteRequest(
                 name=session_name,
-                labels=[{"name": name} for name in class_map.values()] or [{"name": "object"}]
+                labels=[{"name": "object"}]
             )
         )
 
         print(f"[✓] Task created with ID: {task.id}")
 
-        # Collect all image files from the session folder
         image_files = sorted(
             list(frames_dir.glob("*.jpg")) +
             list(frames_dir.glob("*.jpeg")) +
@@ -167,58 +190,31 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, userna
 
         print("[✓] Images uploaded successfully")
 
-        # Upload labels if they exist
-        if labels_dir.exists():
-            label_files = list(labels_dir.glob("*.txt"))
+        lambda_api = LambdaApi(client.api_client)
+        model_id = ask_model(lambda_api)
 
-            if label_files and class_map:
-                print(f"[*] Uploading {len(label_files)} label files as pre-annotations...")
-
-                tmp_path = None
-                try:
-                    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-                        tmp_path = tmp.name
-
-                    labeled_stems = {lf.stem for lf in label_files}
-
-                    with zipfile.ZipFile(tmp_path, "w") as zf:
-                        for label_file in label_files:
-                            zf.write(label_file, f"train/labels/{label_file.name}")
-
-                        # datumaro requires images in the zip to map labels to frames
-                        for img_file in sorted(
-                            list(frames_dir.glob("*.jpg")) +
-                            list(frames_dir.glob("*.jpeg")) +
-                            list(frames_dir.glob("*.png"))
-                        ):
-                            if img_file.stem in labeled_stems:
-                                zf.write(img_file, f"train/images/{img_file.name}")
-
-                        # data.yaml must map the exact class IDs used in the .txt files
-                        names_block = "\n".join(
-                            f"  {cid}: {name}" for cid, name in class_map.items()
-                        )
-                        yaml_content = (
-                            f"path: .\n"
-                            f"train: train/images\n"
-                            f"val: train/images\n"
-                            f"names:\n"
-                            f"{names_block}\n"
-                        )
-                        zf.writestr("data.yaml", yaml_content)
-
-                    task.import_annotations(
-                        format_name="Ultralytics YOLO Detection 1.0",
-                        filename=tmp_path
-                    )
-                    print("[✓] Labels uploaded as pre-annotations")
-                finally:
-                    if tmp_path and os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
-            else:
-                print("[!] No label files found — uploading images only")
+        if model_id is None:
+            print("[!] Skipping auto-annotation.")
         else:
-            print("[!] No labels folder found — uploading images only")
+            print(f"[*] Triggering auto-annotation with model: {model_id}...")
+
+            try:
+                result, _ = lambda_api.create_requests(
+                    FunctionCallRequest(function=model_id, task=task.id, cleanup=True)
+                )
+                request_id = getattr(result, "id", None)
+
+                if request_id:
+                    success = wait_for_annotation_job(lambda_api, str(request_id))
+                    if success:
+                        print("[✓] Auto-annotation complete")
+                    else:
+                        print("[!] Auto-annotation did not finish successfully — check CVAT logs")
+                else:
+                    print("[✓] Auto-annotation request sent (async — check CVAT for progress)")
+
+            except Exception as e:
+                print(f"[!] Failed to trigger auto-annotation: {e}")
 
         print(f"\n{'=' * 40}")
         print(f"Task name  : {session_name}")
@@ -228,18 +224,17 @@ def upload_to_cvat(frames_dir: Path, labels_dir: Path, session_name: str, userna
 
 
 def main():
-    # Step 1: Ask which session to upload
-    frames_dir, labels_dir, session_name = ask_session()
+    frames_dir, session_name = ask_session()
 
-    # Step 2: Ask for CVAT credentials (env vars take priority)
     username = os.environ.get("CVAT_USERNAME", "").strip() or input("Enter your CVAT username: ").strip()
     password = getpass.getpass("Enter your CVAT password: ")
 
     print(f"\n[✓] Session : {session_name}")
 
-    # Step 3: Upload to CVAT
-    upload_to_cvat(frames_dir, labels_dir, session_name, username, password)
+    upload_to_cvat(frames_dir, session_name, username, password)
 
 
 if __name__ == "__main__":
     main()
+
+
