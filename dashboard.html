@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>datak pipeline</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+  <style>
+    :root {
+      --bg:           #0f1117;
+      --bg-card:      #161b27;
+      --bg-input:     #1c2333;
+      --border:       #2a3347;
+      --border-light: #1f2d40;
+      --text:         #e2e8f0;
+      --text-sub:     #8899b0;
+      --text-dim:     #556070;
+      --green:        #1db87a;
+      --green-dim:    #0d3d29;
+      --amber:        #f0a030;
+      --amber-dim:    #3a2510;
+      --blue:         #4a9eff;
+      --red:          #ff5555;
+      --font:         'Inter', sans-serif;
+      --mono:         'JetBrains Mono', monospace;
+      --radius:       8px;
+      --radius-sm:    5px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 0;
+    }
+
+    /* ── TOPBAR ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      border-bottom: 1px solid var(--border-light);
+      background: var(--bg-card);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: var(--text);
+    }
+    .logo span { color: var(--green); }
+    .divider { width: 1px; height: 18px; background: var(--border); }
+    .topbar-sub { font-size: 12px; color: var(--text-dim); }
+    .badge-live {
+      display: flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 20px;
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid #1a5c3a;
+    }
+    .badge-live::before {
+      content: '';
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .topbar-right { display: flex; align-items: center; gap: 8px; }
+    .btn-icon {
+      width: 32px; height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-sub);
+      cursor: pointer;
+      font-size: 16px;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-icon:hover { border-color: var(--text-sub); color: var(--text); }
+
+    /* ── MAIN LAYOUT ── */
+    .main { padding: 24px 28px; max-width: 1300px; margin: 0 auto; }
+
+    /* ── PIPELINE STEPS ── */
+    .pipeline {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 24px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .step-wrap { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 120px; }
+    .step-card {
+      flex: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 14px 12px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+      user-select: none;
+    }
+    .step-card:hover { border-color: #3a4a60; }
+    .step-card.active { border-color: var(--green); background: #101e17; }
+    .step-card.done { border-color: #1a3a28; }
+    .step-num { font-size: 10px; color: var(--text-dim); font-weight: 600; letter-spacing: .08em; margin-bottom: 8px; font-family: var(--mono); }
+    .step-card.active .step-num { color: var(--green); }
+    .step-icon { font-size: 20px; color: var(--text-dim); margin-bottom: 8px; display: block; }
+    .step-card.active .step-icon { color: var(--green); }
+    .step-card.done .step-icon { color: #2a7a50; }
+    .step-name { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 3px; }
+    .step-desc { font-size: 11px; color: var(--text-sub); line-height: 1.5; }
+    .arrow { color: var(--border); font-size: 16px; flex-shrink: 0; }
+
+    /* ── STATS ROW ── */
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .stat-val { font-size: 24px; font-weight: 600; color: var(--text); font-family: var(--mono); line-height: 1; }
+    .stat-val.green { color: var(--green); }
+    .stat-val.amber { color: var(--amber); }
+    .stat-label { font-size: 11px; color: var(--text-sub); margin-top: 5px; }
+
+    /* ── GRID ── */
+    .grid-2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; margin-bottom: 14px; }
+    .grid-2b { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+    /* ── PANELS ── */
+    .panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+    }
+    .panel-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-sub);
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .panel-title i { font-size: 15px; color: var(--text-dim); }
+
+    /* ── DROP ZONE ── */
+    .drop-zone {
+      border: 1.5px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 28px 16px;
+      text-align: center;
+      background: var(--bg-input);
+      cursor: pointer;
+      margin-bottom: 14px;
+      transition: border-color .15s, background .15s;
+    }
+    .drop-zone:hover { border-color: var(--green); background: #101e17; }
+    .drop-zone i { font-size: 30px; color: var(--text-dim); display: block; margin-bottom: 8px; }
+    .drop-zone-text { font-size: 13px; color: var(--text-sub); }
+    .drop-zone-sub { font-size: 11px; color: var(--text-dim); margin-top: 5px; }
+
+    /* ── FORM ── */
+    .field { margin-bottom: 12px; }
+    .field-label { font-size: 11px; font-weight: 500; color: var(--text-sub); margin-bottom: 5px; letter-spacing: .04em; text-transform: uppercase; }
+    .field-input {
+      width: 100%;
+      font-size: 13px;
+      font-family: var(--font);
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-input);
+      color: var(--text);
+      outline: none;
+      transition: border-color .15s;
+    }
+    .field-input:focus { border-color: var(--green); }
+    .field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+
+    /* ── BUTTONS ── */
+    .btn-primary {
+      width: 100%;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font);
+      border-radius: var(--radius-sm);
+      background: var(--green);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      transition: background .15s;
+    }
+    .btn-primary:hover { background: #17a06a; }
+    .btn-primary i { font-size: 15px; }
+    .btn-secondary {
+      width: 100%;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font);
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-sub);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      transition: border-color .15s, color .15s;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover { border-color: var(--text-sub); color: var(--text); }
+
+    /* ── STATUS LIST ── */
+    .status-list { list-style: none; }
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 13px;
+    }
+    .status-item:last-child { border-bottom: none; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-done   { background: var(--green); }
+    .dot-active { background: var(--amber); animation: pulse 2s infinite; }
+    .dot-idle   { background: var(--border); }
+    .dot-error  { background: var(--red); }
+    .status-label { flex: 1; color: var(--text); }
+    .status-meta  { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+    .tag {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 20px;
+    }
+    .tag-done   { background: var(--green-dim); color: var(--green); border: 1px solid #1a5c3a; }
+    .tag-active { background: var(--amber-dim); color: var(--amber); border: 1px solid #5a3510; }
+    .tag-idle   { background: var(--bg-input); color: var(--text-dim); border: 1px solid var(--border); }
+
+    /* ── CVAT ACTIONS ── */
+    .cvat-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--text-sub);
+      cursor: pointer;
+      margin-bottom: 8px;
+      background: var(--bg-input);
+      transition: border-color .15s, color .15s;
+      width: 100%;
+      text-align: left;
+    }
+    .cvat-btn:hover { border-color: var(--blue); color: var(--text); }
+    .cvat-btn i { font-size: 16px; flex-shrink: 0; }
+    .cvat-btn .chevron { margin-left: auto; font-size: 14px; color: var(--text-dim); }
+    .cvat-btn .count {
+      margin-left: auto;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--amber);
+      background: var(--amber-dim);
+      border: 1px solid #5a3510;
+      padding: 1px 7px;
+      border-radius: 20px;
+    }
+
+    /* ── LOG ── */
+    .log {
+      font-size: 12px;
+      font-family: var(--mono);
+      background: #0a0d14;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      line-height: 2;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    .log-ok   { color: var(--green); }
+    .log-warn { color: var(--amber); }
+    .log-dim  { color: var(--text-dim); }
+    .log-err  { color: var(--red); }
+    .log::-webkit-scrollbar { width: 4px; }
+    .log::-webkit-scrollbar-track { background: transparent; }
+    .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── PROGRESS BAR ── */
+    .progress-row { margin-bottom: 14px; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-sub); margin-bottom: 6px; }
+    .progress-bar { height: 5px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width .4s; }
+    .progress-fill.amber { background: var(--amber); }
+
+    /* ── METRICS ── */
+    .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .metric-card {
+      background: var(--bg-input);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      text-align: center;
+    }
+    .metric-val { font-size: 20px; font-weight: 600; font-family: var(--mono); color: var(--green); }
+    .metric-label { font-size: 11px; color: var(--text-sub); margin-top: 3px; }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="logo">dat<span>ak</span></div>
+      <div class="divider"></div>
+      <div class="topbar-sub">video → frames → cvat → yolo</div>
+    </div>
+    <div class="topbar-right">
+      <div class="badge-live">live</div>
+      <button class="btn-icon" title="Notifications"><i class="ti ti-bell"></i></button>
+      <button class="btn-icon" title="Settings"><i class="ti ti-settings"></i></button>
+    </div>
+  </div>
+
+  <div class="main">
+
+    <!-- PIPELINE STEPS -->
+    <div class="pipeline">
+      <div class="step-wrap">
+        <div class="step-card done" onclick="setStep(0)" data-step="0">
+          <div class="step-num">01</div>
+          <i class="step-icon ti ti-upload"></i>
+          <div class="step-name">ingest video</div>
+          <div class="step-desc">upload footage, set session</div>
+        </div>
+        <i class="ti ti-chevron-right arrow"></i>
+      </div>
+      <div class="step-wrap">
+        <div class="step-card active" onclick="setStep(1)" data-step="1">
+          <div class="step-num">02</div>
+          <i class="step-icon ti ti-camera"></i>
+          <div class="step-name">extract frames</div>
+          <div class="step-desc">time or fps interval</div>
+        </div>
+        <i class="ti ti-chevron-right arrow"></i>
+      </div>
+      <div class="step-wrap">
+        <div class="step-card" onclick="setStep(2)" data-step="2">
+          <div class="step-num">03</div>
+          <i class="step-icon ti ti-tag"></i>
+          <div class="step-name">label in cvat</div>
+          <div class="step-desc">push frames, pull annotations</div>
+        </div>
+        <i class="ti ti-chevron-right arrow"></i>
+      </div>
+      <div class="step-wrap">
+        <div class="step-card" onclick="setStep(3)" data-step="3">
+          <div class="step-num">04</div>
+          <i class="step-icon ti ti-brain"></i>
+          <div class="step-name">train yolo</div>
+          <div class="step-desc">split dataset, fine-tune</div>
+        </div>
+        <i class="ti ti-chevron-right arrow"></i>
+      </div>
+      <div class="step-wrap" style="flex:1;min-width:120px;">
+        <div class="step-card" onclick="setStep(4)" data-step="4" style="flex:1">
+          <div class="step-num">05</div>
+          <i class="step-icon ti ti-chart-bar"></i>
+          <div class="step-name">evaluate</div>
+          <div class="step-desc">precision, recall, mAP</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-val"></div>
+        <div class="stat-label">active sessions</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val"></div>
+        <div class="stat-label">frames extracted</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val amber"></div>
+        <div class="stat-label">frames labeled</div>
+      </div>
+      <div class="stat">
+        <div class="stat-val green"></div>
+        <div class="stat-label">latest mAP@0.5</div>
+      </div>
+    </div>
+
+    <!-- TOP ROW -->
+    <div class="grid-2">
+
+      <!-- LEFT: INGEST + EXTRACT -->
+      <div class="panel">
+        <div class="panel-title"><i class="ti ti-upload"></i>ingest &amp; extract</div>
+
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <i class="ti ti-video"></i>
+          <div class="drop-zone-text">drop video files here or click to browse</div>
+          <div class="drop-zone-sub">.mp4 &middot; .mov &middot; .avi &middot; .mkv &middot; .webm</div>
+        </div>
+        <input type="file" id="fileInput" accept="video/*" multiple style="display:none" onchange="onFileSelect(event)" />
+
+        <div class="field">
+          <div class="field-label">session name</div>
+          <input class="field-input" type="text" id="sessionName" placeholder="e.g. apron_cam2_june" />
+        </div>
+
+        <div class="field-row-2">
+          <div>
+            <div class="field-label">interval mode</div>
+            <select class="field-input" id="intervalMode">
+              <option value="time">time-based (sec)</option>
+              <option value="fps">fps-based (frames)</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label">interval value</div>
+            <input class="field-input" type="number" id="intervalVal" placeholder="1.0" min="0.1" step="0.1" value="1.0" />
+          </div>
+        </div>
+
+        <div class="progress-row" id="extractProgress" style="display:none">
+          <div class="progress-label">
+            <span>extracting frames…</span>
+            <span id="progressPct">0%</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+        </div>
+
+        <button class="btn-primary" onclick="runExtraction()">
+          <i class="ti ti-player-play"></i> run extraction
+        </button>
+        <button class="btn-secondary" onclick="openFolder()">
+          <i class="ti ti-folder-open"></i> open output folder
+        </button>
+      </div>
+
+      <!-- RIGHT: PIPELINE STATUS -->
+      <div class="panel">
+        <div class="panel-title"><i class="ti ti-list-check"></i>pipeline status</div>
+        <ul class="status-list">
+          <li class="status-item">
+            <span class="status-dot dot-done"></span>
+            <span class="status-label">ingest video</span>
+            <span class="tag tag-done">done</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-active"></span>
+            <span class="status-label">frame extraction</span>
+            <span class="status-meta"> frames</span>
+            <span class="tag tag-active">running</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">push to cvat</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">cvat labeling</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">pull annotations</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">dataset split</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">yolo training</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+          <li class="status-item">
+            <span class="status-dot dot-idle"></span>
+            <span class="status-label">evaluation</span>
+            <span class="tag tag-idle">waiting</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- BOTTOM ROW -->
+    <div class="grid-2b">
+
+      <!-- CVAT INTEGRATION -->
+      <div class="panel">
+        <div class="panel-title"><i class="ti ti-tag"></i>cvat integration</div>
+
+        <div class="field">
+          <div class="field-label">cvat server url</div>
+          <input class="field-input" type="text" placeholder="http://localhost:8080" />
+        </div>
+        <div class="field-row-2" style="margin-bottom:14px">
+          <div>
+            <div class="field-label">username</div>
+            <input class="field-input" type="text" placeholder="admin" />
+          </div>
+          <div>
+            <div class="field-label">task name</div>
+            <input class="field-input" type="text" placeholder="apron_june_task" />
+          </div>
+        </div>
+
+        <button class="cvat-btn" onclick="cvatAction('push')">
+          <i class="ti ti-upload"></i>
+          push frames to cvat task
+          <span class="count">412</span>
+        </button>
+        <button class="cvat-btn" onclick="cvatAction('pull')">
+          <i class="ti ti-download"></i>
+          pull annotations (yolo format)
+          <span class="chevron ti ti-chevron-right"></span>
+        </button>
+        <button class="cvat-btn" onclick="window.open('http://localhost:8080','_blank')">
+          <i class="ti ti-external-link"></i>
+          open cvat in browser
+          <span class="chevron ti ti-chevron-right"></span>
+        </button>
+
+        <div class="progress-row" style="margin-top:14px">
+          <div class="progress-label">
+            <span>labeling progress</span>
+            <span>280 / 412</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill amber" style="width:68%"></div></div>
+        </div>
+      </div>
+
+      <!-- TRAINING + LOG -->
+      <div class="panel">
+        <div class="panel-title"><i class="ti ti-brain"></i>training</div>
+
+        <div class="field-row-2" style="margin-bottom:12px">
+          <div>
+            <div class="field-label">model</div>
+            <select class="field-input">
+              <option>yolo11n.pt</option>
+              <option selected>yolo11s.pt</option>
+              <option>yolo11m.pt</option>
+              <option>yolo11l.pt</option>
+            </select>
+          </div>
+          <div>
+            <div class="field-label">epochs</div>
+            <input class="field-input" type="number" placeholder="100" value="100" />
+          </div>
+        </div>
+        <div class="field-row-2" style="margin-bottom:14px">
+          <div>
+            <div class="field-label">batch size</div>
+            <input class="field-input" type="number" placeholder="8" value="8" />
+          </div>
+          <div>
+            <div class="field-label">train split</div>
+            <input class="field-input" type="number" placeholder="0.8" value="0.8" step="0.05" />
+          </div>
+        </div>
+
+        <button class="btn-primary" onclick="runTraining()" style="margin-bottom:14px">
+          <i class="ti ti-player-play"></i> start training
+        </button>
+
+        <div class="panel-title" style="margin-bottom:8px"><i class="ti ti-terminal"></i>run log</div>
+        <div class="log" id="runLog">
+          <div class="log-ok">✓ session "apron_june" created</div>
+          <div class="log-ok">✓ 3 video files found in ./videos</div>
+          <div class="log-ok">✓ extracted 412 frames @ 1.0s interval</div>
+          <div class="log-warn">~ cvat task #14 — 280/412 labeled</div>
+          <div class="log-dim">  waiting for annotation export…</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ── Step selector ──
+    function setStep(idx) {
+      document.querySelectorAll('.step-card').forEach((el, i) => {
+        el.classList.remove('active');
+        if (i < idx) el.classList.add('done');
+        else el.classList.remove('done');
+      });
+      document.querySelectorAll('.step-card')[idx].classList.add('active');
+    }
+
+    // ── File drop zone ──
+    const dz = document.getElementById('dropZone');
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = '#1db87a'; });
+    dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; });
+    dz.addEventListener('drop', e => {
+      e.preventDefault();
+      dz.style.borderColor = '';
+      const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('video/'));
+      if (files.length) {
+        dz.querySelector('.drop-zone-text').textContent = `${files.length} file(s) selected`;
+        dz.querySelector('.drop-zone-sub').textContent = files.map(f => f.name).join(', ');
+        log('ok', `✓ ${files.length} video file(s) loaded`);
+      }
+    });
+
+    function onFileSelect(e) {
+      const files = [...e.target.files];
+      if (files.length) {
+        dz.querySelector('.drop-zone-text').textContent = `${files.length} file(s) selected`;
+        dz.querySelector('.drop-zone-sub').textContent = files.map(f => f.name).join(', ');
+        log('ok', `✓ ${files.length} video file(s) loaded`);
+      }
+    }
+
+    // ── Simulated extraction ──
+    function runExtraction() {
+      const name = document.getElementById('sessionName').value.trim() || 'session';
+      const mode = document.getElementById('intervalMode').value;
+      const val  = document.getElementById('intervalVal').value;
+      const prog = document.getElementById('extractProgress');
+      const fill = document.getElementById('progressFill');
+      const pct  = document.getElementById('progressPct');
+
+      prog.style.display = 'block';
+      log('ok', `✓ session "${name}" started`);
+      log('dim', `  mode: ${mode} | interval: ${val}`);
+
+      let p = 0;
+      const iv = setInterval(() => {
+        p += Math.random() * 12;
+        if (p >= 100) { p = 100; clearInterval(iv); log('ok', `✓ extraction complete`); setStep(2); }
+        fill.style.width = p + '%';
+        pct.textContent = Math.round(p) + '%';
+      }, 200);
+    }
+
+    // ── CVAT actions ──
+    function cvatAction(action) {
+      if (action === 'push') {
+        log('ok', '✓ pushing  frames to cvat task #14…');
+        setTimeout(() => log('ok', '✓ upload complete'), 800);
+      } else {
+        log('warn', '~ pulling annotations from cvat…');
+        setTimeout(() => log('ok', '✓ x annotations exported (yolo format)'), 1000);
+      }
+    }
+
+    // ── Simulated training ──
+    function runTraining() {
+      log('ok', '✓ splitting dataset (80/20)');
+      log('ok', '✓ writing data.yaml');
+      log('dim', '  loading yolo11s.pt…');
+      setTimeout(() => {
+        log('ok', '✓ training started — epoch 1/100');
+        setStep(3);
+      }, 600);
+    }
+
+    // ── Open folder (no-op in browser, works when wired to Electron/backend) ──
+    function openFolder() {
+      log('dim', '  open output folder (wire to backend)');
+    }
+
+    // ── Log helper ──
+    function log(type, msg) {
+      const el = document.getElementById('runLog');
+      const line = document.createElement('div');
+      line.className = type === 'ok' ? 'log-ok' : type === 'warn' ? 'log-warn' : type === 'err' ? 'log-err' : 'log-dim';
+      line.textContent = msg;
+      el.appendChild(line);
+      el.scrollTop = el.scrollHeight;
+    }
+  </script>
+
+</body>
+</html>
