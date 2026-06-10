@@ -1,0 +1,14 @@
+.venv/
+venv/
+env/
+.env
+.env.local
+.env.*.local
+*.env
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/venv/
+venv/
+.venv/
