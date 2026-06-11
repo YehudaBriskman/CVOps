@@ -15,10 +15,14 @@ Launches user-supplied Docker training containers via the ICD config, monitors t
 
 ```
 PostgreSQL   job pickup, training_containers ICD config, model_versions write
+             — direct asyncpg connection, not through the API
 MinIO        download export dataset, upload model weights + logs
+             — direct S3/boto3 calls via StorageBackend abstraction, not through the API
 Redis        consume from training stream
 Docker       socket to launch and monitor user containers
 ```
+
+**Important:** this worker connects to PostgreSQL and MinIO directly — it does not go through the API for data access. The `StorageBackend` abstraction wraps boto3 so the worker is storage-agnostic (MinIO, Garage, or S3 swap via config).
 
 ---
 
@@ -50,6 +54,24 @@ No other worker has this mount.
 |---|---|
 | `step.train` | ICD-driven Docker dispatch, reads results, writes model_version |
 | `step.evaluate` | Model evaluation on an eval commit (Phase 3) |
+
+---
+
+## How Model Weights Are Written
+
+```
+1. Training container exits successfully
+2. Worker tars the weights directory from {tmpdir}/output/weights/
+3. worker calls ctx.storage.save_bytes(tar_bytes, "application/x-tar")
+   └──► StorageBackend computes sha256 hash
+   └──► uploads to MinIO at blobs/{hash[7:9]}/{hash[9:]}  (direct S3 PUT)
+   └──► inserts blobs row in PG: {hash, storage_key, size_bytes}
+   └──► returns weights_blob_hash = "sha256:<hex>"
+4. worker inserts model_versions row in PG:
+   {blob_hash: weights_blob_hash, trained_on_commit_id, metrics, ...}
+
+MinIO holds the weight bytes. PG holds the reference.
+```
 
 ---
 

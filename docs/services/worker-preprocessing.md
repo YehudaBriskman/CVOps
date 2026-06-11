@@ -14,10 +14,12 @@ Executes all data transformation steps: frame extraction, auto-labeling, dataset
 ## Dependencies
 
 ```
-PostgreSQL   job pickup and result write-back
-MinIO        read source blobs, write output blobs (frames, thumbnails, exports)
+PostgreSQL   job pickup and result write-back — direct asyncpg connection, not through the API
+MinIO        read source blobs, write output blobs — direct S3/boto3 calls, not through the API
 Redis        consume from preprocessing stream, orphan recovery
 ```
+
+**Important:** this worker connects to both PostgreSQL and MinIO directly — it does not go through the API for either. The API is never in the data path for workers. The `StorageBackend` abstraction (`ctx.storage`) wraps the MinIO boto3 calls so the same worker code works against MinIO, Garage, or AWS S3 with a config change only.
 
 ---
 
@@ -44,6 +46,26 @@ WORKER_CONCURRENCY  4    (optional — parallel job slots, default 4)
 | `step.auto_label` | Model inference on data items, writes annotation_revisions |
 | `step.commit_dataset` | Creates immutable commit + CAS branch advance |
 | `step.export_yolo` | Materialises commit to YOLO tar.gz archive |
+
+---
+
+## How Blobs Are Written
+
+Every byte the worker produces (frames, thumbnails, exports) follows this exact pattern:
+
+```
+1. worker calls ctx.storage.save_bytes(raw_bytes, media_type)
+   └──► StorageBackend computes sha256 hash of bytes
+   └──► uploads to MinIO at path blobs/{hash[7:9]}/{hash[9:]}  (direct S3 PUT)
+   └──► inserts blobs row in PG: {hash, storage_key, size_bytes, media_type}
+   └──► returns blob_hash = "sha256:<hex>"
+
+2. worker inserts data_items row in PG:
+   {blob_hash: "sha256:...", source_id, item_type, metadata}
+
+MinIO holds the bytes. PG holds the reference (hash → storage key).
+They are linked by the content hash.
+```
 
 ---
 

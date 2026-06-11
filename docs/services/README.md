@@ -18,6 +18,7 @@ An ICD defines what a service needs, what it reads, what it writes, and what it 
 | [frontend.md](./frontend.md) | Frontend (React) | TBD |
 | [step-contract.md](./step-contract.md) | Step ABC (shared library) | Itai |
 | [redis-streams.md](./redis-streams.md) | Redis Stream message format | Yehuda |
+| [data-layer.md](./data-layer.md) | PostgreSQL + MinIO data layer (not a microservice) | Yehuda |
 
 ---
 
