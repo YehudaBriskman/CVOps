@@ -19,13 +19,27 @@ Standalone CLI prototypes for the same lifecycle steps live in `frame_extractor/
 
 ## Commands
 
-### Stack (Docker Compose)
+### Stack
+
+Two distinct entry points — keep them straight:
+
+**Inner-loop dev → `tilt up`** (from repo root). Stateful infra (postgres, redis, garage) runs in containers; the API runs as a host `uvicorn --reload` and the frontend as host `npm run dev`. Vite's `server.proxy` mirrors the nginx edge by routing `/api/*` → `http://localhost:8000`. Host prereqs: Python 3.12+, Node 20+, Docker. First `tilt up` runs `pip install -e packages/api[dev]` and `npm install` automatically.
+
+**Pre-prod / integration → `docker compose` with profiles** (from `manifests/`). Everything containerised.
 
 ```bash
-docker compose up                                                  # full stack: postgres, garage, redis, api, frontend, nginx
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up  # hot-reload dev mode
-docker compose --profile phase2 up                                 # also start the Celery worker
+cd manifests
+
+docker compose up                                                            # infra only (matches what Tilt uses)
+docker compose --profile app up                                              # + api, frontend, nginx (prod-target builds)
+docker compose --profile app --profile worker up                             # + celery worker
+docker compose --profile all up                                              # everything
+
+# Force dev-target containers (rare — for reproducing CI failures):
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 ```
+
+All compose, env, and config files live under `manifests/`. Paths inside the compose files are relative to that directory.
 
 The `worker` service is gated behind the `phase2` profile and does not start by default.
 

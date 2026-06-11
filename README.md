@@ -18,7 +18,7 @@ Track datasets · version models · orchestrate workflows · audit everything - 
 [![Lint](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml/badge.svg)](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](manifests/docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
 <br>
@@ -87,17 +87,24 @@ Every node in that graph is a **Step** - composable, versioned, idempotent. Ever
 
 ## Quick Start
 
-**Requires:** Docker and Docker Compose.
+**Requires (dev):** Docker, Python 3.12+, Node 20+, [Tilt](https://docs.tilt.dev/install.html).
+**Requires (pre-prod):** Docker + Docker Compose.
 
 ```bash
 # 1. Clone and configure
 git clone https://github.com/YehudaBriskman/CVOps.git
 cd CVOps
-cp .env.example .env          # fill in JWT_SECRET and passwords
+cp manifests/.env.example manifests/.env   # fill in JWT_SECRET and Garage secrets
 
-# 2. Start the stack
-docker compose up
+# 2a. Inner-loop dev: infra in compose, api+frontend as host processes
+tilt up
+
+# 2b. Pre-prod / integration test (everything containerised):
+cd manifests
+docker compose --profile app up           # prod-target api + frontend + nginx + infra
 ```
+
+In dev mode, Vite's `server.proxy` routes `/api/*` to the host API at `http://localhost:8000`, so the frontend at `http://localhost:5173` calls the API transparently — same code path as prod behind nginx.
 
 In ~30 seconds you have:
 
@@ -449,11 +456,15 @@ npm install
 npm run dev         # http://localhost:5173
 ```
 
-### Full stack - development mode
+### Full stack — development mode
+
+`tilt up` is the recommended dev entry point — infra in containers, api + frontend as host processes with HMR.
+
+To force a containerised dev stack (rare — for reproducing CI failures):
 
 ```bash
-# Hot-reload for both API and frontend
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+cd manifests
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 ```
 
 ### Running a subset of tests
@@ -496,10 +507,10 @@ pytest tests/ -s --tb=long
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in the values:
+Copy `manifests/.env.example` to `manifests/.env` and fill in the values:
 
 ```bash
-cp .env.example .env
+cp manifests/.env.example manifests/.env
 ```
 
 | Variable | Required | Description |
@@ -512,7 +523,7 @@ cp .env.example .env
 | `GARAGE_ADMIN_TOKEN` | ✅ | Garage admin API token |
 | `GARAGE_METRICS_TOKEN` | ✅ | Garage metrics token |
 | `WORKER_TOKEN` | ✅ | Shared secret for internal `/internal/*` calls |
-| `DATABASE_URL` | auto | Derived - set in docker-compose.yml |
+| `DATABASE_URL` | auto | Derived - set in manifests/docker-compose.yml |
 | `REDIS_URL` | auto | Defaults to `redis://redis:6379/0` |
 
 ---
@@ -537,7 +548,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. Short version:
 ```bash
 git clone https://github.com/YehudaBriskman/CVOps.git
 cd CVOps
-cp .env.example .env
+cp manifests/.env.example manifests/.env
 sh scripts/git-setup.sh          # install git hooks
 
 cd packages/api
