@@ -5,19 +5,19 @@
 services:
   api:
     build:
-      context: ../packages/api
+      context: ../services/api
       target: development
     volumes:
-      - ../packages/api/src:/app/src:ro
+      - ../services/api/src:/app/src:ro
     environment:
       RELOAD: "true"
     command: uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload
 
   frontend:
     build:
-      context: ../packages/frontend
+      context: ../services/frontend
       target: development
     ports: ["5173:5173"]
     volumes:
-      - ../packages/frontend/src:/app/src:ro
+      - ../services/frontend/src:/app/src:ro
     command: npm run dev -- --host 0.0.0.0

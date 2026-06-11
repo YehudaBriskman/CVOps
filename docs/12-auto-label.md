@@ -40,7 +40,7 @@ All coordinates are normalized (0.0–1.0). Files are empty when no objects are 
 ## Usage
 
 ```bash
-cd frame_extractor
+cd tools/frame-extractor
 python auto_label.py
 ```
 
@@ -58,7 +58,7 @@ The script prompts interactively:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `DEFAULT_CONFIDENCE` | `0.25` | Minimum detection confidence |
-| Model file | `yolo12n.pt` | Must be present in `frame_extractor/` |
+| Model file | `yolo12n.pt` | Must be present in `tools/frame-extractor/` |
 
 ---
 

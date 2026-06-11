@@ -70,7 +70,7 @@ Immutable blobs and commits get `Cache-Control: immutable, max-age=31536000`.
 
 ```bash
 # Install deps
-cd packages/api
+cd services/api
 pip install -e ".[dev]"
 pip install "pydantic[email]"   # required for EmailStr in schemas
 

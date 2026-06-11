@@ -27,7 +27,7 @@ frames/
 ## Usage
 
 ```bash
-cd frame_extractor
+cd tools/frame-extractor
 python extract_frames.py
 ```
 

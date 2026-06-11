@@ -297,7 +297,7 @@ def run(input_dir: Path, project_id: str, session_name: str, mode: str, interval
 def main():
     if not PROJECT_ID:
         print("[!] PROJECT_ID env var is required.")
-        print("    Set it in frame_extractor/.env or export it before running.")
+        print("    Set it in tools/frame-extractor/.env or export it before running.")
         sys.exit(1)
 
     input_dir = Path("./videos")

@@ -82,7 +82,7 @@ services:
   #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
   api:
     build:
-      context: ../packages/api
+      context: ../services/api
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
@@ -107,7 +107,7 @@ services:
 
   worker:  # Celery async workers (formerly the "phase2" service)
     build:
-      context: ../packages/worker
+      context: ../services/worker
       dockerfile: Dockerfile
     restart: unless-stopped
     # Worker consumes jobs from redis; it doesn't call the api. Combine with
@@ -129,7 +129,7 @@ services:
 
   frontend:
     build:
-      context: ../packages/frontend
+      context: ../services/frontend
       dockerfile: Dockerfile
       target: production
     restart: unless-stopped
