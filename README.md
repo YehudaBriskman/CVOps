@@ -10,7 +10,7 @@
 
 **The ML lifecycle dashboard that replaces five fragmented tools.**
 
-Track datasets · version models · orchestrate workflows · audit everything — in one place.
+Track datasets · version models · orchestrate workflows · audit everything - in one place.
 
 <br>
 
@@ -408,7 +408,7 @@ Highlights:
 - `GET /runs/{id}/events/stream` — SSE stream, closes on terminal status
 - `POST /runs/{id}/gates/{step_id}/resolve` — resume a paused workflow
 - `GET /datasets/{id}/diff?from=&to=` — set-diff between two commits
-- `POST /datasets/{id}/commits` — CAS branch-head advance (concurrent-safe)
+- `POST /datasets/{id}/commits` —- CAS branch-head advance (concurrent-safe)
 
 </details>
 
