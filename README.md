@@ -141,7 +141,7 @@ Expected output:
 
 ## Walkthrough: End-to-end in 10 minutes
 
-This section walks through the full lifecycle using `curl`. All IDs below are placeholders — substitute your own.
+This section walks through the full lifecycle using `curl`. All IDs below are placeholders —- substitute your own.
 
 ### 1. Upload a data source
 
