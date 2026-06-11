@@ -51,7 +51,7 @@ async def make_blob(session: AsyncSession, **kwargs) -> Blob:
     h = f"sha256:{'a' * 60}{_uid()}"
     blob = Blob(
         hash=h,
-        storage_backend="minio",
+        storage_backend="garage",
         storage_key=f"blobs/aa/{_uid()}",
         size_bytes=1024,
         media_type="image/jpeg",

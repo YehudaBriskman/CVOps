@@ -2,23 +2,28 @@
 FROM python:3.12-slim AS build
 WORKDIR /app
 COPY pyproject.toml .
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --timeout=300 --retries=10 hatchling && \
-    python3 -c "import tomllib,subprocess,sys; f=open('pyproject.toml','rb'); deps=tomllib.load(f)['project']['dependencies']; f.close(); subprocess.run([sys.executable,'-m','pip','install','--timeout=300','--retries=10']+deps,check=True)"
+# hatchling's editable install scans for packages at install time, so src/
+# must be present before `pip install -e` runs — otherwise the wheel's
+# .pth/finder for cvops_api never gets created and `import cvops_api` 404s.
 COPY src/ src/
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-deps --no-build-isolation "."
+RUN pip install --no-cache-dir hatchling && \
+    pip install --no-cache-dir -e ".[dev]"
 
 # ── development target ───────────────────────────────────────────────────
 FROM build AS development
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
+RUN groupadd --system --gid 1001 app && \
+    useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app && \
+    chown -R 1001:1001 /app
+USER 1001:1001
 
 # ── production stage ─────────────────────────────────────────────────────
 FROM python:3.12-slim AS production
 WORKDIR /app
 COPY --from=build /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=build /usr/local/bin /usr/local/bin
+COPY src/ src/
 COPY alembic/ alembic/
 COPY alembic.ini .
 
@@ -27,4 +32,10 @@ COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
+
+RUN groupadd --system --gid 1001 app && \
+    useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app && \
+    chown -R 1001:1001 /app
+USER 1001:1001
+
 ENTRYPOINT ["./entrypoint.sh"]

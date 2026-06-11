@@ -7,11 +7,12 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://cvops:cvops@localhost:5432/cvops"
 
-    # MinIO / S3
-    MINIO_ENDPOINT: str = "http://localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_BUCKET: str = "cvops-blobs"
+    # S3-compatible storage (Garage by default; works against AWS S3, MinIO, etc.)
+    S3_ENDPOINT: str = "http://localhost:3900"
+    S3_ACCESS_KEY: str = "GKchangeme"
+    S3_SECRET_KEY: str = "changeme"
+    S3_BUCKET: str = "cvops-blobs"
+    S3_REGION: str = "garage"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

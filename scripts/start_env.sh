@@ -42,10 +42,15 @@ git -C "$REPO_DIR" submodule update --init --recursive
 ok "Submodules ready"
 
 # ── step 2: docker compose up ─────────────────────────────────────────────────
+# Compose files live under manifests/ as of the dev-stack refactor; project-name
+# pinned to `cvops` to keep volume continuity across invocations.
 info "Starting full stack (CVOps + CVAT + Nuclio)..."
-docker compose -f "$REPO_DIR/docker-compose.yml" \
-               -f "$REPO_DIR/docker-compose.override.yml" \
-               --project-directory "$REPO_DIR" \
+docker compose -f "$REPO_DIR/manifests/docker-compose.yml" \
+               -f "$REPO_DIR/manifests/docker-compose.override.yml" \
+               --env-file "$REPO_DIR/manifests/.env" \
+               --project-directory "$REPO_DIR/manifests" \
+               --project-name cvops \
+               --profile app \
                up -d 2>&1 | tail -5
 
 wait_healthy "cvat_server" 120

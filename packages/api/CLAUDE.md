@@ -14,7 +14,7 @@
 ```python
 from cvops_api.db.session import get_session          # AsyncSession per request
 from cvops_api.core.auth import get_current_user      # returns User ORM object, raises 401 if invalid
-from cvops_api.core.storage import get_storage        # MinIOBackend singleton
+from cvops_api.core.storage import get_storage        # S3Backend singleton (Garage)
 from cvops_api.core.audit import emit_event           # append-only event log
 from cvops_api.core.registry import registry          # in-memory step registry
 ```

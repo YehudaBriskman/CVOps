@@ -15,7 +15,7 @@ Stores metadata for every binary object in the system. The hash is the identity;
 | Column | Type | Constraints |
 |---|---|---|
 | `hash` | `TEXT` | `PRIMARY KEY` — format: `sha256:<64-hex>` |
-| `storage_backend` | `TEXT` | `NOT NULL` — one of `"s3"`, `"minio"`, `"gcs"` |
+| `storage_backend` | `TEXT` | `NOT NULL` — one of `"garage"`, `"s3"`, `"gcs"` |
 | `storage_key` | `TEXT` | `NOT NULL` — path pattern: `blobs/{hash[7:9]}/{hash[9:]}` |
 | `size_bytes` | `BIGINT` | `NOT NULL` |
 | `media_type` | `TEXT` | `NOT NULL` — MIME type, e.g. `"image/jpeg"`, `"application/zip"` |
@@ -60,7 +60,7 @@ blobs/ab/cdef1234...
 
 The prefix `blobs/` scopes blobs away from other storage namespaces. The next two characters (`ab`) form a one-level directory shard, and the rest of the hex string (`cdef1234...`) is the filename.
 
-**Why this matters at scale.** Object stores like MinIO use consistent hashing or key-prefix routing to assign objects to storage nodes. If all keys share a long common prefix (e.g. every key starts with `blobs/sha256:`), all writes can land on the same node or partition. Sharding by the first two hex characters of the hash distributes keys across up to 256 equally likely prefixes (`00`–`ff`), spreading I/O and avoiding a single hot partition.
+**Why this matters at scale.** Object stores like Garage and MinIO use consistent hashing or key-prefix routing to assign objects to storage nodes. If all keys share a long common prefix (e.g. every key starts with `blobs/sha256:`), all writes can land on the same node or partition. Sharding by the first two hex characters of the hash distributes keys across up to 256 equally likely prefixes (`00`–`ff`), spreading I/O and avoiding a single hot partition.
 
 ---
 
@@ -74,7 +74,7 @@ The examples below use raw SQL. Adapt to your ORM of choice.
 INSERT INTO blobs (hash, storage_backend, storage_key, size_bytes, media_type)
 VALUES (
     'sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
-    'minio',
+    'garage',
     'blobs/ab/cdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab',
     204800,
     'image/jpeg'

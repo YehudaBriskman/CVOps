@@ -168,7 +168,7 @@ services:
       TRAEFIK_PROVIDERS_FILE_DIRECTORY: /etc/traefik/rules
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro,z
-      - ./services/cvat/components/analytics/grafana_conf.yml:/etc/traefik/rules/grafana_conf.yml:ro,z
+      - ../services/cvat/components/analytics/grafana_conf.yml:/etc/traefik/rules/grafana_conf.yml:ro,z
     networks:
       - cvat
 
@@ -295,7 +295,7 @@ services:
         aliases:
           - vector
     volumes:
-      - ./services/cvat/components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro,z
+      - ../services/cvat/components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro,z
       - type: tmpfs
         target: /vector-data-dir
 
@@ -314,7 +314,7 @@ services:
       GF_INSTALL_PLUGINS: 'grafana-clickhouse-datasource 4.8.2'
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/all_events.json
     volumes:
-      - ./services/cvat/components/analytics/grafana/dashboards:/var/lib/grafana/dashboards:ro,z
+      - ../services/cvat/components/analytics/grafana/dashboards:/var/lib/grafana/dashboards:ro,z
     entrypoint:
       - sh
       - -euc
@@ -382,7 +382,7 @@ services:
   # ── model-deployer (replaces the profiles:cvat entry in docker-compose.yml) ─
   model-deployer:
     build:
-      context: services/model-deployer
+      context: ../services/model-deployer
       dockerfile: Dockerfile
     restart: unless-stopped
     volumes:

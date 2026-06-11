@@ -7,14 +7,21 @@ COPY . .
 RUN npm run build
 
 # ── development target ───────────────────────────────────────────────────
+# Used by docker-compose.dev.yml when you want to reproduce the dev stack in
+# containers. For day-to-day dev, Tilt runs `npm run dev` on the host instead.
+# node:20-alpine ships with a built-in `node` user (UID 1000); drop privileges.
 FROM node:20-alpine AS development
 WORKDIR /app
-COPY package.json .
+COPY --chown=node:node package.json .
 RUN npm install
+# Vite needs vite.config.ts, index.html, tsconfig.json, public/, etc. at the
+# project root — not just src/ — to bootstrap. .dockerignore drops node_modules.
+COPY --chown=node:node . .
+USER node
 EXPOSE 5173
 
 # ── production ───────────────────────────────────────────────────────────
-FROM nginx:alpine AS production
+# Rootless nginx (UID 101) listens on 8080. Doc root is /usr/share/nginx/html.
+FROM nginxinc/nginx-unprivileged:1.27-alpine AS production
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 80
+EXPOSE 8080
