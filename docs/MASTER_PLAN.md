@@ -713,19 +713,45 @@ Every sample gets a thumbnail on ingest. Algorithm: `image.thumbnail((256, 256),
 
 All types are registered at API startup by calling `registry.register()` and are synced to the `type_schemas` table. The `GET /registry/types` endpoint exposes them to the UI.
 
+### ui_hints and ui_group
+
+Every registered type carries a `ui_hints` JSONB column in `type_schemas`. The `ui_group` field inside `ui_hints` controls how the workflow builder palette groups steps into sections. The frontend reads `ui_hints.group` and renders grouped, labelled sections — no hardcoded lists anywhere.
+
+```json
+// Example ui_hints on step.extract_frames:
+{
+  "group":       "Data Preprocessing",
+  "icon":        "video",
+  "description": "Extract frames from a video source at a configured interval",
+  "order":       1
+}
+```
+
+`GET /registry/types?category=step` returns all registered steps including `ui_hints`. The workflow builder palette is built entirely from this response.
+
+**Palette groups (current):**
+
+| group | Steps shown |
+|---|---|
+| `Data Preprocessing` | extract_frames, auto_label, denoise_rf (future), commit_dataset, export_yolo |
+| `Labeling` | human_review |
+| `Training` | train, evaluate |
+
+Adding a new step with a new `group` value creates a new palette section automatically.
+
 ### 8.1 Step Registry (`category = 'step'`)
 
 Steps are routed to workers by a `queue` field on each step class. Workers only pick up jobs for their queue.
 
-| type_key | queue | config fields | inputs | outputs | Gate? |
-|---|---|---|---|---|---|
-| `step.extract_frames` | `preprocessing` | `interval_seconds: float`, `max_frames: int?`, `dedup_threshold: float?` | `source_id: str` | `data_item_ids: str[]` | No |
-| `step.auto_label` | `preprocessing` | `model_version_id: str`, `confidence_threshold: float` | `data_item_ids: str[]` | `annotation_revision_ids: str[]` | No |
-| `step.human_review` | `labeling` | `labeling_backend: str` (default "cvat"), `assignees: str[]?` | `annotation_revision_ids: str[]` | `annotation_revision_ids: str[]` | **Yes** |
-| `step.commit_dataset` | `preprocessing` | `dataset_name: str`, `branch_name: str`, `split_strategy: str` (default "by_source_group"), `train_ratio: float` (default 0.8), `val_ratio: float` (default 0.2), `ontology_id: str` | `data_item_ids: str[]`, `annotation_revision_ids: str[]` | `commit_id: str`, `ref_id: str` | No |
-| `step.export_yolo` | `preprocessing` | `ontology_id: str?` | `commit_id: str` | `export_blob_hash: str` | No |
-| `step.train` | `training` | `training_container_id: str`, `hyperparams: object` | `export_blob_hash: str` | `model_version_id: str` | No |
-| `step.evaluate` | `training` | `eval_commit_id: str` | `model_version_id: str` | `metrics: object` | No (Phase 3) |
+| type_key | queue | ui_group | config fields | inputs | outputs | Gate? |
+|---|---|---|---|---|---|---|
+| `step.extract_frames` | `preprocessing` | Data Preprocessing | `interval_seconds: float`, `max_frames: int?`, `dedup_threshold: float?` | `source_id: str` | `data_item_ids: str[]` | No |
+| `step.auto_label` | `preprocessing` | Data Preprocessing | `model_version_id: str`, `confidence_threshold: float` | `data_item_ids: str[]` | `annotation_revision_ids: str[]` | No |
+| `step.commit_dataset` | `preprocessing` | Data Preprocessing | `dataset_name: str`, `branch_name: str`, `split_strategy: str`, `train_ratio: float`, `val_ratio: float`, `ontology_id: str` | `data_item_ids: str[]`, `annotation_revision_ids: str[]` | `commit_id: str`, `ref_id: str` | No |
+| `step.export_yolo` | `preprocessing` | Data Preprocessing | `ontology_id: str?` | `commit_id: str` | `export_blob_hash: str` | No |
+| `step.human_review` | `labeling` | Labeling | `labeling_backend: str` (default "cvat"), `assignees: str[]?` | `annotation_revision_ids: str[]` | `annotation_revision_ids: str[]` | **Yes** |
+| `step.train` | `training` | Training | `training_container_id: str`, `hyperparams: object` | `export_blob_hash: str` | `model_version_id: str` | No |
+| `step.evaluate` | `training` | Training | `eval_commit_id: str` | `model_version_id: str` | `metrics: object` | No (Phase 3) |
 
 ### 8.2 Exporter Registry (`category = 'exporter'`)
 
@@ -847,9 +873,18 @@ class GateException(Exception):
         self.gate_data = gate_data
 
 class Step:
-    type_key: str = ""
-    config_schema: dict = {}
-    is_gate: bool = False
+    type_key:     str  = ""     # e.g. "step.extract_frames"
+    queue:        str  = ""     # "preprocessing" | "labeling" | "training"
+    config_schema: dict = {}    # JSON Schema — validated before run; also drives UI form
+    is_gate:      bool = False
+    ui_hints:     dict = {}
+    # ui_hints shape:
+    # {
+    #   "group":       "Data Preprocessing",  <- palette section in workflow builder
+    #   "icon":        "video",               <- icon name (from icon library)
+    #   "description": "Human-readable text shown in palette",
+    #   "order":       1                      <- sort order within the group
+    # }
 
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
         raise NotImplementedError

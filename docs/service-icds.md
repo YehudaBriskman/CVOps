@@ -482,10 +482,20 @@ class GateException(Exception):
         self.gate_data = gate_data   # stored in runs.output_refs
 
 class Step:
-    type_key:     str   = ""     # e.g. "step.extract_frames"
-    queue:        str   = ""     # "preprocessing" | "labeling" | "training"
-    config_schema: dict = {}     # JSON Schema — validated before run starts
-    is_gate:      bool  = False  # True → raises GateException to pause workflow
+    type_key:      str  = ""    # e.g. "step.extract_frames"
+    queue:         str  = ""    # "preprocessing" | "labeling" | "training"
+    config_schema: dict = {}    # JSON Schema — validated before run; also drives UI config form
+    is_gate:       bool = False # True → raises GateException to pause workflow
+    ui_hints:      dict = {}
+    # ui_hints shape — controls how this step appears in the workflow builder palette:
+    # {
+    #   "group":       "Data Preprocessing",  ← palette section header
+    #   "icon":        "video",               ← icon shown on step card
+    #   "description": "Extract frames from a video source at a configured interval",
+    #   "order":       1                      ← sort position within the group
+    # }
+    # The frontend calls GET /registry/types?category=step and builds the palette
+    # entirely from this data. No hardcoded step lists anywhere in the UI.
 
     async def run(
         self,
