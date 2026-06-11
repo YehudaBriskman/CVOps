@@ -31,10 +31,14 @@ from cvat_sdk.api_client.apis import LambdaApi
 from cvat_sdk.api_client.models import FunctionCallRequest
 
 
+#- pth-custom-yolov8n
+#  - pth-custom-yolov9t
+#  - pth-ultralytics-yolo12n
+
 CVAT_HOST     = os.environ.get("CVAT_HOST",     "http://localhost")
 CVAT_PORT     = int(os.environ.get("CVAT_PORT", "8080"))
-CVAT_USERNAME = os.environ.get("CVAT_USERNAME", "admin")
-CVAT_PASSWORD = os.environ.get("CVAT_PASSWORD", "Admin1234!")
+CVAT_USERNAME = os.environ.get("CVAT_USERNAME", "nati")
+CVAT_PASSWORD = os.environ.get("CVAT_PASSWORD", "NAti2133!")
 FUNC_ID       = "pth-ultralytics-yolo12n"
 
 COCO_LABELS = [
@@ -98,7 +102,7 @@ def main():
         task.upload_data(resources=images, params={"image_quality": 95})
         print(f"[✓] Upload complete")
 
-        print(f"[*] Starting auto-annotation with YOLO12n...")
+        print(f"[*] Starting auto-annotation with {FUNC_ID}")
         lambda_api = LambdaApi(client.api_client)
         result, _ = lambda_api.create_requests(
             FunctionCallRequest(

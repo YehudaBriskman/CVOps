@@ -30,6 +30,8 @@ dependencies = [
   "pillow>=10.3",
   # Docker dispatch (step.train)
   "docker>=7.1",
+  # HTTP client (CVAT/model-deployer proxy)
+  "httpx>=0.27",
   # Cache / token blacklist
   "redis[asyncio]>=5.0",
   # Utilities

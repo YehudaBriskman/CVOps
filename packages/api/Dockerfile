@@ -2,9 +2,12 @@
 FROM python:3.12-slim AS build
 WORKDIR /app
 COPY pyproject.toml .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --timeout=300 --retries=10 hatchling && \
+    python3 -c "import tomllib,subprocess,sys; f=open('pyproject.toml','rb'); deps=tomllib.load(f)['project']['dependencies']; f.close(); subprocess.run([sys.executable,'-m','pip','install','--timeout=300','--retries=10']+deps,check=True)"
 COPY src/ src/
-RUN pip install --no-cache-dir hatchling && \
-    pip install --no-cache-dir "."
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-deps --no-build-isolation "."
 
 # ── development target ───────────────────────────────────────────────────
 FROM build AS development
