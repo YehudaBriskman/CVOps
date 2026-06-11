@@ -15,7 +15,7 @@ async def test_blob_create(session: AsyncSession):
     hash_val = "sha256:" + "a" * 64
     blob = Blob(
         hash=hash_val,
-        storage_backend="minio",
+        storage_backend="garage",
         storage_key="blobs/aa/test-object",
         size_bytes=2048,
         media_type="image/png",
@@ -38,7 +38,7 @@ async def test_blob_duplicate_hash_raises(session: AsyncSession):
 
     blob_a = Blob(
         hash=shared_hash,
-        storage_backend="minio",
+        storage_backend="garage",
         storage_key="blobs/aa/object-a",
         size_bytes=512,
         media_type="image/jpeg",
@@ -48,7 +48,7 @@ async def test_blob_duplicate_hash_raises(session: AsyncSession):
 
     blob_b = Blob(
         hash=shared_hash,
-        storage_backend="minio",
+        storage_backend="garage",
         storage_key="blobs/aa/object-b",
         size_bytes=1024,
         media_type="image/jpeg",

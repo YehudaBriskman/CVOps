@@ -10,6 +10,10 @@ COPY src/ src/
 FROM build AS development
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
+RUN groupadd --system --gid 1001 app && \
+    useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app && \
+    chown -R 1001:1001 /app
+USER 1001:1001
 
 # ── production stage ─────────────────────────────────────────────────────
 FROM python:3.12-slim AS production
@@ -25,4 +29,10 @@ COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
+
+RUN groupadd --system --gid 1001 app && \
+    useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app && \
+    chown -R 1001:1001 /app
+USER 1001:1001
+
 ENTRYPOINT ["./entrypoint.sh"]

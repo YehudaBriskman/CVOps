@@ -1,4 +1,4 @@
-import { STEP_TYPES } from '../../mock/data'
+import { STEP_TYPES } from '../../lib/stepCatalog'
 
 export function StepPalette() {
   const onDragStart = (e: React.DragEvent, typeKey: string) => {

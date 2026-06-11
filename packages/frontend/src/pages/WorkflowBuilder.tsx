@@ -18,7 +18,7 @@ import '@xyflow/react/dist/style.css'
 import { StepNode } from '../components/workflow/StepNode'
 import type { StepNodeType } from '../components/workflow/StepNode'
 import { StepPalette } from '../components/workflow/StepPalette'
-import { STEP_TYPES } from '../mock/data'
+import { STEP_TYPES } from '../lib/stepCatalog'
 
 const INITIAL_NODES: StepNodeType[] = [
   { id: 'extract',   type: 'step', position: { x: 50,   y: 150 }, data: { label: 'Extract Frames',  type_key: 'step.extract_frames',  status: null } },
