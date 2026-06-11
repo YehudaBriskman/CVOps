@@ -1,51 +1,156 @@
 """
 extract_frames.py
 -----------------
-Step 1 in the YOLO workflow: extract frames from videos into a named output folder.
+Step 1 in the YOLO workflow: extract frames from videos, upload to MinIO,
+and register blobs + samples in PostgreSQL.
+
+Required env vars (or a .env file in this directory):
+    PROJECT_ID          UUID of an existing project in the database
+    DATABASE_URL        postgresql://user:pass@host:5432/db
+    MINIO_ENDPOINT      default: http://localhost:9000
+    MINIO_ACCESS_KEY    default: minioadmin
+    MINIO_SECRET_KEY    default: minioadmin
+    MINIO_BUCKET        default: cvops-blobs
 
 Usage:
     python extract_frames.py
-    (the script will prompt you interactively for all settings)
 """
 
-import cv2
+import hashlib
+import json
+import os
+import sys
+import uuid
 from pathlib import Path
 
+import boto3
+import cv2
+import psycopg2
+from botocore.config import Config
+from dotenv import load_dotenv
 
-# Supported video file extensions
+load_dotenv(Path(__file__).parent / ".env")
+
+MINIO_ENDPOINT   = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+MINIO_BUCKET     = os.getenv("MINIO_BUCKET", "cvops-blobs")
+PROJECT_ID       = os.getenv("PROJECT_ID", "")
+
+# Strip async driver prefix so psycopg2 can use the same DATABASE_URL
+_raw_db_url = os.getenv("DATABASE_URL", "postgresql://cvops:cvops@localhost:5432/cvops")
+DATABASE_URL = _raw_db_url.replace("postgresql+asyncpg://", "postgresql://")
+
 SUPPORTED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm"}
+STORAGE_BACKEND = "minio"
 
+
+# ── MinIO helpers ────────────────────────────────────────────────────────────
+
+def _sha256(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _bucket_key(blob_hash: str) -> str:
+    """blobs/{first2}/{rest} — avoids hot-spotting in MinIO at scale."""
+    hex_part = blob_hash.removeprefix("sha256:")
+    return f"blobs/{hex_part[:2]}/{hex_part[2:]}"
+
+
+def build_minio_client():
+    client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
+        config=Config(signature_version="s3v4"),
+    )
+    try:
+        client.head_bucket(Bucket=MINIO_BUCKET)
+    except Exception:
+        client.create_bucket(Bucket=MINIO_BUCKET)
+    return client
+
+
+def upload_blob(minio_client, data: bytes, media_type: str) -> tuple[str, str]:
+    """Upload bytes to MinIO (dedup by hash). Returns (blob_hash, storage_key)."""
+    blob_hash = _sha256(data)
+    key = _bucket_key(blob_hash)
+    try:
+        minio_client.head_object(Bucket=MINIO_BUCKET, Key=key)
+    except Exception:
+        minio_client.put_object(
+            Bucket=MINIO_BUCKET, Key=key, Body=data, ContentType=media_type
+        )
+    return blob_hash, key
+
+
+# ── Postgres helpers ─────────────────────────────────────────────────────────
+
+def pg_register_blob(cur, blob_hash: str, storage_key: str, size_bytes: int, media_type: str) -> None:
+    cur.execute(
+        """
+        INSERT INTO blobs (hash, storage_backend, storage_key, size_bytes, media_type)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (hash) DO NOTHING
+        """,
+        (blob_hash, STORAGE_BACKEND, storage_key, size_bytes, media_type),
+    )
+
+
+def pg_create_data_source(cur, project_id: str, video_name: str) -> str:
+    source_id = str(uuid.uuid4())
+    cur.execute(
+        """
+        INSERT INTO data_sources (id, project_id, type, status, metadata)
+        VALUES (%s::uuid, %s::uuid, 'video', 'processing', %s::jsonb)
+        """,
+        (source_id, project_id, json.dumps({"filename": video_name})),
+    )
+    return source_id
+
+
+def pg_register_sample(
+    cur,
+    project_id: str,
+    blob_hash: str,
+    source_id: str,
+    width: int,
+    height: int,
+    frame_index: int,
+) -> None:
+    cur.execute(
+        """
+        INSERT INTO samples (id, project_id, blob_hash, source_id, width, height, frame_index)
+        VALUES (%s::uuid, %s::uuid, %s, %s::uuid, %s, %s, %s)
+        ON CONFLICT (project_id, blob_hash) DO NOTHING
+        """,
+        (str(uuid.uuid4()), project_id, blob_hash, source_id, width, height, frame_index),
+    )
+
+
+def pg_set_source_processed(cur, source_id: str) -> None:
+    cur.execute(
+        "UPDATE data_sources SET status = 'processed', updated_at = now() WHERE id = %s::uuid",
+        (source_id,),
+    )
+
+
+# ── Interactive prompts ───────────────────────────────────────────────────────
 
 def ask_output_name() -> str:
-    """
-    Ask the user for a session name.
-    This name will be used as the output folder name and as the prefix for all saved frames.
-    Example: user types "test" -> folder: ./frames/test -> files: test_1.jpg, test_2.jpg ...
-    """
     print("\n========================================")
     print("  Frame Extraction - Session Name       ")
     print("========================================")
-
     while True:
         name = input("Enter a name for this session (e.g. test, script, run1): ").strip()
-
-        # Make sure the name is not empty
         if not name:
             print("  [!] Name cannot be empty. Please try again.")
             continue
-
-        # Replace spaces with underscores to keep filenames clean
-        name = name.replace(" ", "_")
-        return name
+        return name.replace(" ", "_")
 
 
 def ask_interval_mode() -> tuple:
-    """
-    Prompt the user to choose between time-based or fps-based interval mode.
-    Returns a tuple: (mode, value)
-        mode  -> "time" or "fps"
-        value -> seconds (float) or frame interval (int)
-    """
     print("\n========================================")
     print("  Frame Extraction - Interval Settings  ")
     print("========================================")
@@ -53,13 +158,9 @@ def ask_interval_mode() -> tuple:
     print("  1. Time-based  (extract one frame every N seconds)")
     print("  2. FPS-based   (extract one frame every N frames)")
     print("========================================")
-
-    # Keep asking until user gives a valid choice
     while True:
         choice = input("Enter 1 or 2: ").strip()
-
         if choice == "1":
-            # Time-based mode: ask for seconds
             while True:
                 try:
                     seconds = float(input("Extract one frame every how many seconds? (e.g. 1.0): ").strip())
@@ -69,9 +170,7 @@ def ask_interval_mode() -> tuple:
                     return ("time", seconds)
                 except ValueError:
                     print("  [!] Please enter a valid number (e.g. 1.0 or 2.5).")
-
         elif choice == "2":
-            # FPS-based mode: ask for frame interval
             while True:
                 try:
                     n_frames = int(input("Extract one frame every how many frames? (e.g. 10): ").strip())
@@ -81,35 +180,22 @@ def ask_interval_mode() -> tuple:
                     return ("fps", n_frames)
                 except ValueError:
                     print("  [!] Please enter a valid integer (e.g. 10 or 30).")
-
         else:
             print("  [!] Invalid choice. Please enter 1 or 2.")
 
 
-def extract_frames(
+# ── Core extraction ───────────────────────────────────────────────────────────
+
+def extract_and_ingest(
     video_path: Path,
-    output_dir: Path,
-    session_name: str,
+    project_id: str,
+    minio_client,
+    pg_conn,
     mode: str,
     interval_value: float,
     frame_counter_start: int = 0,
 ) -> int:
-    """
-    Extract frames from a single video and save them to the output directory.
-
-    Args:
-        video_path          -> path to the video file
-        output_dir          -> folder where frames will be saved
-        session_name        -> prefix used for all saved frame filenames
-        mode                -> "time" or "fps"
-        interval_value      -> seconds (if time mode) or frame count (if fps mode)
-        frame_counter_start -> global frame index offset (for multi-video runs)
-
-    Returns:
-        Number of frames saved from this video
-    """
     cap = cv2.VideoCapture(str(video_path))
-
     if not cap.isOpened():
         print(f"  [!] Could not open video: {video_path.name}")
         return 0
@@ -120,112 +206,112 @@ def extract_frames(
         fps = 1.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Calculate the frame interval based on the chosen mode
-    if mode == "time":
-        # Convert seconds to number of frames using the video's FPS
-        interval = max(1, int(fps * interval_value))
-    else:
-        # FPS mode: use the value directly as a frame interval
-        interval = max(1, int(interval_value))
-
+    interval = max(1, int(fps * interval_value)) if mode == "time" else max(1, int(interval_value))
     print(f"  -> {video_path.name} | {fps:.1f} fps | {total_frames} frames | interval: every {interval} frames")
+
+    with pg_conn.cursor() as cur:
+        source_id = pg_create_data_source(cur, project_id, video_path.name)
+        pg_conn.commit()
 
     saved = 0
     frame_idx = 0
 
     while True:
         ret, frame = cap.read()
-
-        # Stop when the video ends or cannot be read
         if not ret:
             break
 
-        # Save the frame if it falls on the interval boundary
         if frame_idx % interval == 0:
-            # File name format: sessionname_1.jpg, sessionname_2.jpg ...
-            # Index starts at 1 (not 0) for readability
+            height_px, width_px = frame.shape[:2]
             global_idx = frame_counter_start + saved + 1
-            filename = f"{session_name}_{global_idx}.jpg"
-            out_path = output_dir / filename
-            if cv2.imwrite(str(out_path), frame):
-                saved += 1
-            else:
-                print(f"  [!] Warning: failed to write {filename}")
+
+            ok, buf = cv2.imencode(".jpg", frame)
+            if not ok:
+                print(f"  [!] Warning: failed to encode frame {global_idx}")
+                frame_idx += 1
+                continue
+
+            data = buf.tobytes()
+            blob_hash, storage_key = upload_blob(minio_client, data, "image/jpeg")
+
+            with pg_conn.cursor() as cur:
+                pg_register_blob(cur, blob_hash, storage_key, len(data), "image/jpeg")
+                pg_register_sample(cur, project_id, blob_hash, source_id, width_px, height_px, global_idx)
+                pg_conn.commit()
+
+            saved += 1
 
         frame_idx += 1
 
     cap.release()
-    print(f"     Saved {saved} frames")
+
+    with pg_conn.cursor() as cur:
+        pg_set_source_processed(cur, source_id)
+        pg_conn.commit()
+
+    print(f"     Uploaded {saved} frames")
     return saved
 
 
-def run(input_dir: Path, output_dir: Path, session_name: str, mode: str, interval_value: float):
-    """
-    Main runner: finds all videos in input_dir and extracts frames from each one.
-    """
-    # Create the session output folder: ./frames/<session_name>/
-    output_dir.mkdir(parents=True, exist_ok=True)
+def run(input_dir: Path, project_id: str, session_name: str, mode: str, interval_value: float):
+    print("\n[*] Connecting to MinIO and PostgreSQL...")
+    minio_client = build_minio_client()
+    pg_conn = psycopg2.connect(DATABASE_URL)
 
-    # Collect all supported video files, sorted alphabetically
     video_files = sorted([
         f for f in input_dir.iterdir()
         if f.suffix.lower() in SUPPORTED_EXTENSIONS
     ])
 
     if not video_files:
+        pg_conn.close()
         print(f"\n[!] No videos found in: {input_dir}")
         return
 
     print(f"\n[✓] Found {len(video_files)} video(s)")
-    print(f"[✓] Output folder: {output_dir}")
-    print(f"[✓] Files will be named: {session_name}_1.jpg, {session_name}_2.jpg ...\n")
+    print(f"[✓] Project ID  : {project_id}")
+    print(f"[✓] MinIO bucket: {MINIO_BUCKET}\n")
 
     total_saved = 0
-
-    # Process each video one by one
     for video_path in video_files:
-        saved = extract_frames(
+        saved = extract_and_ingest(
             video_path=video_path,
-            output_dir=output_dir,
-            session_name=session_name,
+            project_id=project_id,
+            minio_client=minio_client,
+            pg_conn=pg_conn,
             mode=mode,
             interval_value=interval_value,
             frame_counter_start=total_saved,
         )
         total_saved += saved
 
-    # Print final summary
+    pg_conn.close()
+
     print(f"\n{'=' * 40}")
     print(f"Session name   : {session_name}")
     print(f"Total frames   : {total_saved}")
-    print(f"Saved to       : {output_dir}")
+    print(f"Stored in      : MinIO bucket '{MINIO_BUCKET}'")
     print(f"{'=' * 40}\n")
 
 
 def main():
-    # --- Base paths ---
-    input_dir = Path("./videos")
-    base_output_dir = Path("./frames")
+    if not PROJECT_ID:
+        print("[!] PROJECT_ID env var is required.")
+        print("    Set it in frame_extractor/.env or export it before running.")
+        sys.exit(1)
 
-    # Validate that the input folder exists before doing anything
+    input_dir = Path("./videos")
     if not input_dir.exists():
         print(f"[!] Input folder not found: {input_dir}")
-        return
+        sys.exit(1)
 
-    # Step 1: Ask user for a session name
     session_name = ask_output_name()
-
-    # Build the final output path: ./frames/<session_name>/
-    output_dir = base_output_dir / session_name
-
-    # Step 2: Ask user to choose interval mode
     mode, interval_value = ask_interval_mode()
 
     print(f"\n[✓] Session  : {session_name}")
     print(f"[✓] Mode     : {'Time-based' if mode == 'time' else 'FPS-based'} | Value: {interval_value}")
 
-    # Step 3: Start the extraction process
-    run(input_dir, output_dir, session_name, mode, interval_value)
+    run(input_dir, PROJECT_ID, session_name, mode, interval_value)
 
 
 if __name__ == "__main__":

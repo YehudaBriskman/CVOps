@@ -32,5 +32,8 @@ class Settings(BaseSettings):
     CVAT_USERNAME: str = "admin"
     CVAT_PASSWORD: str = "cvops"
 
+    # Model Deployer
+    MODEL_DEPLOYER_URL: str = "http://model-deployer:8001"
+
 
 settings = Settings()

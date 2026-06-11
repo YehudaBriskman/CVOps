@@ -1,0 +1,416 @@
+# CVAT + Nuclio + model-deployer
+# Auto-merged by Docker Compose on every `docker compose up`
+
+x-backend-env: &backend-env
+  CVAT_POSTGRES_HOST: cvat_db
+  CVAT_REDIS_INMEM_HOST: cvat_redis_inmem
+  CVAT_REDIS_INMEM_PORT: 6379
+  CVAT_REDIS_ONDISK_HOST: cvat_redis_ondisk
+  CVAT_REDIS_ONDISK_PORT: 6666
+  CVAT_LOG_IMPORT_ERRORS: 'true'
+  CVAT_ALLOW_STATIC_CACHE: 'no'
+  CVAT_NUM_PROXIES: '1'
+  DJANGO_LOG_SERVER_HOST: vector
+  DJANGO_LOG_SERVER_PORT: 8282
+  no_proxy: clickhouse,grafana,vector,nuclio,opa
+  SMOKESCREEN_OPTS: ''
+
+x-clickhouse-env: &clickhouse-env
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: 8123
+  CLICKHOUSE_DB: cvat
+  CLICKHOUSE_USER: user
+  CLICKHOUSE_PASSWORD: user
+
+x-backend-deps: &backend-deps
+  cvat_redis_inmem: { condition: service_started }
+  cvat_redis_ondisk: { condition: service_started }
+  cvat_db:          { condition: service_started }
+  cvat_clickhouse:  { condition: service_started }
+
+x-cvat-volumes: &cvat-volumes
+  - cvat_data:/home/django/data
+  - cvat_keys:/home/django/keys
+  - cvat_logs:/home/django/logs
+
+services:
+  # ── CVAT data layer ────────────────────────────────────────────────────────
+  cvat_db:
+    container_name: cvat_db
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_DB: cvat
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - cvat_db:/var/lib/postgresql/data
+    networks:
+      - cvat
+
+  cvat_redis_inmem:
+    container_name: cvat_redis_inmem
+    image: redis:7.2.11-alpine
+    restart: always
+    command: ["redis-server", "--save", "60", "100", "--appendonly", "yes"]
+    volumes:
+      - cvat_inmem_db:/data
+    networks:
+      - cvat
+
+  cvat_redis_ondisk:
+    container_name: cvat_redis_ondisk
+    image: apache/kvrocks:2.15.0
+    restart: always
+    init: true
+    command: ["--compact-cron", "0 3 * * *"]
+    volumes:
+      - cvat_cache_db:/var/lib/kvrocks
+    networks:
+      - cvat
+
+  cvat_clickhouse:
+    container_name: cvat_clickhouse
+    image: clickhouse/clickhouse-server:23.11-alpine
+    restart: always
+    environment:
+      <<: *clickhouse-env
+    networks:
+      cvat:
+        aliases:
+          - clickhouse
+    volumes:
+      - cvat_events_db:/var/lib/clickhouse/
+
+  cvat_opa:
+    container_name: cvat_opa
+    image: openpolicyagent/opa:1.12.2
+    restart: always
+    networks:
+      cvat:
+        aliases:
+          - opa
+    command:
+      - run
+      - --server
+      - --addr=:8181
+      - --log-level=error
+      - --set=services.cvat.url=http://cvat-server:8080
+      - --set=bundles.cvat.service=cvat
+      - --set=bundles.cvat.resource=/api/auth/rules
+      - --set=bundles.cvat.polling.min_delay_seconds=5
+      - --set=bundles.cvat.polling.max_delay_seconds=15
+
+  # ── CVAT application layer ─────────────────────────────────────────────────
+  cvat_server:
+    container_name: cvat_server
+    image: cvat/server:dev
+    restart: always
+    depends_on:
+      <<: *backend-deps
+      cvat_opa: { condition: service_started }
+    environment:
+      <<: [*backend-env, *clickhouse-env]
+      DJANGO_MODWSGI_EXTRA_ARGS: ''
+      ALLOWED_HOSTS: '*'
+      ADAPTIVE_AUTO_ANNOTATION: 'false'
+      NUMPROCS: 2
+      CVAT_ANALYTICS: 1
+      CVAT_BASE_URL: ''
+      ONE_RUNNING_JOB_IN_QUEUE_PER_USER: 'false'
+      CVAT_SERVERLESS: 1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: init run server nginx
+    labels:
+      traefik.enable: "true"
+      traefik.http.services.cvat.loadbalancer.server.port: "8080"
+      traefik.http.routers.cvat.rule: >-
+        Host(`${CVAT_HOST:-localhost}`) &&
+        (PathPrefix(`/api/`) || PathPrefix(`/static/`) ||
+         PathPrefix(`/admin`) || PathPrefix(`/django-rq`))
+      traefik.http.routers.cvat.entrypoints: web
+    volumes: *cvat-volumes
+    networks:
+      cvat:
+        aliases:
+          - cvat-server
+
+  cvat_ui:
+    container_name: cvat_ui
+    image: cvat/ui:dev
+    restart: always
+    depends_on:
+      - cvat_server
+    labels:
+      traefik.enable: "true"
+      traefik.http.services.cvat-ui.loadbalancer.server.port: "8000"
+      traefik.http.routers.cvat-ui.rule: Host(`${CVAT_HOST:-localhost}`)
+      traefik.http.routers.cvat-ui.entrypoints: web
+    networks:
+      - cvat
+
+  traefik:
+    image: traefik:v3.6
+    container_name: traefik
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      CVAT_HOST: ${CVAT_HOST:-localhost}
+      DJANGO_LOG_VIEWER_HOST: grafana
+      DJANGO_LOG_VIEWER_PORT: 3000
+      TRAEFIK_ACCESSLOG_FORMAT: json
+      TRAEFIK_LOG_FORMAT: json
+      TRAEFIK_ENTRYPOINTS_web_ADDRESS: :8080
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_PROVIDERS_DOCKER_NETWORK: cvat_cvat
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /etc/traefik/rules
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro,z
+      - ../services/cvat/components/analytics/grafana_conf.yml:/etc/traefik/rules/grafana_conf.yml:ro,z
+    networks:
+      - cvat
+
+  # ── CVAT workers ───────────────────────────────────────────────────────────
+  cvat_worker_utils:
+    container_name: cvat_worker_utils
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      CVAT_REDIS_INMEM_PASSWORD: ''
+      NUMPROCS: 1
+    command: run worker notifications cleaning
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_import:
+    container_name: cvat_worker_import
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 2
+    command: run worker import
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_export:
+    container_name: cvat_worker_export
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: [*backend-env, *clickhouse-env]
+      NUMPROCS: 2
+    command: run worker export
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_annotation:
+    container_name: cvat_worker_annotation
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      <<: *backend-env
+      NUMPROCS: 1
+    command: run worker annotation
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_webhooks:
+    container_name: cvat_worker_webhooks
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 1
+    command: run worker webhooks --with-scheduler
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_quality_reports:
+    container_name: cvat_worker_quality_reports
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 1
+    command: run worker quality_reports
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_chunks:
+    container_name: cvat_worker_chunks
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 2
+    command: run worker chunks
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  cvat_worker_consensus:
+    container_name: cvat_worker_consensus
+    image: cvat/server:dev
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 1
+    command: run worker consensus
+    volumes: *cvat-volumes
+    networks:
+      - cvat
+
+  # ── Analytics ─────────────────────────────────────────────────────────────
+  cvat_vector:
+    container_name: cvat_vector
+    image: timberio/vector:0.26.0-alpine
+    user: "1000:1000"
+    restart: always
+    depends_on:
+      - cvat_clickhouse
+    environment:
+      <<: *clickhouse-env
+    networks:
+      cvat:
+        aliases:
+          - vector
+    volumes:
+      - ../services/cvat/components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro,z
+      - type: tmpfs
+        target: /vector-data-dir
+
+  cvat_grafana:
+    container_name: cvat_grafana
+    image: grafana/grafana-oss:10.1.2
+    restart: always
+    environment:
+      <<: *clickhouse-env
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SERVER_ROOT_URL: http://${CVAT_HOST:-localhost}/analytics
+      GF_INSTALL_PLUGINS: 'grafana-clickhouse-datasource 4.8.2'
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/all_events.json
+    volumes:
+      - ../services/cvat/components/analytics/grafana/dashboards:/var/lib/grafana/dashboards:ro,z
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat << 'EOF' > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+          - name: 'ClickHouse'
+            type: 'grafana-clickhouse-datasource'
+            isDefault: true
+            jsonData:
+              defaultDatabase: $${CLICKHOUSE_DB}
+              port: $${CLICKHOUSE_PORT}
+              server: $${CLICKHOUSE_HOST}
+              username: $${CLICKHOUSE_USER}
+              tlsSkipVerify: false
+              protocol: http
+            secureJsonData:
+              password: $${CLICKHOUSE_PASSWORD}
+            editable: true
+        EOF
+        mkdir -p /etc/grafana/provisioning/dashboards
+        cat << EOF > /etc/grafana/provisioning/dashboards/dashboard.yaml
+        apiVersion: 1
+        providers:
+          - name: cvat-logs
+            type: file
+            updateIntervalSeconds: 30
+            options:
+              path: /var/lib/grafana/dashboards
+              foldersFromFilesStructure: true
+        EOF
+        exec /run.sh
+    networks:
+      cvat:
+        aliases:
+          - grafana
+
+  # ── Nuclio (AI model serving for CVAT) ────────────────────────────────────
+  nuclio:
+    container_name: nuclio
+    image: quay.io/nuclio/dashboard:1.15.9-amd64
+    restart: always
+    networks:
+      - cvat
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "962"
+    security_opt:
+      - label:disable
+    environment:
+      http_proxy: ''
+      https_proxy: ''
+      no_proxy: ''
+      NUCLIO_CHECK_FUNCTION_CONTAINERS_HEALTHINESS: 'true'
+      NUCLIO_DASHBOARD_DEFAULT_FUNCTION_MOUNT_MODE: 'volume'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: 100m
+        max-file: "3"
+
+  # ── model-deployer (replaces the profiles:cvat entry in docker-compose.yml) ─
+  model-deployer:
+    build:
+      context: ../services/model-deployer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      CVAT_NETWORK:              cvat_cvat
+      CVAT_HOST:                 http://cvat_server:8080
+      CVAT_PORT:                 8080
+      CVAT_USERNAME:             ${CVAT_USERNAME:-admin}
+      CVAT_PASSWORD:             ${CVAT_PASSWORD:-Admin1234!}
+      CVAT_FUNCTIONS_REDIS_HOST: cvat_redis_ondisk
+      CVAT_FUNCTIONS_REDIS_PORT: 6666
+      YOLO_BASE_IMAGE:           cvat/yolo-base:latest
+    networks:
+      - default
+      - cvat
+    profiles: []
+
+volumes:
+  cvat_db:
+  cvat_data:
+  cvat_keys:
+  cvat_logs:
+  cvat_inmem_db:
+  cvat_events_db:
+  cvat_cache_db:
+
+networks:
+  cvat:
+    name: cvat_cvat
+    external: true
