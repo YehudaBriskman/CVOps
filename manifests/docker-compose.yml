@@ -1,0 +1,163 @@
+name: cvops
+
+services:
+  # ── Data layer ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-cvops}
+      POSTGRES_USER:     ${POSTGRES_USER:-cvops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-cvops}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # The official dxflrs/garage image runs as root by default. We chown the
+  # named volumes once in `garage-init`, then run the Garage server as UID 1000.
+  garage-init:
+    image: alpine:3.20
+    user: "0:0"
+    command: ["chown", "-R", "1000:1000", "/var/lib/garage/meta", "/var/lib/garage/data"]
+    volumes:
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    restart: "no"
+
+  garage:
+    image: dxflrs/garage:v2.3.0
+    restart: unless-stopped
+    user: "1000:1000"
+    command: ["/garage", "server"]
+    depends_on:
+      garage-init:
+        condition: service_completed_successfully
+    ports:
+      - "3900:3900"   # S3 API
+      - "3903:3903"   # Admin API
+    environment:
+      GARAGE_DEFAULT_ACCESS_KEY: ${GARAGE_DEFAULT_ACCESS_KEY}
+      GARAGE_DEFAULT_SECRET_KEY: ${GARAGE_DEFAULT_SECRET_KEY}
+      GARAGE_DEFAULT_BUCKET:     ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      GARAGE_RPC_SECRET:         ${GARAGE_RPC_SECRET}
+      GARAGE_ADMIN_TOKEN:        ${GARAGE_ADMIN_TOKEN}
+      GARAGE_METRICS_TOKEN:      ${GARAGE_METRICS_TOKEN}
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Application layer (opt-in via profiles) ─────────────────────────────
+  #
+  # Profiles:
+  #   (default, no profile) → infra only (postgres, redis, garage). Tilt uses this.
+  #   --profile app         → api + frontend + nginx (production-target builds)
+  #   --profile worker      → celery async worker
+  #   --profile all         → everything
+  #
+  # For dev-target container builds, layer docker-compose.dev.yml on top:
+  #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
+  api:
+    build:
+      context: ../packages/api
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      S3_ENDPOINT:     http://garage:3900
+      S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
+      S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
+      S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      S3_REGION:       garage
+      REDIS_URL:       redis://redis:6379/0
+      JWT_SECRET:      ${JWT_SECRET}
+      WORKER_TOKEN:    ${WORKER_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
+    profiles: ["app", "all"]
+
+  worker:  # Celery async workers (formerly the "phase2" service)
+    build:
+      context: ../packages/worker
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Worker consumes jobs from redis; it doesn't call the api. Combine with
+    # `--profile app --profile worker` if you want both running together.
+    depends_on:
+      redis: { condition: service_healthy }
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      REDIS_URL:       redis://redis:6379/0
+      S3_ENDPOINT:     http://garage:3900
+      S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
+      S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
+      S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      S3_REGION:       garage
+      WORKER_TOKEN:    ${WORKER_TOKEN}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles: ["worker", "all"]
+
+  frontend:
+    build:
+      context: ../packages/frontend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    # nginx-unprivileged listens on 8080 (UID 101, no root anywhere)
+    ports: ["3000:8080"]
+    depends_on:
+      - api
+    profiles: ["app", "all"]
+
+  nginx:
+    # Rootless nginx: UID 101, listens on 8080 (no root in this container)
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    restart: unless-stopped
+    ports: ["80:8080"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - frontend
+    profiles: ["app", "all"]
+
+  # ── External tools (Phase 2) ────────────────────────────────────────────
+  # cvat:
+  #   image: cvat/server:v2.14.3
+  #   ... see docs/design/11-cvat-integration.md for full CVAT compose config
+
+volumes:
+  postgres_data:
+  garage_meta:
+  garage_data:
+  redis_data:

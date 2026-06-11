@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import clsx from 'clsx'
-import type { RunStep } from '../../mock/data'
+import type { RunStep } from './types'
 
 const STATUS_STYLE: Record<string, { badge: string; dot: string }> = {
   completed: { badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
