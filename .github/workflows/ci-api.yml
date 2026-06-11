@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/api/**'
+      - 'services/api/**'
       - '.github/workflows/ci-api.yml'
   pull_request:
     paths:
-      - 'packages/api/**'
+      - 'services/api/**'
       - '.github/workflows/ci-api.yml'
 
 jobs:
@@ -23,12 +23,12 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-          cache-dependency-path: packages/api/pyproject.toml
+          cache-dependency-path: services/api/pyproject.toml
 
       - name: Install dependencies
-        working-directory: packages/api
+        working-directory: services/api
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        working-directory: packages/api
+        working-directory: services/api
         run: pytest tests/ -q --tb=short

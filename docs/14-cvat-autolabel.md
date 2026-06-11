@@ -24,7 +24,7 @@ See [start_env.sh](../scripts/start_env.sh) for details on what the startup scri
 ## Usage
 
 ```bash
-cd frame_extractor
+cd tools/frame-extractor
 python3 cvat_autolabel.py frames/<session_name>
 ```
 

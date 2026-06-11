@@ -137,15 +137,15 @@ local_resource('garage-bootstrap',
 # ── Host-side install resources (one-time, auto-run on first tilt up) ──────
 # Editable install for the API package; uvicorn comes in as a dep.
 local_resource('api-install',
-    cmd='cd packages/api && python3 -m pip install --user -e ".[dev]" >/dev/null',
-    deps=['packages/api/pyproject.toml'],
+    cmd='cd services/api && python3 -m pip install --user -e ".[dev]" >/dev/null',
+    deps=['services/api/pyproject.toml'],
     labels=['5-setup'],
 )
 
 # npm install for the frontend.
 local_resource('frontend-install',
-    cmd='cd packages/frontend && npm install --silent',
-    deps=['packages/frontend/package.json'],
+    cmd='cd services/frontend && npm install --silent',
+    deps=['services/frontend/package.json'],
     labels=['5-setup'],
 )
 
@@ -168,9 +168,9 @@ api_env = {
 }
 
 local_resource('api',
-    serve_cmd='cd packages/api && python3 -m uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload',
+    serve_cmd='cd services/api && python3 -m uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload',
     serve_env=api_env,
-    deps=['packages/api/src'],
+    deps=['services/api/src'],
     resource_deps=['postgres', 'redis', 'garage-bootstrap', 'api-install'],
     readiness_probe=probe(
         period_secs=5,
@@ -185,8 +185,8 @@ local_resource('api',
 
 local_resource('frontend',
     # Vite already proxies /api → http://localhost:8000 (see vite.config.ts).
-    serve_cmd='cd packages/frontend && npm run dev -- --host 0.0.0.0 --port 5173',
-    deps=['packages/frontend/src', 'packages/frontend/vite.config.ts', 'packages/frontend/index.html'],
+    serve_cmd='cd services/frontend && npm run dev -- --host 0.0.0.0 --port 5173',
+    deps=['services/frontend/src', 'services/frontend/vite.config.ts', 'services/frontend/index.html'],
     resource_deps=['api', 'frontend-install'],
     readiness_probe=probe(
         period_secs=5,
@@ -206,8 +206,8 @@ local_resource('git-hooks',
 )
 
 local_resource('worker-install',
-    cmd='cd packages/worker && python3 -m pip install --user -e .',
-    deps=['packages/worker/pyproject.toml'],
+    cmd='cd services/worker && python3 -m pip install --user -e .',
+    deps=['services/worker/pyproject.toml'],
     labels=['5-setup'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
@@ -215,28 +215,28 @@ local_resource('worker-install',
 
 # ── Quality gates ───────────────────────────────────────────────────────────
 local_resource('api-test',
-    cmd='cd packages/api && pytest tests/ -q',
+    cmd='cd services/api && pytest tests/ -q',
     labels=['6-quality'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 local_resource('api-lint',
-    cmd='cd packages/api && ruff check src/ tests/ && ruff format --check src/ tests/ && mypy src/',
+    cmd='cd services/api && ruff check src/ tests/ && ruff format --check src/ tests/ && mypy src/',
     labels=['6-quality'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 local_resource('frontend-lint',
-    cmd='cd packages/frontend && npm run lint && npm run typecheck',
+    cmd='cd services/frontend && npm run lint && npm run typecheck',
     labels=['6-quality'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 local_resource('frontend-build',
-    cmd='cd packages/frontend && npm run build',
+    cmd='cd services/frontend && npm run build',
     labels=['6-quality'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,
@@ -247,7 +247,7 @@ local_resource('frontend-build',
 migrate_env = {'DATABASE_URL': api_env['DATABASE_URL']}
 
 local_resource('migrate-up',
-    cmd='cd packages/api && alembic upgrade head',
+    cmd='cd services/api && alembic upgrade head',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],
@@ -256,7 +256,7 @@ local_resource('migrate-up',
 )
 
 local_resource('migrate-down',
-    cmd='cd packages/api && alembic downgrade -1',
+    cmd='cd services/api && alembic downgrade -1',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],
@@ -265,7 +265,7 @@ local_resource('migrate-down',
 )
 
 local_resource('migrate-revision',
-    cmd='cd packages/api && alembic revision --autogenerate -m "tilt-generated"',
+    cmd='cd services/api && alembic revision --autogenerate -m "tilt-generated"',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],

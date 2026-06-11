@@ -26,20 +26,20 @@ W&B / MLflow product family).
 
 Changes landed:
 
-- `packages/frontend/tailwind.config.ts` — full cobalt 50–900 scale, `chart-1..8` Okabe-Ito
+- `services/frontend/tailwind.config.ts` — full cobalt 50–900 scale, `chart-1..8` Okabe-Ito
   derived categorical palette, `focus` ring token, tinted `shadow-*` tokens that switch on
   theme, `info` recolored from `#0EA5E9` to `#6366F1` to stop colliding with the brand `sky`.
-- `packages/frontend/src/index.css` — semantic CSS variables on `:root` (light) and
+- `services/frontend/src/index.css` — semantic CSS variables on `:root` (light) and
   `[data-theme='dark']` (dark): `--surface-1/2/3`, `--text-primary/secondary/muted/inverse`,
   `--border`, `--border-strong`, `--focus`, `--shadow-color`. Body uses `var(--surface-1)` /
   `var(--text-primary)`. `*:focus-visible` ring is global. `prefers-reduced-motion` honored.
-- `packages/frontend/src/lib/theme.tsx` — `ThemeProvider`, `useTheme()`, cycles
+- `services/frontend/src/lib/theme.tsx` — `ThemeProvider`, `useTheme()`, cycles
   light → dark → system, persists to `localStorage`, listens to `prefers-color-scheme` when
   in `system` mode.
-- `packages/frontend/index.html` — boot script sets `data-theme` *before* React mounts to
+- `services/frontend/index.html` — boot script sets `data-theme` *before* React mounts to
   prevent the flash-of-wrong-theme.
-- `packages/frontend/src/main.tsx` — wraps the tree in `<ThemeProvider>`.
-- `packages/frontend/src/components/layout/Header.tsx` — sun/moon/monitor toggle, uses the
+- `services/frontend/src/main.tsx` — wraps the tree in `<ThemeProvider>`.
+- `services/frontend/src/components/layout/Header.tsx` — sun/moon/monitor toggle, uses the
   semantic tokens (`bg-surface-2 text-text-primary border-border`).
 
 ### Palette audit findings that motivated the work
@@ -309,7 +309,7 @@ This product is read-only on phones by design — you don't build ML pipelines o
 
 ## 10. Tech additions  (concrete)
 
-Add to `packages/frontend/package.json`:
+Add to `services/frontend/package.json`:
 
 ```json
 "recharts":                       "^2.13",

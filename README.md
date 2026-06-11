@@ -340,10 +340,10 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
 
 | Package | Language | Status | Description |
 |---|---|---|---|
-| `packages/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer - 21 models, 40+ endpoints, 146 tests |
-| `packages/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react |
+| `services/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer - 21 models, 40+ endpoints, 146 tests |
+| `services/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react |
 | `packages/steps` | Python | 🚧 Pending | Step implementations: `extract_frames`, `auto_label`, `export_yolo`, `train` |
-| `packages/worker` | Python · Celery | 📋 Phase 2 | Async worker queue for long-running steps |
+| `services/worker` | Python · Celery | 📋 Phase 2 | Async worker queue for long-running steps |
 
 ---
 
@@ -426,7 +426,7 @@ Highlights:
 ### API
 
 ```bash
-cd packages/api
+cd services/api
 
 # Set up virtual environment
 python -m venv .venv
@@ -451,7 +451,7 @@ uvicorn cvops_api.main:app --reload --port 8000
 ### Frontend
 
 ```bash
-cd packages/frontend
+cd services/frontend
 npm install
 npm run dev         # http://localhost:5173
 ```
@@ -534,7 +534,7 @@ cp manifests/.env.example manifests/.env
 |---|---|
 | [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md) | Full system reference - start here |
 | [`docs/VISION.md`](docs/VISION.md) | Product vision and roadmap |
-| [`packages/api/CLAUDE.md`](packages/api/CLAUDE.md) | API developer orientation (shared deps, conventions, auth model) |
+| [`services/api/CLAUDE.md`](services/api/CLAUDE.md) | API developer orientation (shared deps, conventions, auth model) |
 | [`docs/db/`](docs/db/) | Per-model database schema documentation |
 | [Interactive API docs](http://localhost:8000/docs) | Swagger UI - live when stack is running |
 | [`brand/`](brand/) | Logos, color tokens, icons, social assets, brand guide |
@@ -551,7 +551,7 @@ cd CVOps
 cp manifests/.env.example manifests/.env
 sh scripts/git-setup.sh          # install git hooks
 
-cd packages/api
+cd services/api
 pip install -e ".[dev]"
 pytest tests/ -q                 # all 146 must pass before a PR
 ```

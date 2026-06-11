@@ -20,7 +20,7 @@ Uploads extracted frames and auto-generated labels to a local CVAT instance as a
 ## Usage
 
 ```bash
-cd frame_extractor
+cd tools/frame-extractor
 python upload_to_cvat.py
 ```
 
