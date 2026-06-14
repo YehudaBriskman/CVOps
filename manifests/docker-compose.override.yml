@@ -395,7 +395,7 @@ services:
       CVAT_PASSWORD:             ${CVAT_PASSWORD:-Admin1234!}
       CVAT_FUNCTIONS_REDIS_HOST: cvat_redis_ondisk
       CVAT_FUNCTIONS_REDIS_PORT: 6666
-      YOLO_BASE_IMAGE:           cvat/yolo-base:latest
+      YOLO_BASE_IMAGE:           python:3.9-slim
     networks:
       - default
       - cvat
