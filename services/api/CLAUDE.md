@@ -24,20 +24,24 @@ from cvops_api.core.registry import registry          # in-memory step registry
 ## 3. Auth
 
 - Bearer JWT (HS256), 15-min access / 7-day refresh
-- All endpoints except `/auth/*` require `Authorization: Bearer <token>`
+- All endpoints except `/api/v1/auth/*` require `Authorization: Bearer <token>`
 - `get_current_user` dependency handles validation and DB lookup
 - Tokens created by `create_access_token(str(user.id))` / `create_refresh_token(str(user.id))`
 
 ## 4. Router Mounting (from `main.py`)
 
-| Router | Prefix |
+The API owns the `/api/v1` version prefix — every public router is mounted under
+it (the nginx edge and Vite proxy pass `/api/v1/*` through unchanged). `/health`
+(liveness) and `/dataset` (the human-facing viewer page) stay at root, unversioned.
+
+| Router | Mounted prefix |
 |---|---|
-| auth | `/auth` |
-| orgs | `/orgs` |
-| projects | `/projects` |
-| registry | `/registry` |
-| internal | `/internal` |
-| data_sources, samples, ontologies, datasets, workflows, runs, models, training_containers | `""` (routes define their own full paths, e.g. `/projects/{id}/samples`) |
+| auth | `/api/v1/auth` |
+| orgs | `/api/v1/orgs` |
+| projects | `/api/v1/projects` |
+| registry | `/api/v1/registry` |
+| internal | `/api/v1/internal` |
+| data_sources, samples, ontologies, datasets, workflows, runs, models, training_containers | `/api/v1` (routes define their own full paths, e.g. `/api/v1/projects/{id}/samples`) |
 
 ## 5. Pagination Convention
 

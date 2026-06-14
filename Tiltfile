@@ -9,7 +9,7 @@
 #                                                and proxies /api/v1 → host API, so
 #                                                the stack is browser-usable at
 #                                                http://localhost (and dev VMs).
-#   Vite also proxies /api → http://localhost:8000 for the React app.
+#   Vite also proxies /api/v1 → http://localhost:8000 for the React app.
 #
 # For container-based pre-prod testing, use docker compose with profiles directly:
 #   cd manifests
@@ -232,7 +232,7 @@ local_resource('api',
 )
 
 local_resource('frontend',
-    # Vite already proxies /api → http://localhost:8000 (see vite.config.ts).
+    # Vite already proxies /api/v1 → http://localhost:8000 (see vite.config.ts).
     serve_cmd='cd services/frontend && npm run dev -- --host 0.0.0.0 --port 5173',
     deps=['services/frontend/src', 'services/frontend/vite.config.ts', 'services/frontend/index.html'],
     resource_deps=['api', 'frontend-install'],

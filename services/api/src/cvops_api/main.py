@@ -55,19 +55,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routers ──────────────────────────────────────────────────────────────
-app.include_router(auth.router, prefix="/auth", tags=["auth"])
-app.include_router(registry_router.router, prefix="/registry", tags=["registry"])
-app.include_router(orgs.router, prefix="/orgs", tags=["orgs"])
-app.include_router(projects.router, prefix="/projects", tags=["projects"])
-app.include_router(data_sources.router, prefix="", tags=["data-sources"])
-app.include_router(samples.router, prefix="", tags=["samples"])
-app.include_router(ontologies.router, prefix="", tags=["ontologies"])
-app.include_router(datasets.router, prefix="", tags=["datasets"])
-app.include_router(workflows.router, prefix="", tags=["workflows"])
-app.include_router(runs.router, prefix="", tags=["runs"])
-app.include_router(models.router, prefix="", tags=["models"])
-app.include_router(training_containers.router, prefix="", tags=["training-containers"])
-app.include_router(internal.router, prefix="/internal", tags=["internal"])
-app.include_router(cvat.router, prefix="", tags=["cvat"])
+# Public API version prefix. The API *owns* this prefix — the nginx edge and
+# the Vite dev proxy pass `/api/v1/*` through unchanged (no rewrite), so the
+# path is defined in exactly one place and OpenAPI docs describe real URLs.
+API_V1 = "/api/v1"
+
+
+@app.get("/health", tags=["health"])
+async def health() -> dict[str, str]:
+    """Liveness probe — process is up. Stable and unversioned so container/k8s
+    health checks never depend on the API version. (DB *readiness* is the
+    deeper check at `/api/v1/internal/health`.)"""
+    return {"status": "ok"}
+
+
+# ── Routers — all public API under /api/v1 ─────────────────────────────────
+app.include_router(auth.router, prefix=f"{API_V1}/auth", tags=["auth"])
+app.include_router(registry_router.router, prefix=f"{API_V1}/registry", tags=["registry"])
+app.include_router(orgs.router, prefix=f"{API_V1}/orgs", tags=["orgs"])
+app.include_router(projects.router, prefix=f"{API_V1}/projects", tags=["projects"])
+app.include_router(data_sources.router, prefix=API_V1, tags=["data-sources"])
+app.include_router(samples.router, prefix=API_V1, tags=["samples"])
+app.include_router(ontologies.router, prefix=API_V1, tags=["ontologies"])
+app.include_router(datasets.router, prefix=API_V1, tags=["datasets"])
+app.include_router(workflows.router, prefix=API_V1, tags=["workflows"])
+app.include_router(runs.router, prefix=API_V1, tags=["runs"])
+app.include_router(models.router, prefix=API_V1, tags=["models"])
+app.include_router(training_containers.router, prefix=API_V1, tags=["training-containers"])
+app.include_router(internal.router, prefix=f"{API_V1}/internal", tags=["internal"])
+app.include_router(cvat.router, prefix=API_V1, tags=["cvat"])
+# Viewer is a human-facing server-rendered page, not part of the versioned JSON
+# API — it stays at root (`/dataset`) with its own nginx pass-through.
 app.include_router(viewer.router, prefix="", tags=["viewer"])

@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useMemo, useEffect, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
   Background,
@@ -18,24 +18,10 @@ import '@xyflow/react/dist/style.css'
 import { StepNode } from '../components/workflow/StepNode'
 import type { StepNodeType } from '../components/workflow/StepNode'
 import { StepPalette } from '../components/workflow/StepPalette'
+import { useWorkflow, useUpdateWorkflow } from '../api/workflows'
+import { useCreateRun } from '../api/runs'
+import { useRegistryTypes } from '../api/registry'
 import { STEP_TYPES } from '../lib/stepCatalog'
-
-const INITIAL_NODES: StepNodeType[] = [
-  { id: 'extract',   type: 'step', position: { x: 50,   y: 150 }, data: { label: 'Extract Frames',  type_key: 'step.extract_frames',  status: null } },
-  { id: 'autolabel', type: 'step', position: { x: 290,  y: 150 }, data: { label: 'Auto Label',       type_key: 'step.auto_label',      status: null } },
-  { id: 'review',    type: 'step', position: { x: 530,  y: 150 }, data: { label: 'Human Review',     type_key: 'step.human_review',    status: null } },
-  { id: 'commit',    type: 'step', position: { x: 770,  y: 150 }, data: { label: 'Commit Dataset',   type_key: 'step.commit_dataset',  status: null } },
-  { id: 'export',    type: 'step', position: { x: 1010, y: 150 }, data: { label: 'Export YOLO',      type_key: 'step.export_yolo',     status: null } },
-  { id: 'train',     type: 'step', position: { x: 1250, y: 150 }, data: { label: 'Train',            type_key: 'step.train',           status: null } },
-]
-
-const INITIAL_EDGES: Edge[] = [
-  { id: 'e1', source: 'extract',   target: 'autolabel' },
-  { id: 'e2', source: 'autolabel', target: 'review'    },
-  { id: 'e3', source: 'review',    target: 'commit'    },
-  { id: 'e4', source: 'commit',    target: 'export'    },
-  { id: 'e5', source: 'export',    target: 'train'     },
-]
 
 const MINIMAP_COLORS: Record<string, string> = {
   'step.extract_frames': '#3b82f6',
@@ -46,13 +32,83 @@ const MINIMAP_COLORS: Record<string, string> = {
   'step.train':          '#ef4444',
 }
 
-function FlowCanvas() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeType>(INITIAL_NODES)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(INITIAL_EDGES)
-  const { screenToFlowPosition } = useReactFlow()
+function defToNodes(definition: Record<string, unknown>): StepNodeType[] {
+  const steps = (definition.steps as Array<Record<string, unknown>>) ?? []
+  return steps.map((s, i) => ({
+    id: String(s.id ?? `step-${i}`),
+    type: 'step',
+    position: (s.position as { x: number; y: number }) ?? { x: i * 240, y: 150 },
+    data: {
+      label: String(s.label ?? s.type ?? 'Step'),
+      type_key: String(s.type ?? ''),
+      status: null,
+    },
+  }))
+}
+
+function defToEdges(definition: Record<string, unknown>): Edge[] {
+  const edges = (definition.edges as Array<Record<string, unknown>>) ?? []
+  return edges.map((e, i) => ({
+    id: String(e.id ?? `e${i}`),
+    source: String(e.source ?? e.from ?? ''),
+    target: String(e.target ?? e.to ?? ''),
+  }))
+}
+
+function nodesToDef(
+  nodes: StepNodeType[],
+  edges: Edge[],
+): Record<string, unknown> {
+  return {
+    steps: nodes.map(n => ({
+      id: n.id,
+      type: n.data.type_key,
+      label: n.data.label,
+      position: n.position,
+      config: {},
+    })),
+    edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target })),
+  }
+}
+
+function FlowCanvas({ workflowId }: { workflowId: string }) {
   const navigate = useNavigate()
+  const { data: workflow } = useWorkflow(workflowId)
+  const updateWorkflow = useUpdateWorkflow(workflowId)
+  const createRun = useCreateRun()
+  const { data: registryTypes } = useRegistryTypes('step')
+  const { screenToFlowPosition } = useReactFlow()
+
+  const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeType>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const [loaded, setLoaded] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  useEffect(() => {
+    if (workflow && !loaded) {
+      setNodes(defToNodes(workflow.definition))
+      setEdges(defToEdges(workflow.definition))
+      setLoaded(true)
+    }
+  }, [workflow, loaded, setNodes, setEdges])
 
   const nodeTypes = useMemo(() => ({ step: StepNode }), [])
+
+  const paletteSteps = useMemo(() => {
+    if (registryTypes && registryTypes.length > 0) {
+      return registryTypes.map(rt => ({
+        type_key: rt.type_key,
+        label: rt.ui_hints.description
+          ? String(rt.ui_hints.description).replace(/\..+/, '')
+          : rt.type_key.replace('step.', '').replace(/_/g, ' '),
+        description: String(rt.ui_hints.description ?? ''),
+        accent: MINIMAP_COLORS[rt.type_key]
+          ? `bg-[${MINIMAP_COLORS[rt.type_key]}]`
+          : 'bg-slate-500',
+      }))
+    }
+    return STEP_TYPES
+  }, [registryTypes])
 
   const onConnect = useCallback(
     (params: Connection) => setEdges(eds => addEdge(params, eds)),
@@ -69,35 +125,53 @@ function FlowCanvas() {
       e.preventDefault()
       const typeKey = e.dataTransfer.getData('application/xyflow')
       if (!typeKey) return
-
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const stepType = STEP_TYPES.find(s => s.type_key === typeKey)
-
+      const step = paletteSteps.find(s => s.type_key === typeKey)
       setNodes(nds => [
         ...nds,
         {
           id: `${typeKey}-${Date.now()}`,
           type: 'step',
           position,
-          data: { label: stepType?.label ?? typeKey, type_key: typeKey, status: null },
+          data: { label: step?.label ?? typeKey, type_key: typeKey, status: null },
         },
       ])
     },
-    [screenToFlowPosition, setNodes],
+    [screenToFlowPosition, setNodes, paletteSteps],
   )
+
+  async function handleSave() {
+    setSaveStatus('saving')
+    try {
+      await updateWorkflow.mutateAsync({ definition: nodesToDef(nodes, edges) })
+      setSaveStatus('saved')
+      setTimeout(() => setSaveStatus('idle'), 2000)
+    } catch {
+      setSaveStatus('idle')
+    }
+  }
+
+  async function handleRun() {
+    const run = await createRun.mutateAsync({ workflowId })
+    navigate(`/runs/${run.id}`)
+  }
 
   return (
     <div className="flex-1 relative">
-      {/* Toolbar */}
       <div className="absolute top-4 right-4 z-10 flex gap-2">
-        <button className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 shadow-sm transition-colors">
-          Save
+        <button
+          onClick={handleSave}
+          disabled={updateWorkflow.isPending}
+          className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 shadow-sm transition-colors disabled:opacity-60"
+        >
+          {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? '✓ Saved' : 'Save'}
         </button>
         <button
-          onClick={() => navigate('/runs/run-1')}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm transition-colors"
+          onClick={handleRun}
+          disabled={createRun.isPending}
+          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm transition-colors disabled:opacity-60"
         >
-          ▶ Run Workflow
+          {createRun.isPending ? 'Starting…' : '▶ Run Workflow'}
         </button>
       </div>
 
@@ -124,12 +198,37 @@ function FlowCanvas() {
 }
 
 export default function WorkflowBuilder() {
+  const { id } = useParams<{ id: string }>()
+  const { data: workflow } = useWorkflow(id)
+  const { data: registryTypes } = useRegistryTypes('step')
+
+  const paletteSteps = useMemo(() => {
+    if (registryTypes && registryTypes.length > 0) {
+      return registryTypes.map(rt => ({
+        type_key: rt.type_key,
+        label: rt.ui_hints.description
+          ? String(rt.ui_hints.description).replace(/\..+/, '')
+          : rt.type_key.replace('step.', '').replace(/_/g, ' '),
+        description: String(rt.ui_hints.description ?? ''),
+        accent: 'bg-slate-500',
+      }))
+    }
+    return STEP_TYPES
+  }, [registryTypes])
+
   return (
     <div className="flex" style={{ height: 'calc(100vh - 56px)' }}>
-      <StepPalette />
-      <ReactFlowProvider>
-        <FlowCanvas />
-      </ReactFlowProvider>
+      <StepPalette steps={paletteSteps} />
+      {id && workflow && (
+        <ReactFlowProvider>
+          <FlowCanvas workflowId={id} />
+        </ReactFlowProvider>
+      )}
+      {!workflow && (
+        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+          Loading workflow…
+        </div>
+      )}
     </div>
   )
 }
