@@ -21,6 +21,7 @@ from cvops_api.engine.step import Step, StepContext
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 7200  # seconds
+_LOG_TAIL_CHARS = 2000
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ async def _download_dataset(
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
-        tf.extractall(dataset_dir)  # noqa: S202 — controlled path from trusted MinIO
+        tf.extractall(dataset_dir, filter="data")  # noqa: S202 — controlled path from trusted MinIO
 
     return dataset_dir
 
@@ -64,7 +65,7 @@ def _clone_repo(git_url: str, branch: str | None, workdir: Path) -> Path:
     result = subprocess.run(cmd, capture_output=True, timeout=300)  # noqa: S603
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(f"git clone failed: {stderr[-500:]}")
+        raise RuntimeError(f"git clone failed: {stderr[-_LOG_TAIL_CHARS:]}")
     return repo_dir
 
 
@@ -72,6 +73,7 @@ def _install_requirements(repo_dir: Path) -> None:
     req_file = repo_dir / "requirements.txt"
     if not req_file.exists():
         return
+    # Installs into the worker's own env — accepted risk for a trusted-user, self-hosted system.
     result = subprocess.run(  # noqa: S603
         ["pip", "install", "-r", str(req_file)],
         capture_output=True,
@@ -79,7 +81,7 @@ def _install_requirements(repo_dir: Path) -> None:
     )
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(f"pip install failed: {stderr[-500:]}")
+        raise RuntimeError(f"pip install failed: {stderr[-_LOG_TAIL_CHARS:]}")
 
 
 def _build_env(
@@ -114,15 +116,17 @@ def _run_training(
     env: dict[str, str],
     timeout: int,
 ) -> tuple[int, str]:
-    """Run the training script. Returns (returncode, combined_logs[-500:])."""
-    script = repo_dir / entry_point
+    """Run the training script. Returns (returncode, combined_logs[-_LOG_TAIL_CHARS:])."""
+    script = (repo_dir / entry_point).resolve()
+    if not str(script).startswith(str(repo_dir.resolve()) + "/"):
+        raise RuntimeError(f"entry_point escapes repo directory: {entry_point!r}")
     result = subprocess.run(  # noqa: S603
         ["python", str(script)],
         env=env,
         capture_output=True,
         timeout=timeout,
     )
-    logs = (result.stdout + result.stderr).decode("utf-8", errors="replace")[-500:]
+    logs = (result.stdout + result.stderr).decode("utf-8", errors="replace")[-_LOG_TAIL_CHARS:]
     return result.returncode, logs
 
 
@@ -172,14 +176,15 @@ async def _write_model_version(
     hyperparams: dict[str, Any],
 ) -> str:
     """Insert ModelVersion row. Returns str(mv.id)."""
-    mlflow_run_id: str | None = metrics.pop("mlflow_run_id", None)
+    mlflow_run_id: str | None = metrics.get("mlflow_run_id")
+    clean_metrics = {k: v for k, v in metrics.items() if k != "mlflow_run_id"}
     mv = ModelVersion(
         project_id=UUID(ctx.project_id),
         blob_hash=weights_blob_hash,
         trained_on_commit_id=UUID(commit_id),
         training_container_id=tc.id,
         hyperparams=hyperparams or None,
-        metrics=metrics or None,
+        metrics=clean_metrics or None,
         mlflow_run_id=mlflow_run_id,
         seed=hyperparams.get("seed"),
     )
@@ -217,7 +222,7 @@ class TrainStep(Step):
         commit_id = config["commit_id"]
         export_blob_hash: str | None = inputs.get("export_blob_hash")
 
-        timeout = int(os.environ.get("DOCKER_TIMEOUT", _DEFAULT_TIMEOUT))
+        timeout = int(os.environ.get("TRAINING_TIMEOUT", _DEFAULT_TIMEOUT))
 
         # 1. Load TrainingContainer
         tc = await _load_training_container(ctx.session, tc_id)

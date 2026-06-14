@@ -214,7 +214,7 @@ async def test_write_model_version_extracts_mlflow_run_id(ctx, mock_tc, commit_i
     added_obj = ctx.session.add.call_args[0][0]
     assert isinstance(added_obj, ModelVersion)
     assert added_obj.mlflow_run_id == "mlflow-run-abc"
-    # mlflow_run_id should be popped from the metrics dict
+    # mlflow_run_id is extracted into its own column; metrics stored without it
     assert "mlflow_run_id" not in added_obj.metrics
 
 
@@ -231,7 +231,7 @@ async def test_run_nonzero_exit_raises_runtime_error(ctx, base_config, base_inpu
         patch("worker_training.steps.train._install_requirements"),
         patch("worker_training.steps.train._run_training", return_value=(1, "crash log output")),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("shutil.rmtree"),
+        patch("worker_training.steps.train.shutil.rmtree"),
     ):
         step = TrainStep()
         with pytest.raises(RuntimeError, match="crash log output"):
@@ -248,7 +248,7 @@ async def test_run_cleans_up_tmpdir_on_failure(ctx, base_config, base_inputs, mo
         patch("worker_training.steps.train._install_requirements"),
         patch("worker_training.steps.train._run_training", return_value=(1, "error")),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("shutil.rmtree") as mock_rmtree,
+        patch("worker_training.steps.train.shutil.rmtree") as mock_rmtree,
     ):
         step = TrainStep()
         with pytest.raises(RuntimeError):
@@ -272,7 +272,7 @@ async def test_run_cleans_up_tmpdir_on_success(ctx, base_config, tmp_path, mock_
         patch("worker_training.steps.train._upload_weights", new=AsyncMock(return_value="sha256:abc")),
         patch("worker_training.steps.train._write_model_version", new=AsyncMock(return_value=model_version_id)),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("shutil.rmtree") as mock_rmtree,
+        patch("worker_training.steps.train.shutil.rmtree") as mock_rmtree,
     ):
         step = TrainStep()
         result = await step.run(ctx, base_config, inputs={})
