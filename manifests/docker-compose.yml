@@ -143,19 +143,22 @@ services:
     profiles: ["app", "all"]
 
   nginx:
-    # Rootless nginx: UID 101, listens on 8080 (no root in this container)
+    # Rootless nginx: UID 101, listens on 8080 (no root in this container).
+    # No profile: it's part of the base stack so `tilt up` (which loads only
+    # this compose file, no profiles) brings it up alongside the infra. It
+    # proxies /api/v1 to the host API (see nginx.conf), so it needs no api
+    # container — host.docker.internal resolves via the host-gateway alias.
     image: nginxinc/nginx-unprivileged:1.27-alpine
     restart: unless-stopped
     ports: ["80:8080"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # `:z` lets the SELinux-labeled host files be readable inside the container
       # on Fedora/RHEL hosts. No-op on Ubuntu/macOS.
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
       # Placeholder static site. Swap for the frontend `dist/` build later.
       - ./nginx/html:/usr/share/nginx/html:ro,z
-    depends_on:
-      - api
-    profiles: ["app", "all"]
 
   # ── External tools (Phase 2) ────────────────────────────────────────────
   # cvat:

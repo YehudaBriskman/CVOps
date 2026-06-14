@@ -229,6 +229,17 @@ local_resource('frontend',
     labels=['2-app'],
 )
 
+# ── Edge proxy (container) ──────────────────────────────────────────────────
+# nginx serves the placeholder index.html and proxies /api/v1 → host API. This
+# is what makes `tilt up` a one-stop, browser-usable stack at http://localhost
+# (and http://<dev-vm>:80 for VM-based devs). Swap the html mount for the
+# frontend dist/ build later. Defined (profile-less) in docker-compose.yml.
+dc_resource('nginx',
+    labels=['2-app'],
+    resource_deps=['api'],
+    links=[link('http://localhost', 'app (nginx)')],
+)
+
 # ── Optional helper resources (manual trigger) ──────────────────────────────
 local_resource('git-hooks',
     cmd='sh scripts/git-setup.sh',
