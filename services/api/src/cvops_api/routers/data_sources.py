@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.config import settings
 from cvops_api.core.auth import get_current_user
-from cvops_api.core.storage import get_storage
+from cvops_api.core.storage import get_storage, public_s3_endpoint
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.blobs import Blob
@@ -66,6 +74,7 @@ async def list_data_sources(
 async def create_data_source(
     project_id: uuid.UUID,
     body: DataSourceCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UploadResponse:
@@ -83,7 +92,11 @@ async def create_data_source(
 
     put_url: str | None = None
     if body.type != "external_uri":
-        put_url = await get_storage().get_presigned_put_for_upload(str(ds.id))
+        # Sign against the host the browser used so the direct upload is reachable.
+        endpoint = public_s3_endpoint(request.url.hostname)
+        put_url = await get_storage().get_presigned_put_for_upload(
+            str(ds.id), endpoint=endpoint
+        )
 
     await session.commit()
     return UploadResponse(

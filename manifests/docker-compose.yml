@@ -94,9 +94,10 @@ services:
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       S3_ENDPOINT:     http://garage:3900
-      # Browser-reachable host for presigned URLs. Set PUBLIC_HOST to the dev
-      # VM's address when accessing from another machine; defaults to localhost.
-      S3_PUBLIC_ENDPOINT: http://${PUBLIC_HOST:-localhost}:3900
+      # Presign host is derived per-request from the browser's Host header, so
+      # uploads work from localhost and dev VMs alike. Set PUBLIC_HOST only to
+      # force a fixed host (otherwise this stays empty → dynamic).
+      S3_PUBLIC_ENDPOINT: ${PUBLIC_HOST:+http://${PUBLIC_HOST}:3900}
       S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
       S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
       S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}

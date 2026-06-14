@@ -200,9 +200,9 @@ api_env = {
     ),
     'REDIS_URL':       'redis://localhost:6379/0',
     'S3_ENDPOINT':     'http://localhost:3900',
-    # Presigned URLs must be browser-reachable. Defaults to localhost; set
-    # PUBLIC_HOST=<dev-vm-host> in the env when serving to other machines.
-    'S3_PUBLIC_ENDPOINT': 'http://%s:3900' % os.getenv('PUBLIC_HOST', 'localhost'),
+    # S3_PUBLIC_ENDPOINT intentionally unset: the API derives the presign host
+    # per-request from the browser's Host header, so uploads work from localhost
+    # and dev VMs alike. Set it only to force a fixed host/scheme (e.g. HTTPS).
     'S3_ACCESS_KEY':   envreq('GARAGE_DEFAULT_ACCESS_KEY'),
     'S3_SECRET_KEY':   envreq('GARAGE_DEFAULT_SECRET_KEY'),
     'S3_BUCKET':       envreq('GARAGE_DEFAULT_BUCKET'),
