@@ -5,12 +5,15 @@
 #   • Stateful infra (postgres, redis, garage) → containers via docker_compose.
 #   • App code (api, frontend)                → host processes via local_resource
 #                                                (uvicorn --reload, npm run dev).
-#   • Nothing else. No edge nginx — Vite proxies /api → http://localhost:8000.
+#   • Edge nginx (container)                   → serves the placeholder index.html
+#                                                and proxies /api/v1 → host API, so
+#                                                the stack is browser-usable at
+#                                                http://localhost (and dev VMs).
+#   Vite also proxies /api → http://localhost:8000 for the React app.
 #
 # For container-based pre-prod testing, use docker compose with profiles directly:
 #   cd manifests
-#   docker compose --profile app up                       # prod-target stack
-#   docker compose --profile app --profile worker up      # + celery worker
+#   docker compose --profile app up                       # prod-target stack + worker-preprocessing
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 #
 # Usage:
@@ -261,12 +264,27 @@ local_resource('git-hooks',
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+# Install the preprocessing worker into the API venv (which already carries
+# cvops-api + cvops-steps). The worker reuses those packages, so it shares the env.
 local_resource('worker-install',
-    cmd='cd services/worker && python3 -m pip install --user -e .',
-    deps=['services/worker/pyproject.toml'],
+    cmd='cd services/api && .venv/bin/python -m pip install -e ../worker-preprocessing >/dev/null',
+    deps=['services/worker-preprocessing/pyproject.toml'],
+    resource_deps=['steps-install'],
     labels=['5-setup'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# ── Worker processes (host) ─────────────────────────────────────────────────
+# Redis-Streams preprocessing worker: consumes the `preprocessing` stream and
+# runs extract_frames (and future preprocessing steps) out of the API process.
+worker_env = dict(api_env)
+worker_env['REDIS_STREAM'] = 'preprocessing'
+
+local_resource('worker-preprocessing',
+    serve_cmd='cd services/api && .venv/bin/python -m cvops_worker',
+    serve_env=worker_env,
+    deps=['services/worker-preprocessing/src'],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-install', 'migrate-up'],
+    labels=['2-app'],
 )
 
 # ── Quality gates ───────────────────────────────────────────────────────────

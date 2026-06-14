@@ -53,6 +53,10 @@ class Step(ABC):
     type_key: str = ""
     config_schema: dict[str, Any] = {}
     is_gate: bool = False
+    # Redis Stream this step is dispatched to. Empty → coordinator's default
+    # ("preprocessing"). Steps that need a domain-specific worker (e.g. CVAT
+    # gates → "labeling", training → "training") override this.
+    queue: str = ""
 
     @abstractmethod
     async def run(

@@ -20,10 +20,18 @@ Inherits the standard `EntityBase` columns (`id`, `created_at`, `updated_at`, `d
 | `name` | TEXT | NOT NULL |
 | `task_type` | TEXT | NOT NULL, default `'detection'` |
 | `default_ontology_id` | UUID | FK → `ontologies.id`, nullable |
+| `default_ingest_workflow_id` | UUID | FK → `workflows.id`, nullable |
 | `settings` | JSONB | nullable |
 
-> `default_ontology_id` is added via a deferred `ALTER TABLE` in migrations — see
+> `default_ontology_id` and `default_ingest_workflow_id` are added via deferred
+> `ALTER TABLE`s (both target tables reference `projects`, so the FK is created
+> after) — `default_ingest_workflow_id` lands in migration `0002`. See
 > [Circular FK](#circular-fk-projects--ontologies) below.
+>
+> `default_ingest_workflow_id` is the workflow auto-dispatched by
+> `confirm-upload` when a data source finishes uploading (backend-triggered
+> ingest). Set it the same deferred way as `default_ontology_id` (never in the
+> project INSERT transaction).
 
 ---
 

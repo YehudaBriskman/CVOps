@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -6,6 +7,7 @@ from testcontainers.postgres import PostgresContainer
 
 import cvops_api.db.models  # noqa: F401 — registers all 21 models with Base.metadata
 from cvops_api.db.base import Base
+from cvops_api.engine.step import Step, StepContext
 
 
 @pytest.fixture(scope="session")
@@ -33,6 +35,45 @@ def create_test_schema(postgres_url: str) -> None:
         await engine.dispose()
 
     asyncio.run(_setup())
+
+
+@pytest.fixture
+def fake_redis():  # type: ignore[no-untyped-def]
+    """Install a fakeredis client as the process-global Redis used by
+    `get_redis()` (so `enqueue_step` XADDs land somewhere inspectable), then
+    restore the previous client on teardown."""
+    import fakeredis.aioredis
+
+    from cvops_api.core import redis_client
+
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    prev = redis_client._redis
+    redis_client._redis = fake
+    yield fake
+    redis_client._redis = prev
+
+
+class EchoStep(Step):
+    """Trivial step for engine tests — no ffmpeg/S3, just echoes its inputs."""
+
+    type_key = "test.echo"
+    config_schema: dict[str, Any] = {"type": "object"}
+
+    async def run(
+        self, ctx: StepContext, config: dict[str, Any], inputs: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"echoed": inputs}
+
+
+@pytest.fixture
+def echo_step():  # type: ignore[no-untyped-def]
+    """Register EchoStep in the global registry for the duration of a test."""
+    from cvops_api.core.registry import registry
+
+    step = EchoStep()
+    registry.register(step)
+    yield step
+    registry._store.pop(step.type_key, None)
 
 
 @pytest.fixture

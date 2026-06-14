@@ -51,20 +51,22 @@ That is the entire message. Workers use `job_id` to fetch the full config and in
 
 ## Producer (API)
 
-Phase 1 — API does NOT write to Redis. Executor runs in-process via `BackgroundTasks`.
-
-Phase 2 — after inserting the `runs` row:
+The API's `advance_workflow` coordinator (`services/api/src/cvops_api/engine/coordinator.py`)
+creates the child `runs` row, then — for each ready step — rings the queue:
 
 ```python
 await redis.xadd(
-    step.queue,
+    queue,                       # step.queue or "preprocessing" by default
     {
-        "job_id":    str(run_id),
+        "job_id":    str(child_run_id),
         "step_type": step.type_key,
-        "queue":     step.queue,
+        "queue":     queue,
     }
 )
 ```
+
+This is synchronous in-request (just row creation + `XADD`; no step runs in the API
+process). The in-process `BackgroundTasks` executor has been removed.
 
 ---
 

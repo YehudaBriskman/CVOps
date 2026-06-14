@@ -681,7 +681,7 @@ The API never proxies image bytes. Authorization is enforced at the API; bytes f
 **Upload flow:**
 1. `POST /projects/{id}/data-sources` — API creates a `data_sources` row, calls `storage.get_presigned_put()`, returns the presigned PUT URL.
 2. Client PUTs directly to MinIO.
-3. Client calls `POST /data-sources/{id}/confirm-upload` with the `blob_hash` it computed. API verifies, inserts/confirms `blobs` row.
+3. Client calls `POST /data-sources/{id}/confirm-upload` with the `blob_hash` it computed. The API promotes the upload to its content-addressed key (server-side copy), inserts the `blobs` row, sets the data source to `uploaded`, and (if the project has `default_ingest_workflow_id`) auto-dispatches that ingest workflow. The SHA-256 is verified lazily when `extract_frames` reads the bytes, not at confirm time.
 
 ### 7.3 MinIO Configuration
 

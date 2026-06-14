@@ -7,8 +7,9 @@ trigger point: it registers the uploaded blob, flips the data source to
 
 Pattern (first router test besides /internal): a minimal FastAPI app mounting
 only the data_sources router, with `get_session`/`get_current_user` overridden
-onto the testcontainers Postgres, `get_storage` faked, and `execute_workflow`
-patched to a recording no-op so the BackgroundTask can't touch the real DB.
+onto the testcontainers Postgres and `get_storage` faked. Dispatch now goes
+through `advance_workflow`, which creates a pending child step run and XADDs a
+thin doorbell message — asserted against the `fake_redis` client.
 """
 
 from __future__ import annotations
@@ -35,6 +36,22 @@ from cvops_api.db.models.samples import DataSource
 from cvops_api.db.models.runs import Run
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.routers import data_sources
+
+STREAM = "preprocessing"
+
+# Single-step ingest workflow referencing the registered test.echo step (the
+# `echo_step` fixture). Keeps the router test free of ffmpeg/S3.
+_INGEST_DEF = {
+    "steps": [
+        {
+            "id": "s1",
+            "type": "test.echo",
+            "config": {},
+            "inputs": {"src": "$run.params.source_id"},
+        }
+    ],
+    "edges": [],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -69,18 +86,10 @@ async def factory(postgres_url: str):
 
 
 @pytest_asyncio.fixture(autouse=True)
-def patched_storage_and_dispatch():
-    """Fake the storage backend and capture background dispatches."""
-    dispatched: list[tuple[uuid.UUID, uuid.UUID]] = []
-
-    async def _record(run_id: uuid.UUID, actor_id: uuid.UUID) -> None:
-        dispatched.append((run_id, actor_id))
-
-    with (
-        patch.object(data_sources, "get_storage", lambda: _FakeStorage()),
-        patch.object(data_sources, "execute_workflow", _record),
-    ):
-        yield dispatched
+def patched_storage():
+    """Fake the storage backend so promote_upload never touches a real store."""
+    with patch.object(data_sources, "get_storage", lambda: _FakeStorage()):
+        yield
 
 
 def _client(factory, current_user: User) -> AsyncClient:
@@ -115,7 +124,7 @@ async def _seed(
             wf = Workflow(
                 project_id=project.id,
                 name=f"ingest-{suffix}",
-                definition={"steps": [], "edges": []},
+                definition=_INGEST_DEF,
             )
             s.add(wf)
             await s.flush()
@@ -135,7 +144,7 @@ async def _seed(
 
 
 async def test_confirm_without_default_workflow_registers_blob(factory) -> None:
-    user, _project, ds = await _seed(factory, with_workflow=False)
+    user, project, ds = await _seed(factory, with_workflow=False)
 
     async with _client(factory, user) as c:
         res = await c.post(
@@ -153,14 +162,19 @@ async def test_confirm_without_default_workflow_registers_blob(factory) -> None:
         assert blob is not None
         assert blob.size_bytes == 4096
         assert blob.media_type == "video/mp4"
-        runs = (await s.execute(select(Run))).scalars().all()
+        # No workflow → no run dispatched (scope to this project; the
+        # testcontainers DB is shared across the session).
+        runs = (
+            (await s.execute(select(Run).where(Run.project_id == project.id)))
+            .scalars()
+            .all()
+        )
         assert runs == []
 
 
 async def test_confirm_with_default_workflow_dispatches_run(
-    factory, patched_storage_and_dispatch
+    factory, fake_redis, echo_step
 ) -> None:
-    dispatched = patched_storage_and_dispatch
     user, _project, ds = await _seed(factory, with_workflow=True)
 
     async with _client(factory, user) as c:
@@ -179,12 +193,29 @@ async def test_confirm_with_default_workflow_dispatches_run(
         assert run.kind == "workflow"
         assert run.input_refs == {"params": {"source_id": str(ds.id)}}
 
-    # Background task was scheduled exactly once for this run.
-    assert [d[0] for d in dispatched] == [uuid.UUID(run_id)]
+        # advance_workflow created exactly one pending child step run.
+        children = (
+            (await s.execute(select(Run).where(Run.parent_run_id == run.id)))
+            .scalars()
+            .all()
+        )
+        assert len(children) == 1
+        child = children[0]
+        assert child.kind == "step"
+        assert child.step_type == "test.echo"
+        assert child.status == "pending"
+
+    # Exactly one thin doorbell message, pointing at the child step run.
+    assert await fake_redis.xlen(STREAM) == 1
+    _msg_id, fields = (await fake_redis.xrange(STREAM))[0]
+    assert fields == {
+        "job_id": str(child.id),
+        "step_type": "test.echo",
+        "queue": STREAM,
+    }
 
 
-async def test_confirm_is_idempotent(factory, patched_storage_and_dispatch) -> None:
-    dispatched = patched_storage_and_dispatch
+async def test_confirm_is_idempotent(factory, fake_redis, echo_step) -> None:
     user, project, ds = await _seed(factory, with_workflow=True)
 
     async with _client(factory, user) as c:
@@ -201,13 +232,21 @@ async def test_confirm_is_idempotent(factory, patched_storage_and_dispatch) -> N
 
     # Scope to this project — the testcontainers DB is shared across the session.
     async with factory() as s:
-        runs = (
-            (await s.execute(select(Run).where(Run.project_id == project.id)))
+        parents = (
+            (
+                await s.execute(
+                    select(Run).where(
+                        Run.project_id == project.id, Run.kind == "workflow"
+                    )
+                )
+            )
             .scalars()
             .all()
         )
-        assert len(runs) == 1
-    assert len(dispatched) == 1
+        assert len(parents) == 1  # only one workflow run despite two confirms
+
+    # And only one step was enqueued.
+    assert await fake_redis.xlen(STREAM) == 1
 
 
 async def test_confirm_cross_org_returns_404(factory) -> None:
