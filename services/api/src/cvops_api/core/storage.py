@@ -12,6 +12,7 @@ boto3 directly.
 from __future__ import annotations
 
 import hashlib
+import logging
 from abc import ABC, abstractmethod
 
 import boto3
@@ -19,6 +20,8 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from cvops_api.config import settings
+
+log = logging.getLogger(__name__)
 
 
 class StorageBackend(ABC):
@@ -78,19 +81,61 @@ class StorageBackend(ABC):
 
 class S3Backend(StorageBackend):
     def __init__(self) -> None:
+        cfg = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        )
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT,
             region_name=settings.S3_REGION,
             aws_access_key_id=settings.S3_ACCESS_KEY,
             aws_secret_access_key=settings.S3_SECRET_KEY,
-            config=Config(
-                signature_version="s3v4",
-                s3={"addressing_style": "path"},
-            ),
+            config=cfg,
         )
+        # Presigned URLs must be signed against a browser-reachable host. When
+        # S3_PUBLIC_ENDPOINT differs from the internal endpoint, use a dedicated
+        # client for signing; otherwise reuse the internal one.
+        public_endpoint = settings.S3_PUBLIC_ENDPOINT or settings.S3_ENDPOINT
+        if public_endpoint == settings.S3_ENDPOINT:
+            self._presign_client = self._client
+        else:
+            self._presign_client = boto3.client(
+                "s3",
+                endpoint_url=public_endpoint,
+                region_name=settings.S3_REGION,
+                aws_access_key_id=settings.S3_ACCESS_KEY,
+                aws_secret_access_key=settings.S3_SECRET_KEY,
+                config=cfg,
+            )
         self._bucket = settings.S3_BUCKET
         self._verify_bucket()
+        self._ensure_cors()
+
+    def _ensure_cors(self) -> None:
+        """Allow browsers to PUT/GET directly against presigned URLs.
+
+        Permissive (origin '*') because dev runs from varied origins (localhost,
+        dev-VM hostnames, Vite). Best-effort: a backend that rejects the CORS API
+        shouldn't take down the API — uploads just won't work cross-origin.
+        """
+        try:
+            self._client.put_bucket_cors(
+                Bucket=self._bucket,
+                CORSConfiguration={
+                    "CORSRules": [
+                        {
+                            "AllowedOrigins": ["*"],
+                            "AllowedMethods": ["GET", "PUT", "HEAD"],
+                            "AllowedHeaders": ["*"],
+                            "ExposeHeaders": ["ETag"],
+                            "MaxAgeSeconds": 3600,
+                        }
+                    ]
+                },
+            )
+        except ClientError as exc:
+            log.warning("Could not set bucket CORS on %r: %s", self._bucket, exc)
 
     def _verify_bucket(self) -> None:
         """Garage does not auto-create buckets. Fail fast at startup if missing."""
@@ -122,7 +167,7 @@ class S3Backend(StorageBackend):
 
     async def get_presigned_get(self, blob_hash: str, ttl_seconds: int = 900) -> str:
         return str(
-            self._client.generate_presigned_url(
+            self._presign_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
                 ExpiresIn=ttl_seconds,
@@ -131,7 +176,7 @@ class S3Backend(StorageBackend):
 
     async def get_presigned_put(self, blob_hash: str, ttl_seconds: int = 3600) -> str:
         return str(
-            self._client.generate_presigned_url(
+            self._presign_client.generate_presigned_url(
                 "put_object",
                 Params={"Bucket": self._bucket, "Key": self._bucket_key(blob_hash)},
                 ExpiresIn=ttl_seconds,
@@ -142,7 +187,7 @@ class S3Backend(StorageBackend):
         self, upload_id: str, ttl_seconds: int = 3600
     ) -> str:
         return str(
-            self._client.generate_presigned_url(
+            self._presign_client.generate_presigned_url(
                 "put_object",
                 Params={"Bucket": self._bucket, "Key": f"uploads/{upload_id}"},
                 ExpiresIn=ttl_seconds,

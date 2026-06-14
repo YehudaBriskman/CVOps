@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     S3_BUCKET: str = "cvops-blobs"
     S3_REGION: str = "garage"
     S3_BACKEND: str = "garage"  # value recorded in blobs.storage_backend
+    # Browser-reachable endpoint used ONLY to sign presigned URLs. S3_ENDPOINT
+    # (e.g. http://garage:3900) is internal and unresolvable from a browser, so
+    # presigned PUT/GET are signed against this instead (e.g. http://localhost:3900,
+    # or a dev VM's host). Empty → fall back to S3_ENDPOINT (single-host/local).
+    S3_PUBLIC_ENDPOINT: str = ""
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
