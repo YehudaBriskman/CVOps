@@ -35,6 +35,18 @@ class Project(Base, EntityBase):
         nullable=True,
     )
 
+    # Workflow auto-triggered by the backend when a data source finishes uploading
+    # (see routers/data_sources.confirm_upload). use_alter breaks the projects↔workflows
+    # circular FK, same as default_ontology_id above.
+    default_ingest_workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey(
+            "workflows.id",
+            use_alter=True,
+            name="fk_projects_default_ingest_workflow",
+        ),
+        nullable=True,
+    )
+
     settings: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
     def __repr__(self) -> str:

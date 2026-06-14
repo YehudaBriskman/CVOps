@@ -15,6 +15,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = None
     task_type: str | None = None
     default_ontology_id: uuid.UUID | None = None
+    default_ingest_workflow_id: uuid.UUID | None = None
     settings: dict[str, Any] | None = None
 
 
@@ -25,4 +26,5 @@ class ProjectOut(BaseModel):
     name: str
     task_type: str
     default_ontology_id: uuid.UUID | None = None
+    default_ingest_workflow_id: uuid.UUID | None = None
     created_at: datetime
