@@ -41,27 +41,28 @@ async def register(
     org_name = body.org_name or body.email.split("@")[0]
     org = Org(name=org_name)
     session.add(org)
-    await session.flush()
 
-    user = User(
-        org_id=org.id,
-        email=body.email,
-        password_hash=hash_password(body.password),
-        is_active=True,
-    )
-    session.add(user)
-    await session.flush()
-
-    membership = Membership(org_id=org.id, user_id=user.id, role="owner")
-    session.add(membership)
-
+    # Unique violations (orgs.name, users.email) surface at flush, not just
+    # commit — so the whole write must be guarded to return 409 rather than 500.
     try:
+        await session.flush()  # org.id; may violate uq_orgs_name
+
+        user = User(
+            org_id=org.id,
+            email=body.email,
+            password_hash=hash_password(body.password),
+            is_active=True,
+        )
+        session.add(user)
+        await session.flush()  # may violate the unique email constraint
+
+        session.add(Membership(org_id=org.id, user_id=user.id, role="owner"))
         await session.commit()
     except IntegrityError:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            detail="Email or organization name already registered",
         )
 
     return TokenResponse(
