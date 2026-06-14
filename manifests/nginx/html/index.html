@@ -180,13 +180,23 @@
 
           log("Polling run…");
           let status = "pending";
+          let detail = null;
           const terminal = ["succeeded", "failed", "cancelled"];
           for (let i = 0; i < 120 && !terminal.includes(status); i++) {
             await new Promise((r) => setTimeout(r, 1000));
-            const run = await api("GET", `/runs/${confirm.run_id}`);
-            if (run.status !== status) { status = run.status; log(`  run: ${status}`); }
+            // GET /runs/{id} returns { run, steps } — status lives on .run.
+            detail = await api("GET", `/runs/${confirm.run_id}`);
+            if (detail.run.status !== status) { status = detail.run.status; log(`  run: ${status}`); }
           }
-          log(status === "succeeded" ? "✓ run succeeded" : `run ended: ${status}`, status === "succeeded" ? "ok" : "err");
+          if (status === "succeeded") {
+            log("✓ run succeeded", "ok");
+          } else {
+            log(`run ended: ${status}`, "err");
+            if (detail && detail.run.error) log(`  error: ${detail.run.error}`, "err");
+            for (const st of (detail ? detail.steps : [])) {
+              if (st.error) log(`  step ${st.step_id || st.id}: ${st.error}`, "err");
+            }
+          }
 
           log("Fetching samples…");
           const samples = await api("GET", `/projects/${project.id}/samples?source_id=${sourceId}&limit=100`);
