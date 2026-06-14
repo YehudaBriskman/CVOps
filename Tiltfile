@@ -31,6 +31,7 @@ require('node',     'install Node 20+')
 require('npm',      'usually bundled with node')
 require('docker',   'install Docker — needed for the infra containers')
 require('openssl',  'install openssl — needed to generate dev secrets')
+require('ffmpeg',   'install ffmpeg — needed by the extract_frames step')
 
 # ── Bootstrap manifests/.env from manifests/.env.example ────────────────────
 if not os.path.exists('manifests/.env'):
@@ -172,6 +173,17 @@ local_resource('api-install',
     labels=['5-setup'],
 )
 
+# Install the step implementations (cvops_steps) into the API venv so the
+# engine registry picks up extract_frames at startup. Base deps only (no ml/train
+# extras → no torch); the engine import is best-effort, but without this the
+# registry is empty and workflow creation rejects step.extract_frames.
+local_resource('steps-install',
+    cmd='cd services/api && .venv/bin/python -m pip install -e ../../packages/steps >/dev/null',
+    deps=['packages/steps/pyproject.toml'],
+    resource_deps=['api-install'],
+    labels=['5-setup'],
+)
+
 # npm install for the frontend.
 local_resource('frontend-install',
     cmd='cd services/frontend && npm install --silent',
@@ -204,7 +216,7 @@ local_resource('api',
     serve_cmd='cd services/api && .venv/bin/python -m uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload',
     serve_env=api_env,
     deps=['services/api/src'],
-    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'api-install', 'migrate-up'],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'api-install', 'steps-install', 'migrate-up'],
     readiness_probe=probe(
         period_secs=5,
         http_get=http_get_action(port=8000, path='/openapi.json'),
