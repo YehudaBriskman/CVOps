@@ -48,7 +48,8 @@
     <script>
       const API = "/api/v1";
       const $ = (id) => document.getElementById(id);
-      $("email").value = `dev-${Math.random().toString(36).slice(2, 10)}@local.test`;
+      // Avoid reserved TLDs (.test/.local/example.com) — email-validator rejects them.
+      $("email").value = `dev-${Math.random().toString(36).slice(2, 10)}@cvops.dev`;
 
       const logEl = $("log");
       function log(msg, cls) {
