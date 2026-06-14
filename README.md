@@ -317,25 +317,23 @@ Client  →  nginx  →  FastAPI  →  Depends(get_current_user)
                          (reads/writes)     (presigned URLs)
 ```
 
-**Workflow execution** runs as a `BackgroundTask` - the `/runs` POST returns immediately; the engine runs asynchronously:
+**Workflow execution** runs **out of process** on Redis Streams (doorbell) with Postgres as the authority — the `/runs` POST returns immediately and a worker does the work:
 
 ```
 POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
-                                     ┬
-                               BackgroundTask
                                      │
-                               execute_workflow()
+                       advance_workflow()  (synchronous, in-request)
+                          ├─ topological sort (Kahn's)
+                          ├─ for each ready step: create pending child run,
+                          │     freeze resolved inputs, compute idem key (sha256)
+                          └─ XADD {job_id, step_type, queue} → Redis Stream
                                      │
-                          topological sort (Kahn's)
-                                     │
-                           for each step in order:
-                             ┬
-                             ├─ compute idem key (sha256)
-                             ├─ reuse if already succeeded
-                             ├─ resolve $steps.* refs
-                             ├─ call step_impl.run()
-                             ├─ on GateException → status=waiting, halt
-                             └─ on error → status=failed, halt
+                       worker-preprocessing  (separate process)
+                          ├─ XREADGROUP, claim child (FOR UPDATE SKIP LOCKED)
+                          ├─ process_step(): run step_impl.run(), write results
+                          │     ├─ GateException → status=waiting
+                          │     └─ error        → status=failed
+                          └─ on success → advance_workflow() enqueues next ready steps
 ```
 
 ---
@@ -347,7 +345,7 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
 | `services/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer - 21 models, 40+ endpoints, 146 tests |
 | `services/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react |
 | `packages/steps` | Python | 🚧 Pending | Step implementations: `extract_frames`, `auto_label`, `export_yolo`, `train` |
-| `services/worker` | Python · Celery | 📋 Phase 2 | Async worker queue for long-running steps |
+| `services/worker-preprocessing` | Python · Redis Streams | ✅ Complete | Consumes the `preprocessing` stream; runs steps out of the API process |
 
 ---
 
