@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "worker-preprocessing"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "cvops-worker-common",  # ConsumerLoop, runner, session
+  "cvops-steps",          # ExtractFramesStep, CommitDatasetStep (pulls cvops-api transitively)
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/worker_preprocessing"]

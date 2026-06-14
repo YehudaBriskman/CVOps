@@ -10,7 +10,7 @@
 # For container-based pre-prod testing, use docker compose with profiles directly:
 #   cd manifests
 #   docker compose --profile app up                       # prod-target stack
-#   docker compose --profile app --profile worker up      # + celery worker
+#   docker compose --profile app --profile worker up      # + worker-preprocessing
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 #
 # Usage:
@@ -31,7 +31,6 @@ require('node',     'install Node 20+')
 require('npm',      'usually bundled with node')
 require('docker',   'install Docker — needed for the infra containers')
 require('openssl',  'install openssl — needed to generate dev secrets')
-require('ffmpeg',   'install ffmpeg — needed by the extract_frames step')
 
 # ── Bootstrap manifests/.env from manifests/.env.example ────────────────────
 if not os.path.exists('manifests/.env'):
@@ -262,8 +261,9 @@ local_resource('git-hooks',
 )
 
 local_resource('worker-install',
-    cmd='cd services/worker && python3 -m pip install --user -e .',
-    deps=['services/worker/pyproject.toml'],
+    cmd='cd services/api && .venv/bin/pip install -e ../worker-preprocessing >/dev/null',
+    deps=['services/worker-preprocessing/pyproject.toml'],
+    resource_deps=['api-install', 'steps-install'],
     labels=['5-setup'],
     auto_init=False,
     trigger_mode=TRIGGER_MODE_MANUAL,

@@ -75,7 +75,7 @@ services:
   # Profiles:
   #   (default, no profile) → infra only (postgres, redis, garage). Tilt uses this.
   #   --profile app         → api + frontend + nginx (production-target builds)
-  #   --profile worker      → celery async worker
+  #   --profile worker      → worker-preprocessing (Redis-stream consumer)
   #   --profile all         → everything
   #
   # For dev-target container builds, layer docker-compose.dev.yml on top:
@@ -109,15 +109,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
     profiles: ["app", "all"]
 
-  worker:  # Celery async workers (formerly the "phase2" service)
+  worker-preprocessing:
     build:
-      context: ../services/worker
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/worker-preprocessing/Dockerfile
     restart: unless-stopped
-    # Worker consumes jobs from redis; it doesn't call the api. Combine with
-    # `--profile app --profile worker` if you want both running together.
     depends_on:
-      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_healthy }
+      redis:    { condition: service_healthy }
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       REDIS_URL:       redis://redis:6379/0
@@ -127,8 +127,7 @@ services:
       S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
       S3_REGION:       garage
       WORKER_TOKEN:    ${WORKER_TOKEN}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      API_BASE_URL:    http://api:8000
     profiles: ["worker", "all"]
 
   frontend:
