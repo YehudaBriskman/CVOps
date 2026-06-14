@@ -17,6 +17,8 @@ import signal
 import socket
 import uuid
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select
 
 from cvops_api.core.redis_client import init_redis, close_redis, get_redis
@@ -88,9 +90,17 @@ async def _consume_loop(stop: asyncio.Event, sem: asyncio.Semaphore) -> None:
             sem.release()
 
     while not stop.is_set():
-        resp = await redis.xreadgroup(
-            GROUP, CONSUMER, streams={STREAM: ">"}, count=CONCURRENCY, block=BLOCK_MS
-        )
+        try:
+            resp = await redis.xreadgroup(
+                GROUP, CONSUMER, streams={STREAM: ">"}, count=CONCURRENCY, block=BLOCK_MS
+            )
+        except RedisTimeoutError:
+            # The blocking read elapsed or was interrupted at shutdown (redis-py
+            # surfaces a cancelled blocking read as TimeoutError). Re-check stop
+            # and retry rather than crashing the worker.
+            continue
+        except (RedisConnectionError, asyncio.CancelledError):
+            break
         if not resp:
             continue
         for _stream, messages in resp:
