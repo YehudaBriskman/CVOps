@@ -1,0 +1,160 @@
+# ICD — Redis Streams (Job Message Format)
+
+**Owner:** Yehuda
+**Last updated:** 2026-06-14
+
+---
+
+## Purpose
+
+Redis Streams are the wake-up mechanism between the API and workers. They carry only a thin pointer to the job — all job state lives in PostgreSQL.
+
+```
+API creates runs row in PG  →  XADD thin message to Redis Stream
+                                         ↓
+                               Worker wakes up instantly
+                                         ↓
+                               Worker fetches full job from PG
+                                         ↓
+                               Worker executes, writes results to PG
+                                         ↓
+                               Worker POSTs /internal/runs/{id}/advance
+                                         ↓
+                               Executor enqueues next step → XADD next stream
+                                         ↓
+                               Worker XACKs message
+```
+
+---
+
+## Stream Names
+
+| Stream | Consumed by |
+|---|---|
+| `preprocessing` | worker-preprocessing |
+| `cvat` | worker-cvat |
+| `training` | worker-training |
+
+---
+
+## Message Format
+
+All three streams use the same shape:
+
+```json
+{
+  "job_id":    "<uuid — the runs row id>",
+  "step_type": "<registered type_key, e.g. step.extract_frames>",
+  "queue":     "<stream name>"
+}
+```
+
+That is the entire message. Workers use `job_id` to fetch the full config and inputs from the `runs` table in PostgreSQL. Redis holds no job state.
+
+---
+
+## Producer (API)
+
+Phase 1 — API does NOT write to Redis. Executor runs in-process via `BackgroundTasks`.
+
+Phase 2 — after inserting the `runs` row:
+
+```python
+await redis.xadd(
+    step.queue,
+    {
+        "job_id":    str(run_id),
+        "step_type": step.type_key,
+        "queue":     step.queue,
+    }
+)
+```
+
+---
+
+## Consumer Pattern (Workers)
+
+Each worker uses a named consumer group to allow multiple replicas without double-processing:
+
+```python
+# on startup — create group if not exists
+await redis.xgroup_create(
+    stream_name,
+    groupname=f"worker-{stream_name}",
+    id="$",           # only new messages from this point forward
+    mkstream=True
+)
+
+# main loop
+messages = await redis.xreadgroup(
+    groupname=f"worker-{stream_name}",
+    consumername=f"worker-{hostname}-{pid}",
+    streams={stream_name: ">"},   # ">" = undelivered messages only
+    count=1,
+    block=5000                    # block up to 5s if stream is empty
+)
+
+for stream, msgs in messages:
+    for msg_id, fields in msgs:
+        job_id    = fields["job_id"]
+        step_type = fields["step_type"]
+
+        await process_job(job_id, step_type)
+
+        await redis.xack(stream_name, f"worker-{stream_name}", msg_id)
+```
+
+---
+
+## Auto-Chain Contract
+
+Workers do not enqueue the next step directly. Instead, on successful step completion a worker calls:
+
+```
+POST /internal/runs/{workflow_run_id}/advance
+Body: { "step_run_id": "<uuid>", "output_refs": { ... } }
+```
+
+The executor then:
+1. Marks the child run `succeeded`
+2. Resolves the next steps in the workflow DAG
+3. Creates their `runs` rows in PG
+4. Does `XADD` to the appropriate stream for each
+
+This keeps all DAG orchestration logic in the executor. Workers are dumb executors — they never know what comes next.
+
+```
+extract_frames (preprocessing) → auto_label (cvat) → human_review (cvat, gate)
+    → commit_dataset (preprocessing) → export_yolo (cvat) → train (training)
+```
+
+---
+
+## Orphan Recovery
+
+Redis can lose messages on restart if persistence is not configured. PostgreSQL is the safety net.
+
+Each worker runs this on startup and every 60 seconds:
+
+```sql
+SELECT id, step_type FROM runs
+WHERE status = 'pending'
+  AND step_type IN (<this worker's step types>)
+  AND created_at < now() - interval '30 seconds'
+```
+
+For each result, re-enqueue into the Redis Stream. Consumer group deduplication prevents double-processing if the message is already in Redis.
+
+---
+
+## Why Not Fat Messages
+
+The alternative — putting full config and inputs into the Redis message — creates a sync problem:
+
+```
+If PG and Redis disagree on job content → which is correct?
+If the job is retried → Redis has stale config
+If Redis loses the message → config is lost with it
+```
+
+Thin messages avoid all of this. PG is always the authority. Redis is just a doorbell.

@@ -45,6 +45,19 @@ class StorageBackend(ABC):
         """
 
     @abstractmethod
+    async def promote_upload(
+        self, upload_id: str, blob_hash: str
+    ) -> tuple[int, str, str]:
+        """Move a finished `uploads/{id}` object to its content-addressed
+        `blobs/{hash}` location via a server-side copy (bytes never transit the
+        API). Idempotent: skips the copy if the blob key already exists.
+
+        Returns `(size_bytes, media_type, storage_key)` for the caller to record
+        in the `blobs` table. The SHA-256 is taken on trust here and verified
+        lazily by the step that first reads the bytes (e.g. extract_frames).
+        """
+
+    @abstractmethod
     async def get_bytes(self, blob_hash: str) -> bytes:
         """For workers that need to read bytes locally."""
 
@@ -135,6 +148,24 @@ class S3Backend(StorageBackend):
                 ExpiresIn=ttl_seconds,
             )
         )
+
+    async def promote_upload(
+        self, upload_id: str, blob_hash: str
+    ) -> tuple[int, str, str]:
+        src_key = f"uploads/{upload_id}"
+        dst_key = self._bucket_key(blob_hash)
+        head = self._client.head_object(Bucket=self._bucket, Key=src_key)
+        size_bytes = int(head["ContentLength"])
+        media_type = head.get("ContentType") or "application/octet-stream"
+        if not self._exists(dst_key):
+            self._client.copy_object(
+                Bucket=self._bucket,
+                Key=dst_key,
+                CopySource={"Bucket": self._bucket, "Key": src_key},
+                ContentType=media_type,
+                MetadataDirective="REPLACE",
+            )
+        return size_bytes, media_type, dst_key
 
     async def get_bytes(self, blob_hash: str) -> bytes:
         resp = self._client.get_object(

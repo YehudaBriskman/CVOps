@@ -17,6 +17,7 @@ from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.db.models.runs import Run, Event
+from cvops_api.engine.dispatch import create_workflow_run
 from cvops_api.engine.executor import execute_workflow
 from cvops_api.schemas.runs import RunCreate, RunOut, RunDetail, EventOut, GateResolve
 
@@ -55,22 +56,7 @@ async def create_run(
         raise HTTPException(status_code=404, detail="Workflow not found")
     await _check_project(wf.project_id, current_user, session)
 
-    run = Run(
-        project_id=wf.project_id,
-        workflow_id=wf.id,
-        kind="workflow",
-        status="pending",
-        attempt=1,
-        input_refs={"params": body.params},
-        output_refs={},
-        config={},
-    )
-    session.add(run)
-    await session.flush()
-
-    # Commit before background task so the row is visible to the executor session
-    await session.commit()
-
+    run = await create_workflow_run(session, wf, body.params, current_user.id)
     background_tasks.add_task(execute_workflow, run.id, current_user.id)
     return RunOut.model_validate(run)
 

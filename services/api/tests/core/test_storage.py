@@ -137,3 +137,54 @@ async def test_get_presigned_put_for_upload_returns_string() -> None:
 
     assert isinstance(url, str)
     assert "uploads/some-upload-id" in url
+
+
+async def test_promote_upload_copies_to_blob_key() -> None:
+    """promote_upload should server-side copy uploads/{id} → blobs/{hash} and
+    return (size, media_type, storage_key) without reading bytes through us."""
+    payload = b"a tiny fake video"
+    blob_hash = StorageBackend._sha256(payload)
+    expected_key = StorageBackend._bucket_key(blob_hash)
+
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            # Simulate the client's direct PUT to the transient uploads key.
+            backend._client.put_object(
+                Bucket=settings.S3_BUCKET,
+                Key="uploads/ds-1",
+                Body=payload,
+                ContentType="video/mp4",
+            )
+
+            size_bytes, media_type, storage_key = await backend.promote_upload(
+                "ds-1", blob_hash
+            )
+
+            assert size_bytes == len(payload)
+            assert media_type == "video/mp4"
+            assert storage_key == expected_key
+            # Bytes now live at the content-addressed key.
+            assert await backend.get_bytes(blob_hash) == payload
+
+
+async def test_promote_upload_idempotent() -> None:
+    """A second promote_upload for an already-registered blob must not error."""
+    payload = b"dup content"
+    blob_hash = StorageBackend._sha256(payload)
+
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            backend._client.put_object(
+                Bucket=settings.S3_BUCKET,
+                Key="uploads/ds-2",
+                Body=payload,
+                ContentType="application/octet-stream",
+            )
+            first = await backend.promote_upload("ds-2", blob_hash)
+            second = await backend.promote_upload("ds-2", blob_hash)
+
+    assert first == second

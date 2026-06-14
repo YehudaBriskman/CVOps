@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = "changeme"
     S3_BUCKET: str = "cvops-blobs"
     S3_REGION: str = "garage"
+    S3_BACKEND: str = "garage"  # value recorded in blobs.storage_backend
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
