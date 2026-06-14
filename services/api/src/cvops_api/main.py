@@ -20,6 +20,7 @@ from cvops_api.routers import (
     registry as registry_router,
     internal,
         cvat,
+    viewer,
 )
 
 
@@ -69,3 +70,4 @@ app.include_router(models.router, prefix="", tags=["models"])
 app.include_router(training_containers.router, prefix="", tags=["training-containers"])
 app.include_router(internal.router, prefix="/internal", tags=["internal"])
 app.include_router(cvat.router, prefix="", tags=["cvat"])
+app.include_router(viewer.router, prefix="", tags=["viewer"])
