@@ -13,12 +13,23 @@ import RunView from './pages/RunView'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
 import ProjectSettings from './pages/ProjectSettings'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import { isAuthenticated } from './api/auth'
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
 
 export default function App() {
   return (
     <Routes>
-      <Route element={<Layout />}>
-        <Route path="/"                                      element={<Navigate to="/projects" replace />} />
+      <Route path="/login"    element={<Login />} />
+      <Route path="/register" element={<Register />} />
+
+      <Route element={<RequireAuth><Layout /></RequireAuth>}>
+        <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/projects"                              element={<Projects />} />
         <Route path="/projects/:id"                          element={<Project />} />
         <Route path="/projects/:id/data-sources"             element={<DataSources />} />

@@ -1,10 +1,16 @@
-import { STEP_TYPES } from '../../lib/stepCatalog'
+import type { StepTypeDef } from '../../lib/stepCatalog'
 
-export function StepPalette() {
+interface Props {
+  steps?: StepTypeDef[]
+}
+
+export function StepPalette({ steps }: Props) {
   const onDragStart = (e: React.DragEvent, typeKey: string) => {
     e.dataTransfer.setData('application/xyflow', typeKey)
     e.dataTransfer.effectAllowed = 'move'
   }
+
+  const items = steps ?? []
 
   return (
     <div className="w-56 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 overflow-y-auto">
@@ -14,7 +20,7 @@ export function StepPalette() {
       </div>
 
       <div className="p-3 space-y-2">
-        {STEP_TYPES.map(step => (
+        {items.map(step => (
           <div
             key={step.type_key}
             draggable
@@ -28,6 +34,10 @@ export function StepPalette() {
             <p className="text-xs text-slate-400 leading-snug">{step.description}</p>
           </div>
         ))}
+
+        {items.length === 0 && (
+          <p className="text-xs text-slate-400 px-1">No steps registered</p>
+        )}
       </div>
     </div>
   )
