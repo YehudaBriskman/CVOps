@@ -1,7 +1,7 @@
 # ICD — Redis Streams (Job Message Format)
 
 **Owner:** Yehuda
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-14
 
 ---
 
@@ -18,7 +18,11 @@ API creates runs row in PG  →  XADD thin message to Redis Stream
                                          ↓
                                Worker executes, writes results to PG
                                          ↓
-                               Worker XACK message
+                               Worker POSTs /internal/runs/{id}/advance
+                                         ↓
+                               Executor enqueues next step → XADD next stream
+                                         ↓
+                               Worker XACKs message
 ```
 
 ---
@@ -28,7 +32,7 @@ API creates runs row in PG  →  XADD thin message to Redis Stream
 | Stream | Consumed by |
 |---|---|
 | `preprocessing` | worker-preprocessing |
-| `labeling` | worker-labeling |
+| `cvat` | worker-cvat |
 | `training` | worker-training |
 
 ---
@@ -102,6 +106,30 @@ for stream, msgs in messages:
 
 ---
 
+## Auto-Chain Contract
+
+Workers do not enqueue the next step directly. Instead, on successful step completion a worker calls:
+
+```
+POST /internal/runs/{workflow_run_id}/advance
+Body: { "step_run_id": "<uuid>", "output_refs": { ... } }
+```
+
+The executor then:
+1. Marks the child run `succeeded`
+2. Resolves the next steps in the workflow DAG
+3. Creates their `runs` rows in PG
+4. Does `XADD` to the appropriate stream for each
+
+This keeps all DAG orchestration logic in the executor. Workers are dumb executors — they never know what comes next.
+
+```
+extract_frames (preprocessing) → auto_label (cvat) → human_review (cvat, gate)
+    → commit_dataset (preprocessing) → export_yolo (cvat) → train (training)
+```
+
+---
+
 ## Orphan Recovery
 
 Redis can lose messages on restart if persistence is not configured. PostgreSQL is the safety net.
@@ -115,7 +143,7 @@ WHERE status = 'pending'
   AND created_at < now() - interval '30 seconds'
 ```
 
-For each result, re-enqueue into the Redis Stream. If the job is already in Redis, the consumer group deduplication prevents double-processing.
+For each result, re-enqueue into the Redis Stream. Consumer group deduplication prevents double-processing if the message is already in Redis.
 
 ---
 

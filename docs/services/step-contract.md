@@ -79,14 +79,14 @@ class Step:
 
 All inputs and outputs are **artifact references** — UUIDs and blob hashes. Raw bytes never pass through the engine.
 
-| step_type | inputs | outputs |
-|---|---|---|
-| `step.extract_frames` | `{source_id: uuid}` | `{data_item_ids: [uuid, ...]}` |
-| `step.auto_label` | `{data_item_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
-| `step.human_review` | `{annotation_revision_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
-| `step.commit_dataset` | `{data_item_ids: [uuid, ...], annotation_revision_ids: [uuid, ...]}` | `{commit_id: uuid, ref_id: uuid}` |
-| `step.export_yolo` | `{commit_id: uuid}` | `{export_blob_hash: "sha256:..."}` |
-| `step.train` | `{export_blob_hash: "sha256:..."}` | `{model_version_id: uuid}` |
+| step_type | queue | inputs | outputs |
+|---|---|---|---|
+| `step.extract_frames` | `preprocessing` | `{source_id: uuid}` | `{data_item_ids: [uuid, ...]}` |
+| `step.auto_label` | `cvat` | `{data_item_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
+| `step.human_review` | `cvat` | `{annotation_revision_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
+| `step.commit_dataset` | `preprocessing` | `{data_item_ids: [uuid, ...], annotation_revision_ids: [uuid, ...]}` | `{commit_id: uuid, ref_id: uuid}` |
+| `step.export_yolo` | `cvat` | `{commit_id: uuid}` | `{export_blob_hash: "sha256:..."}` |
+| `step.train` | `training` | `{export_blob_hash: "sha256:..."}` | `{model_version_id: uuid}` |
 
 ---
 
