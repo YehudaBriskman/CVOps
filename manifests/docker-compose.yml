@@ -74,8 +74,7 @@ services:
   #
   # Profiles:
   #   (default, no profile) → infra only (postgres, redis, garage). Tilt uses this.
-  #   --profile app         → api + frontend + nginx (production-target builds)
-  #   --profile worker      → celery async worker
+  #   --profile app         → api + frontend + nginx + worker-preprocessing (prod-target builds)
   #   --profile all         → everything
   #
   # For dev-target container builds, layer docker-compose.dev.yml on top:
@@ -109,27 +108,33 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
     profiles: ["app", "all"]
 
-  worker:  # Celery async workers (formerly the "phase2" service)
+  worker-preprocessing:  # Redis-Streams preprocessing worker (extract_frames, …)
     build:
-      context: ../services/worker
-      dockerfile: Dockerfile
+      # Repo root: the worker image installs the sibling cvops-api + cvops-steps
+      # packages, which live outside services/worker-preprocessing.
+      context: ..
+      dockerfile: services/worker-preprocessing/Dockerfile
     restart: unless-stopped
-    # Worker consumes jobs from redis; it doesn't call the api. Combine with
-    # `--profile app --profile worker` if you want both running together.
+    # Consumes the `preprocessing` stream and writes directly to PG + Garage —
+    # it never calls the API. In the app/all profiles so the ingest flow works
+    # end-to-end under `--profile app`.
     depends_on:
-      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_healthy }
+      redis:    { condition: service_healthy }
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       REDIS_URL:       redis://redis:6379/0
+      REDIS_STREAM:    preprocessing
       S3_ENDPOINT:     http://garage:3900
       S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
       S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
       S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
       S3_REGION:       garage
       WORKER_TOKEN:    ${WORKER_TOKEN}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    profiles: ["worker", "all"]
+    deploy:
+      replicas: 2   # SELECT FOR UPDATE SKIP LOCKED makes this concurrency-safe
+    profiles: ["app", "all"]
 
   frontend:
     build:
