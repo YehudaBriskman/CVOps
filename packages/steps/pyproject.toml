@@ -6,14 +6,20 @@ build-backend = "hatchling.build"
 name = "cvops-steps"
 version = "0.1.0"
 requires-python = ">=3.12"
+# Base deps cover the step contract and extract_frames. Heavy, step-specific
+# deps live in extras so installing the package for the ingest flow doesn't pull
+# torch et al. Modules must lazy-import their extra deps inside run(), so
+# importing cvops_steps (for register_all) never requires the extras.
 dependencies = [
   "cvops-api",          # Step contract, StorageBackend, registry
-  "ffmpeg-python>=0.2",
-  "imagehash>=4.3",
-  "pillow>=10.3",
-  "ultralytics>=8.2",   # auto_label: YOLOv8 inference
-  "docker>=7.1",        # train: Docker container dispatch
+  "ffmpeg-python>=0.2", # extract_frames: video decode
+  "imagehash>=4.3",     # extract_frames: perceptual dedup
+  "pillow>=10.3",       # extract_frames: image handling
 ]
+
+[project.optional-dependencies]
+ml = ["ultralytics>=8.2"]   # auto_label: YOLOv8 inference (pulls torch)
+train = ["docker>=7.1"]     # train: Docker container dispatch
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cvops_steps"]

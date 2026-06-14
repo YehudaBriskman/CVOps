@@ -169,6 +169,62 @@ async def test_promote_upload_copies_to_blob_key() -> None:
             assert await backend.get_bytes(blob_hash) == payload
 
 
+async def test_presigned_url_uses_public_endpoint() -> None:
+    """Presigned URLs must be signed against S3_PUBLIC_ENDPOINT (browser-reachable),
+    not the internal S3_ENDPOINT."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e, patch.object(
+            settings, "S3_PUBLIC_ENDPOINT", "http://public-host:3900"
+        ):
+            backend = _mocked_backend()
+            put_url = await backend.get_presigned_put_for_upload("ds-1")
+            get_url = await backend.get_presigned_get("sha256:" + "a" * 64)
+
+    assert "public-host:3900" in put_url
+    assert "public-host:3900" in get_url
+
+
+async def test_presigned_url_honors_per_request_endpoint() -> None:
+    """A per-request endpoint (derived from the browser Host) overrides the
+    default signing host, so dev-VM uploads target the right address."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:  # S3_PUBLIC_ENDPOINT stays default (empty)
+            backend = _mocked_backend()
+            url = await backend.get_presigned_put_for_upload(
+                "ds-1", endpoint="http://dev-vm.example:3900"
+            )
+
+    assert "dev-vm.example:3900" in url
+
+
+def test_public_s3_endpoint_helper() -> None:
+    from cvops_api.core.storage import public_s3_endpoint
+
+    with patch.object(settings, "S3_PUBLIC_ENDPOINT", ""), patch.object(
+        settings, "S3_PUBLIC_PORT", 3900
+    ):
+        assert public_s3_endpoint("dev-vm") == "http://dev-vm:3900"
+        assert public_s3_endpoint(None) is None
+    with patch.object(settings, "S3_PUBLIC_ENDPOINT", "http://fixed:9000"):
+        assert public_s3_endpoint("dev-vm") == "http://fixed:9000"  # override wins
+
+
+async def test_ensure_cors_sets_bucket_rule() -> None:
+    """Instantiating the backend should install a permissive CORS rule allowing
+    cross-origin PUT (for direct browser uploads)."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            cors = backend._client.get_bucket_cors(Bucket=settings.S3_BUCKET)
+
+    rule = cors["CORSRules"][0]
+    assert "PUT" in rule["AllowedMethods"]
+    assert rule["AllowedOrigins"] == ["*"]
+
+
 async def test_promote_upload_idempotent() -> None:
     """A second promote_upload for an already-registered blob must not error."""
     payload = b"dup content"

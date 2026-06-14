@@ -13,7 +13,9 @@ from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
 from cvops_api.schemas.projects import ProjectCreate, ProjectUpdate, ProjectOut
 
-router = APIRouter(prefix="/projects")
+# main.py mounts this with prefix="/projects"; don't repeat it here or paths
+# double up to /projects/projects (matches the auth/orgs routers).
+router = APIRouter()
 
 
 async def _get_project(
