@@ -62,13 +62,21 @@ def _extract_frames_sync(
                 width, height = img.size
                 phash = imagehash.average_hash(img)
 
-            if max_distance > 0 and any((phash - k) <= max_distance for k in kept_hashes):
-                continue
+                if max_distance > 0 and any((phash - k) <= max_distance for k in kept_hashes):
+                    continue
+
+                # 256x256 thumbnail for the UI grid (samples.thumbnail_hash).
+                thumb = img.copy()
+                thumb.thumbnail((256, 256))
+                tbuf = io.BytesIO()
+                thumb.save(tbuf, format="JPEG")
+                thumb_bytes = tbuf.getvalue()
 
             kept_hashes.append(phash)
             frames.append(
                 {
                     "data": data,
+                    "thumb": thumb_bytes,
                     "width": width,
                     "height": height,
                     "phash": str(phash),
@@ -129,9 +137,7 @@ class ExtractFramesStep(Step):
             _extract_frames_sync, video_bytes, 1.0 / interval, max_frames, max_distance
         )
 
-        sample_ids: list[str] = []
-        for fr in frames:
-            frame_hash = await ctx.storage.save_bytes(fr["data"], "image/jpeg")
+        async def _register_blob(blob_hash: str, data: bytes) -> None:
             await ctx.session.execute(
                 text(
                     "INSERT INTO blobs (hash, storage_backend, storage_key, "
@@ -139,22 +145,29 @@ class ExtractFramesStep(Step):
                     "ON CONFLICT (hash) DO NOTHING"
                 ),
                 {
-                    "h": frame_hash,
+                    "h": blob_hash,
                     "sb": settings.S3_BACKEND,
-                    "sk": StorageBackend._bucket_key(frame_hash),
-                    "sz": len(fr["data"]),
+                    "sk": StorageBackend._bucket_key(blob_hash),
+                    "sz": len(data),
                     "mt": "image/jpeg",
                 },
             )
+
+        sample_ids: list[str] = []
+        for fr in frames:
+            frame_hash = await ctx.storage.save_bytes(fr["data"], "image/jpeg")
+            thumb_hash = await ctx.storage.save_bytes(fr["thumb"], "image/jpeg")
+            await _register_blob(frame_hash, fr["data"])
+            await _register_blob(thumb_hash, fr["thumb"])
             # Generate the id rather than relying on a DB-side default: the ORM
             # model's id default is Python-side, so a schema built from models
             # (e.g. tests) has no server default for it.
             res = await ctx.session.execute(
                 text(
                     "INSERT INTO samples (id, project_id, blob_hash, source_id, width, "
-                    "height, frame_index, perceptual_hash) VALUES "
+                    "height, frame_index, perceptual_hash, thumbnail_hash) VALUES "
                     "(CAST(:id AS uuid), CAST(:pid AS uuid), :bh, CAST(:sid AS uuid), "
-                    ":w, :h, :fi, :ph) "
+                    ":w, :h, :fi, :ph, :th) "
                     "ON CONFLICT (project_id, blob_hash) DO NOTHING RETURNING id"
                 ),
                 {
@@ -166,6 +179,7 @@ class ExtractFramesStep(Step):
                     "h": fr["height"],
                     "fi": fr["frame_index"],
                     "ph": fr["phash"],
+                    "th": thumb_hash,
                 },
             )
             new = res.first()

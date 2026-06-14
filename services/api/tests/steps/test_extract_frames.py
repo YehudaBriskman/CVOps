@@ -120,3 +120,15 @@ async def test_extract_frames_creates_samples(session: AsyncSession) -> None:
         )
     ).scalar()
     assert status == "ingested"
+
+    # Every sample gets a thumbnail blob.
+    no_thumb = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM samples WHERE project_id = CAST(:p AS uuid) "
+                "AND thumbnail_hash IS NULL"
+            ),
+            {"p": str(proj_id)},
+        )
+    ).scalar()
+    assert no_thumb == 0
