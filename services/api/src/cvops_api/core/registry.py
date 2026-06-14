@@ -46,6 +46,9 @@ class Registry:
     def list_by_category(self, category: str) -> list[StepRegistration]:
         return [r for r in self._store.values() if r.category == category]
 
+    def all(self) -> list[StepRegistration]:
+        return list(self._store.values())
+
     def validate_config(self, type_key: str, config: dict[str, Any]) -> None:
         import jsonschema
 

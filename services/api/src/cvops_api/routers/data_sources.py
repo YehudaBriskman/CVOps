@@ -4,7 +4,6 @@ import uuid
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     HTTPException,
     Request,
@@ -24,8 +23,8 @@ from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
 from cvops_api.db.models.samples import DataSource
 from cvops_api.db.models.workflows import Workflow
+from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
-from cvops_api.engine.executor import execute_workflow
 from cvops_api.schemas.data_sources import (
     ConfirmResponse,
     DataSourceCreate,
@@ -109,7 +108,6 @@ async def create_data_source(
 async def confirm_upload(
     id: uuid.UUID,
     body: DataSourceConfirm,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> ConfirmResponse:
@@ -162,7 +160,9 @@ async def confirm_upload(
                 session, wf, {"source_id": str(ds.id)}, current_user.id
             )
             run_id = run.id
-            background_tasks.add_task(execute_workflow, run.id, current_user.id)
+            # Synchronous, fast: creates the first child step runs and rings
+            # their Redis queues. A worker picks them up out-of-process.
+            await advance_workflow(session, run.id, current_user.id)
 
     return ConfirmResponse(
         data_source=DataSourceOut.model_validate(ds), run_id=run_id
