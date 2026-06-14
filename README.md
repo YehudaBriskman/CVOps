@@ -10,7 +10,7 @@
 
 **The ML lifecycle dashboard that replaces five fragmented tools.**
 
-Track datasets · version models · orchestrate workflows · audit everything — in one place.
+Track datasets · version models · orchestrate workflows · audit everything - in one place.
 
 <br>
 
@@ -18,7 +18,7 @@ Track datasets · version models · orchestrate workflows · audit everything �
 [![Lint](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml/badge.svg)](https://github.com/YehudaBriskman/CVOps/actions/workflows/lint-api.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](manifests/docker-compose.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
 
 <br>
@@ -33,7 +33,7 @@ Track datasets · version models · orchestrate workflows · audit everything �
 
 ML teams typically manage 6–10 separate tools: one for data labelling, one for dataset versioning, one for experiment tracking, one for model registry, one for pipeline scheduling, one for training job dispatch. These tools don't talk to each other. Lineage breaks. Bugs hide at integration points. Reproducing a trained model requires an archaeology expedition.
 
-**CVOps collapses that stack into a single, versioned, auditable system** — from raw video to production model weight, every step is tracked, every artifact is content-addressed, every transition is logged.
+**CVOps collapses that stack into a single, versioned, auditable system** - from raw video to production model weight, every step is tracked, every artifact is content-addressed, every transition is logged.
 
 ```
 raw video / images
@@ -51,7 +51,7 @@ raw video / images
   commit dataset        ← step: creates immutable Commit on the Dataset object
        │
        ▼
-  export to YOLO        ← step: builds YOLO annotation package, uploads to MinIO
+  export to YOLO        ← step: builds YOLO annotation package, uploads to Garage S3
        │
        ▼
  dispatch training      ← step: launches Docker training container, tails logs
@@ -60,11 +60,11 @@ raw video / images
   model_version ✓       ← step: registers weights + metadata in the Model Registry
 ```
 
-Every node in that graph is a **Step** — composable, versioned, idempotent. Every edge is tracked. Every artifact is a content-addressed blob.
+Every node in that graph is a **Step** - composable, versioned, idempotent. Every edge is tracked. Every artifact is a content-addressed blob.
 
 ---
 
-## Dashboard
+### Dashboard
 
 <div align="center">
 <img src="brand/graphic-dashboard.svg" alt="CVOps dashboard preview" width="780">
@@ -74,30 +74,37 @@ Every node in that graph is a **Step** — composable, versioned, idempotent. Ev
 
 ## Key Features
 
-- **Dataset versioning** — Git-like commits, refs (branches/tags), and set-diffs on labelled image collections. Roll back, branch, and compare datasets the same way you branch code.
-- **DAG workflow engine** — Define pipelines as directed acyclic graphs. Step outputs are wired to downstream inputs via typed `$steps.<id>.outputs.<name>` references. The engine resolves them at runtime.
-- **Human-in-the-loop gates** — Any step can be a gate that pauses the run. An operator resolves the gate via API; the engine resumes from exactly where it stopped.
-- **Idempotent execution** — Steps are fingerprinted by `sha256(type + config + resolved inputs)`. Re-running a workflow reuses outputs from identical prior steps — no redundant compute.
-- **Content-addressed blob storage** — Every image, annotation file, and model weight is stored by SHA-256 hash in MinIO. Clients receive presigned S3 URLs. Duplicate uploads are free.
-- **Append-only audit log** — Every status transition emits an `Event`. Nothing is deleted. You can replay the full history of any run.
-- **Redis-backed token revocation** — JWTs carry a unique `jti` claim. Revoked tokens are blacklisted in Redis for the remainder of their lifetime. Refresh rotation is atomic.
-- **Org-scoped multi-tenancy** — All resources are scoped to `org_id`. Cross-org access is blocked at the DB query level, not the application layer.
+- **Dataset versioning** - Git-like commits, refs (branches/tags), and set-diffs on labelled image collections. Roll back, branch, and compare datasets the same way you branch code.
+- **DAG workflow engine** - Define pipelines as directed acyclic graphs. Step outputs are wired to downstream inputs via typed `$steps.<id>.outputs.<name>` references. The engine resolves them at runtime.
+- **Human-in-the-loop gates** - Any step can be a gate that pauses the run. An operator resolves the gate via API; the engine resumes from exactly where it stopped.
+- **Idempotent execution** - Steps are fingerprinted by `sha256(type + config + resolved inputs)`. Re-running a workflow reuses outputs from identical prior steps - no redundant compute.
+- **Content-addressed blob storage** - Every image, annotation file, and model weight is stored by SHA-256 hash in Garage (S3-compatible). Clients receive presigned S3 URLs. Duplicate uploads are free.
+- **Append-only audit log** - Every status transition emits an `Event`. Nothing is deleted. You can replay the full history of any run.
+- **Redis-backed token revocation** - JWTs carry a unique `jti` claim. Revoked tokens are blacklisted in Redis for the remainder of their lifetime. Refresh rotation is atomic.
+- **Org-scoped multi-tenancy** - All resources are scoped to `org_id`. Cross-org access is blocked at the DB query level, not the application layer.
 
 ---
 
 ## Quick Start
 
-**Requires:** Docker and Docker Compose.
+**Requires (dev):** Docker, Python 3.12+, Node 20+, [Tilt](https://docs.tilt.dev/install.html).
+**Requires (pre-prod):** Docker + Docker Compose.
 
 ```bash
 # 1. Clone and configure
 git clone https://github.com/YehudaBriskman/CVOps.git
 cd CVOps
-cp .env.example .env          # fill in JWT_SECRET and passwords
+cp manifests/.env.example manifests/.env   # fill in JWT_SECRET and Garage secrets
 
-# 2. Start the stack
-docker compose up
+# 2a. Inner-loop dev: infra in compose, api+frontend as host processes
+tilt up
+
+# 2b. Pre-prod / integration test (everything containerised):
+cd manifests
+docker compose --profile app up           # prod-target api + frontend + nginx + infra
 ```
+
+In dev mode, Vite's `server.proxy` routes `/api/*` to the host API at `http://localhost:8000`, so the frontend at `http://localhost:5173` calls the API transparently — same code path as prod behind nginx.
 
 In ~30 seconds you have:
 
@@ -105,9 +112,9 @@ In ~30 seconds you have:
 |---|---|
 | REST API | http://localhost:8000 |
 | Interactive API docs | http://localhost:8000/docs |
-| MinIO console | http://localhost:9001 |
+| Garage admin API | http://localhost:3903 |
 
-**Smoke test — register and make your first project:**
+**Smoke test - register and make your first project:**
 
 ```bash
 # Register (creates an Org automatically)
@@ -141,7 +148,7 @@ Expected output:
 
 ## Walkthrough: End-to-end in 10 minutes
 
-This section walks through the full lifecycle using `curl`. All IDs below are placeholders — substitute your own.
+This section walks through the full lifecycle using `curl`. All IDs below are placeholders -- substitute your own.
 
 ### 1. Upload a data source
 
@@ -155,7 +162,7 @@ UPLOAD=$(curl -s -X POST http://localhost:8000/projects/$PROJECT_ID/data-sources
 UPLOAD_URL=$(echo $UPLOAD | python3 -c "import sys,json; print(json.load(sys.stdin)['upload_url'])")
 SOURCE_ID=$(echo $UPLOAD | python3 -c "import sys,json; print(json.load(sys.stdin)['data_source']['id'])")
 
-# Upload directly to MinIO (bypasses the API — no proxying of raw bytes)
+# Upload directly to Garage (bypasses the API - no proxying of raw bytes)
 curl -X PUT "$UPLOAD_URL" \
   -H "Content-Type: image/jpeg" \
   --data-binary @./site-footage.zip
@@ -224,7 +231,7 @@ WORKFLOW_ID=$(curl -s -X POST http://localhost:8000/projects/$PROJECT_ID/workflo
     }
   }' | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
-# Launch a run — engine executes steps in topological order
+# Launch a run - engine executes steps in topological order
 RUN_ID=$(curl -s -X POST http://localhost:8000/workflows/$WORKFLOW_ID/runs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -235,7 +242,7 @@ RUN_ID=$(curl -s -X POST http://localhost:8000/workflows/$WORKFLOW_ID/runs \
 ### 4. Watch the run in real-time (SSE)
 
 ```bash
-# Server-sent events stream — each line is a JSON event
+# Server-sent events stream - each line is a JSON event
 curl -N http://localhost:8000/runs/$RUN_ID/events/stream \
   -H "Authorization: Bearer $TOKEN"
 ```
@@ -278,11 +285,11 @@ The engine resumes. The run completes. A new Dataset Commit is created.
    TypeScript · Vite          SQLAlchemy 2.0                     │
    TanStack Query             Pydantic v2                        │
    Zustand                    python-jose                        │
-                                       │                         │
-              ┌────────────────────────┼─────────────────────────┘
-              │                        │
+                                       ┬                         │
+              ┌────────────────────────┼────────────────────┬────┘
+              │                        │                    │
               ▼                        ▼                    ▼
-      PostgreSQL 16           MinIO (S3-compatible)     Redis 7
+      PostgreSQL 16           Garage (S3-compatible)    Redis 7
       21 ORM models           Content-addressed          JWT JTI
       Alembic migrations      blobs (SHA-256)            blacklist
       asyncpg driver          Presigned URLs
@@ -296,21 +303,21 @@ Client  →  nginx  →  FastAPI  →  Depends(get_current_user)
                                     ├─ decode JWT
                                     ├─ check Redis blacklist
                                     └─ load User from postgres
-                                         │
+                                         ┬
                                          ▼
-                                    Router handler
-                                         │
+                                   Router handler
+                                         ┬
                               ┌──────────┴──────────┐
                               ▼                     ▼
-                         postgres              MinIO
+                         postgres              Garage
                          (reads/writes)     (presigned URLs)
 ```
 
-**Workflow execution** runs as a `BackgroundTask` — the `/runs` POST returns immediately; the engine runs asynchronously:
+**Workflow execution** runs as a `BackgroundTask` - the `/runs` POST returns immediately; the engine runs asynchronously:
 
 ```
 POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
-                                     │
+                                     ┬
                                BackgroundTask
                                      │
                                execute_workflow()
@@ -318,7 +325,7 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
                           topological sort (Kahn's)
                                      │
                            for each step in order:
-                             │
+                             ┬
                              ├─ compute idem key (sha256)
                              ├─ reuse if already succeeded
                              ├─ resolve $steps.* refs
@@ -333,10 +340,10 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
 
 | Package | Language | Status | Description |
 |---|---|---|---|
-| `packages/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer — 21 models, 40+ endpoints, 146 tests |
-| `packages/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI — Vite · TanStack Query · Zustand · @xyflow/react |
+| `services/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer - 21 models, 40+ endpoints, 146 tests |
+| `services/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react |
 | `packages/steps` | Python | 🚧 Pending | Step implementations: `extract_frames`, `auto_label`, `export_yolo`, `train` |
-| `packages/worker` | Python · Celery | 📋 Phase 2 | Async worker queue for long-running steps |
+| `services/worker` | Python · Celery | 📋 Phase 2 | Async worker queue for long-running steps |
 
 ---
 
@@ -345,7 +352,7 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
 All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 
 <details>
-<summary><strong>Auth</strong> — 5 endpoints</summary>
+<summary><strong>Auth</strong> - 5 endpoints</summary>
 
 | Method | Path | Description |
 |---|---|---|
@@ -358,7 +365,7 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 </details>
 
 <details>
-<summary><strong>Orgs & Members</strong> — 6 endpoints</summary>
+<summary><strong>Orgs & Members</strong> - 6 endpoints</summary>
 
 | Method | Path | Description |
 |---|---|---|
@@ -372,7 +379,7 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 </details>
 
 <details>
-<summary><strong>Projects</strong> — 5 endpoints</summary>
+<summary><strong>Projects</strong> - 5 endpoints</summary>
 
 | Method | Path | Description |
 |---|---|---|
@@ -385,7 +392,7 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 </details>
 
 <details>
-<summary><strong>Data Sources</strong> — 5 endpoints</summary>
+<summary><strong>Data Sources</strong> - 5 endpoints</summary>
 
 | Method | Path | Description |
 |---|---|---|
@@ -400,15 +407,15 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 <details>
 <summary><strong>Samples, Ontologies, Datasets, Workflows, Runs, Models, Training Containers</strong></summary>
 
-Full endpoint table: **40+ endpoints total** — see the [interactive API docs](http://localhost:8000/docs) for the complete reference with request/response schemas.
+Full endpoint table: **40+ endpoints total** - see the [interactive API docs](http://localhost:8000/docs) for the complete reference with request/response schemas.
 
 Highlights:
-- `GET /projects/{id}/samples?cursor=&source_id=&limit=50` — cursor-based pagination
-- `GET /samples/{id}/image-url` — presigned GET URL (15-min TTL)
-- `GET /runs/{id}/events/stream` — SSE stream, closes on terminal status
-- `POST /runs/{id}/gates/{step_id}/resolve` — resume a paused workflow
-- `GET /datasets/{id}/diff?from=&to=` — set-diff between two commits
-- `POST /datasets/{id}/commits` — CAS branch-head advance (concurrent-safe)
+- `GET /projects/{id}/samples?cursor=&source_id=&limit=50` - cursor-based pagination
+- `GET /samples/{id}/image-url` - presigned GET URL (15-min TTL)
+- `GET /runs/{id}/events/stream` - SSE stream, closes on terminal status
+- `POST /runs/{id}/gates/{step_id}/resolve` - resume a paused workflow
+- `GET /datasets/{id}/diff?from=&to=` - set-diff between two commits
+- `POST /datasets/{id}/commits` - CAS branch-head advance (concurrent-safe)
 
 </details>
 
@@ -419,7 +426,7 @@ Highlights:
 ### API
 
 ```bash
-cd packages/api
+cd services/api
 
 # Set up virtual environment
 python -m venv .venv
@@ -429,7 +436,7 @@ source .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
 # Run the test suite
-# Uses testcontainers to spin up a real PostgreSQL — requires Docker
+# Uses testcontainers to spin up a real PostgreSQL - requires Docker
 pytest tests/ -q
 
 # Lint and type-check
@@ -444,16 +451,20 @@ uvicorn cvops_api.main:app --reload --port 8000
 ### Frontend
 
 ```bash
-cd packages/frontend
+cd services/frontend
 npm install
 npm run dev         # http://localhost:5173
 ```
 
 ### Full stack — development mode
 
+`tilt up` is the recommended dev entry point — infra in containers, api + frontend as host processes with HMR.
+
+To force a containerised dev stack (rare — for reproducing CI failures):
+
 ```bash
-# Hot-reload for both API and frontend
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+cd manifests
+docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 ```
 
 ### Running a subset of tests
@@ -479,7 +490,7 @@ pytest tests/ -s --tb=long
 | Database | PostgreSQL 16 | asyncpg driver |
 | ORM | SQLAlchemy 2.0 async | `Mapped[T]` / `mapped_column()` |
 | Migrations | Alembic | 1 initial migration, 21 tables |
-| Blob storage | MinIO (S3-compatible) | Content-addressed by SHA-256 |
+| Blob storage | Garage (S3-compatible) | Content-addressed by SHA-256 |
 | Cache / revocation | Redis 7 | JWT JTI blacklist with TTL |
 | Auth | python-jose + passlib | JWT HS256, bcrypt cost 12 |
 | Validation | Pydantic v2 | Strict types, `from_attributes=True` |
@@ -496,19 +507,23 @@ pytest tests/ -s --tb=long
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and fill in the values:
+Copy `manifests/.env.example` to `manifests/.env` and fill in the values:
 
 ```bash
-cp .env.example .env
+cp manifests/.env.example manifests/.env
 ```
 
 | Variable | Required | Description |
 |---|---|---|
-| `JWT_SECRET` | ✅ | Min 32-char random string — `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `JWT_SECRET` | ✅ | Min 32-char random string - `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `POSTGRES_PASSWORD` | ✅ | PostgreSQL password |
-| `MINIO_ROOT_PASSWORD` | ✅ | MinIO admin password |
+| `GARAGE_DEFAULT_ACCESS_KEY` | ✅ | Garage S3 access key (must start with `GK`) |
+| `GARAGE_DEFAULT_SECRET_KEY` | ✅ | Garage S3 secret key |
+| `GARAGE_RPC_SECRET` | ✅ | Garage cluster RPC secret (32-byte hex) |
+| `GARAGE_ADMIN_TOKEN` | ✅ | Garage admin API token |
+| `GARAGE_METRICS_TOKEN` | ✅ | Garage metrics token |
 | `WORKER_TOKEN` | ✅ | Shared secret for internal `/internal/*` calls |
-| `DATABASE_URL` | auto | Derived — set in docker-compose.yml |
+| `DATABASE_URL` | auto | Derived - set in manifests/docker-compose.yml |
 | `REDIS_URL` | auto | Defaults to `redis://redis:6379/0` |
 
 ---
@@ -517,11 +532,11 @@ cp .env.example .env
 
 | Document | Description |
 |---|---|
-| [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md) | Full system reference — start here |
+| [`docs/MASTER_PLAN.md`](docs/MASTER_PLAN.md) | Full system reference - start here |
 | [`docs/VISION.md`](docs/VISION.md) | Product vision and roadmap |
-| [`packages/api/CLAUDE.md`](packages/api/CLAUDE.md) | API developer orientation (shared deps, conventions, auth model) |
+| [`services/api/CLAUDE.md`](services/api/CLAUDE.md) | API developer orientation (shared deps, conventions, auth model) |
 | [`docs/db/`](docs/db/) | Per-model database schema documentation |
-| [Interactive API docs](http://localhost:8000/docs) | Swagger UI — live when stack is running |
+| [Interactive API docs](http://localhost:8000/docs) | Swagger UI - live when stack is running |
 | [`brand/`](brand/) | Logos, color tokens, icons, social assets, brand guide |
 
 ---
@@ -533,15 +548,15 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide. Short version:
 ```bash
 git clone https://github.com/YehudaBriskman/CVOps.git
 cd CVOps
-cp .env.example .env
+cp manifests/.env.example manifests/.env
 sh scripts/git-setup.sh          # install git hooks
 
-cd packages/api
+cd services/api
 pip install -e ".[dev]"
 pytest tests/ -q                 # all 146 must pass before a PR
 ```
 
-- One PR per concern — never mix feature + refactor
+- One PR per concern - never mix feature + refactor
 - PR title: `<type>: <5–8 word imperative title>`
 - All tests + ruff + mypy must pass (CI enforces this)
 - Security issues → [SECURITY.md](SECURITY.md), not a public issue
@@ -550,4 +565,4 @@ pytest tests/ -q                 # all 146 must pass before a PR
 
 ## License
 
-[MIT](LICENSE) © 2025 Yehuda Briskman
+[MIT](LICENSE) © 2026 Yehuda Briskman

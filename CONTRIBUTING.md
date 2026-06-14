@@ -25,7 +25,7 @@ sh scripts/git-setup.sh       # install git hooks (enforces commit format)
 ### API (Python 3.12)
 
 ```bash
-cd packages/api
+cd services/api
 python -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
@@ -36,7 +36,7 @@ Requires Docker for the test suite (testcontainers spins up postgres automatical
 ### Frontend (Node 20)
 
 ```bash
-cd packages/frontend
+cd services/frontend
 npm install
 npm run dev
 ```
@@ -110,14 +110,14 @@ Before opening a PR:
 **Comments:** Only write a comment when the *why* is non-obvious — a hidden constraint, a subtle invariant, or a workaround for a specific bug. Never describe *what* the code does.
 
 **TypeScript:**
-- ESLint + Prettier (configured in `packages/frontend`)
+- ESLint + Prettier (configured in `services/frontend`)
 
 ---
 
 ## Running tests
 
 ```bash
-cd packages/api
+cd services/api
 
 # Full test suite (requires Docker)
 pytest tests/ -q

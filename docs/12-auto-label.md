@@ -1,8 +1,15 @@
 # auto_label.py
 
-**Step 2 of 3 in the YOLO workflow**
+`> **This script is a legacy option and is no longer part of the active workflow.**
+> It is kept as a fallback for offline environments where CVAT is not available.
+> The current approach is to run auto-labeling directly inside CVAT using a deployed
+> Nuclio function — see [14-cvat-autolabel.md](14-cvat-autolabel.md).
 
-Runs YOLO12 nano on extracted frames and generates YOLO-format label files (`.txt`) for each image.
+---
+
+**Legacy Step 2 of 3 — local inference only**`
+
+Runs YOLO12 nano locally on extracted frames and generates YOLO-format label files (`.txt`) for each image.
 
 ---
 
@@ -33,7 +40,7 @@ All coordinates are normalized (0.0–1.0). Files are empty when no objects are 
 ## Usage
 
 ```bash
-cd frame_extractor
+cd tools/frame-extractor
 python auto_label.py
 ```
 
@@ -51,21 +58,18 @@ The script prompts interactively:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `DEFAULT_CONFIDENCE` | `0.25` | Minimum detection confidence |
-| Model file | `yolo12n.pt` | Must be present in `frame_extractor/` |
+| Model file | `yolo12n.pt` | Must be present in `tools/frame-extractor/` |
 
 ---
 
-## Class IDs
+## When to use this script
 
-The model uses standard **COCO class IDs** (e.g. `2 = car`, `0 = person`, `7 = truck`). These IDs are written as-is into the `.txt` files and are correctly mapped to class names in the next step (`upload_to_cvat.py`).
+Use `auto_label.py` only when:
+- CVAT is not running and cannot be started
+- You need a quick offline check of what the model detects
+- You want raw YOLO `.txt` files for a pipeline that does not use CVAT
 
----
-
-## Known Limitation — Model Location
-
-> **Note:** The current implementation loads `yolo12n.pt` as a local file and runs inference inside this script. The intended architecture is to have the YOLO12n model deployed **directly on the CVAT server** as an auto-annotation plugin, so that labeling happens inside CVAT itself without a separate script.
->
-> Running the model as a standalone script is a temporary workaround. This will be replaced in a future update by integrating YOLO12n as a native CVAT model.
+In all other cases, use `cvat_autolabel.py` instead.
 
 ---
 

@@ -1,0 +1,23 @@
+# Development overrides — hot-reload, debug ports, local mounts
+# Usage (from repo root):
+#   docker compose -f manifests/docker-compose.yml -f manifests/docker-compose.dev.yml --env-file manifests/.env up
+
+services:
+  api:
+    build:
+      context: ../services/api
+      target: development
+    volumes:
+      - ../services/api/src:/app/src:ro
+    environment:
+      RELOAD: "true"
+    command: uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ../services/frontend
+      target: development
+    ports: ["5173:5173"]
+    volumes:
+      - ../services/frontend/src:/app/src:ro
+    command: npm run dev -- --host 0.0.0.0

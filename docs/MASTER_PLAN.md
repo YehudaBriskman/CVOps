@@ -850,7 +850,7 @@ These are loaded and registered at startup. They are also the source of truth fo
 
 ### 9.1 Step Base Class
 
-Location: `packages/api/src/cvops_api/engine/step.py`
+Location: `services/api/src/cvops_api/engine/step.py`
 
 ```python
 from dataclasses import dataclass
@@ -921,7 +921,7 @@ def register_all():
 
 ### 9.2 Registry Implementation
 
-Location: `packages/api/src/cvops_api/core/registry.py`
+Location: `services/api/src/cvops_api/core/registry.py`
 
 - In-memory `dict[str, Step]` singleton.
 - On `register(step)`: insert/upsert a row into `type_schemas` with `type_key = step.type_key`, `category = 'step'`, `json_schema = step.config_schema`. Sync happens at startup via the entrypoint script.
@@ -931,7 +931,7 @@ Location: `packages/api/src/cvops_api/core/registry.py`
 
 ### 9.3 Synchronous Executor (Phase 1)
 
-Location: `packages/api/src/cvops_api/engine/executor.py`
+Location: `services/api/src/cvops_api/engine/executor.py`
 
 Owner: Itai
 
@@ -983,7 +983,7 @@ async def resume_workflow(
 
 ### 9.4 Reference Resolver
 
-Location: `packages/api/src/cvops_api/engine/ref_resolver.py`
+Location: `services/api/src/cvops_api/engine/ref_resolver.py`
 
 Evaluates reference strings like `$steps.s2.outputs.annotation_revision_ids` against a dict of completed step run `output_refs`. Raises `ResolutionError` if a referenced step ID does not exist or its output key is absent.
 
@@ -1491,7 +1491,7 @@ GET /internal/health
 ### FastAPI Dependency Chain
 
 ```python
-# packages/api/src/cvops_api/core/auth.py
+# services/api/src/cvops_api/core/auth.py
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -1506,7 +1506,7 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
 
-# packages/api/src/cvops_api/core/rbac.py
+# services/api/src/cvops_api/core/rbac.py
 
 def require_project_access(min_role: str = "viewer"):
     async def dep(
@@ -1553,7 +1553,7 @@ Role hierarchy (inclusive): `owner > maintainer > annotator > viewer`. `has_role
 
 ### 14.2 Axios Client and Auth Interceptor
 
-Location: `packages/frontend/src/lib/client.ts`
+Location: `services/frontend/src/lib/client.ts`
 
 ```typescript
 import axios from 'axios'
@@ -1616,7 +1616,7 @@ export const useRunEvents = (id: string) =>
 
 ### 14.4 Schema-Driven Step Config Forms
 
-Location: `packages/frontend/src/components/workflow/StepConfigForm.tsx`
+Location: `services/frontend/src/components/workflow/StepConfigForm.tsx`
 
 ```typescript
 import { Form } from '@rjsf/core'
@@ -1653,7 +1653,7 @@ Every step in the workflow builder uses this component. Adding a new step type t
 
 ### 14.5 Workflow Canvas (React Flow)
 
-Location: `packages/frontend/src/components/workflow/Canvas.tsx`
+Location: `services/frontend/src/components/workflow/Canvas.tsx`
 
 - Each step in `definition.steps` maps to a `StepNode` React Flow node.
 - Each entry in `definition.edges` maps to a React Flow edge.
@@ -1664,7 +1664,7 @@ Location: `packages/frontend/src/components/workflow/Canvas.tsx`
 
 ### 14.6 SSE Run Monitoring
 
-Location: `packages/frontend/src/pages/RunView.tsx`
+Location: `services/frontend/src/pages/RunView.tsx`
 
 ```typescript
 useEffect(() => {
@@ -1684,7 +1684,7 @@ useEffect(() => {
 
 ### 14.7 Zustand UI Store
 
-Location: `packages/frontend/src/store/ui.ts`
+Location: `services/frontend/src/store/ui.ts`
 
 ```typescript
 interface UIStore {
@@ -1922,7 +1922,7 @@ services:
       retries: 10
 
   api:
-    build: packages/api
+    build: services/api
     ports: ["8000:8000"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -1944,7 +1944,7 @@ services:
   # Phase 2: uncomment workers below
 
   worker-preprocessing:  # Phase 2
-    build: packages/workers/preprocessing
+    build: services/workers/preprocessing
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -1961,7 +1961,7 @@ services:
       replicas: 2   # scale horizontally — PG SKIP LOCKED handles concurrency
 
   worker-labeling:  # Phase 2
-    build: packages/workers/labeling
+    build: services/workers/labeling
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -1975,7 +1975,7 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN}
 
   worker-training:  # Phase 2
-    build: packages/workers/training
+    build: services/workers/training
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -1992,7 +1992,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # ONLY this worker needs Docker socket
 
   frontend:
-    build: packages/frontend
+    build: services/frontend
     ports: ["3000:80"]
 
   nginx:
@@ -2037,7 +2037,7 @@ WHERE status = 'pending'
 ```
 Re-enqueue any found jobs into the Redis Stream. Handles Redis restart/message loss.
 
-**API entrypoint script** (`packages/api/entrypoint.sh`):
+**API entrypoint script** (`services/api/entrypoint.sh`):
 ```sh
 #!/bin/sh
 set -e
@@ -2117,7 +2117,7 @@ Create monorepo root. `docker-compose.yml` with service stubs (images pinned, no
 Done: `docker compose up postgres minio redis` all reach healthy state.
 
 **D2. SQLAlchemy + G1 mixin + first migration.**
-`packages/api/src/cvops_api/db/base.py`: `EntityBase` declarative mixin with all G1 columns. `alembic/versions/001_initial.py`: empty migration confirming plumbing. `db/session.py`: `async_sessionmaker`, `get_session` dependency.
+`services/api/src/cvops_api/db/base.py`: `EntityBase` declarative mixin with all G1 columns. `alembic/versions/001_initial.py`: empty migration confirming plumbing. `db/session.py`: `async_sessionmaker`, `get_session` dependency.
 Done: `alembic upgrade head` succeeds; `alembic current` shows `001`.
 
 **D3. All migrations (002–010).**
