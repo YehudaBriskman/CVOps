@@ -204,10 +204,20 @@
           log(`✓ ${items.length} samples`, "ok");
           for (const s of items) {
             try {
-              const u = await api("GET", `/samples/${s.id}/thumbnail-url`).catch(() => api("GET", `/samples/${s.id}/image-url`));
+              // Full image for the link/download; thumbnail for the grid (falls
+              // back to the full image if no thumbnail exists yet).
+              const full = await api("GET", `/samples/${s.id}/image-url`);
+              const thumb = await api("GET", `/samples/${s.id}/thumbnail-url`).catch(() => full);
+              const a = document.createElement("a");
+              a.href = full.url;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.title = `frame ${s.frame_index ?? "?"} — ${s.width}×${s.height} · click to open full image`;
               const img = document.createElement("img");
-              img.src = u.url || u;
-              $("samples").appendChild(img);
+              img.src = thumb.url || thumb;
+              img.loading = "lazy";
+              a.appendChild(img);
+              $("samples").appendChild(a);
             } catch (_) { /* skip un-fetchable */ }
           }
         } catch (err) {
