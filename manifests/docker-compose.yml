@@ -131,6 +131,29 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     profiles: ["worker", "all"]
 
+  worker-training:
+    build:
+      context: ..
+      dockerfile: services/worker-training/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      garage:   { condition: service_healthy }
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      REDIS_URL:       redis://redis:6379/0
+      REDIS_STREAM:    training
+      S3_ENDPOINT:     http://garage:3900
+      S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
+      S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
+      S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      S3_REGION:       garage
+      WORKER_TOKEN:    ${WORKER_TOKEN}
+      API_BASE_URL:    http://api:8000
+      DOCKER_TIMEOUT:  "7200"
+    profiles: ["worker", "all"]
+
   frontend:
     build:
       context: ../services/frontend
