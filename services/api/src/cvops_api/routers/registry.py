@@ -7,7 +7,9 @@ from cvops_api.core.registry import registry
 from cvops_api.db.models.auth import User
 from cvops_api.schemas.registry import TypeSchemaOut
 
-router = APIRouter(prefix="/registry")
+# main.py mounts this with prefix="/registry"; don't repeat it here or paths
+# double up to /registry/registry (matches the auth/orgs routers).
+router = APIRouter()
 
 
 @router.get("/types", response_model=list[TypeSchemaOut])
