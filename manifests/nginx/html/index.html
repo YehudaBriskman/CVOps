@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CVOps — placeholder</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; }
+      code { background: #f2f2f2; padding: 0.1rem 0.3rem; border-radius: 3px; }
+      button { font: inherit; padding: 0.4rem 0.9rem; cursor: pointer; }
+      pre { background: #111; color: #0f0; padding: 0.8rem; border-radius: 5px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>CVOps</h1>
+    <p>
+      Placeholder served by nginx. The frontend <code>dist/</code> build will
+      replace this file later. The API is proxied under <code>/api/v1/</code>.
+    </p>
+    <p>
+      <button id="ping">Ping /api/v1/internal/health</button>
+    </p>
+    <pre id="out">(not run yet)</pre>
+    <script>
+      const out = document.getElementById("out");
+      document.getElementById("ping").addEventListener("click", async () => {
+        out.textContent = "…";
+        try {
+          const res = await fetch("/api/v1/internal/health");
+          out.textContent = res.status + " " + (await res.text());
+        } catch (err) {
+          out.textContent = "error: " + err;
+        }
+      });
+    </script>
+  </body>
+</html>
