@@ -50,6 +50,8 @@
       const $ = (id) => document.getElementById(id);
       // Avoid reserved TLDs (.test/.local/example.com) — email-validator rejects them.
       $("email").value = `dev-${Math.random().toString(36).slice(2, 10)}@cvops.dev`;
+      // org name is globally unique — make a fresh one per load to avoid collisions.
+      const ORG = `ingest-test-${Math.random().toString(36).slice(2, 8)}`;
 
       const logEl = $("log");
       function log(msg, cls) {
@@ -133,7 +135,7 @@
           const reg = await api("POST", "/auth/register", {
             email: $("email").value,
             password: $("password").value,
-            org_name: "ingest-test",
+            org_name: ORG,
           });
           TOKEN = reg.access_token;
           log("✓ authenticated", "ok");
