@@ -104,7 +104,7 @@ cd manifests
 docker compose --profile app up           # prod-target api + frontend + nginx + infra
 ```
 
-In dev mode, Vite's `server.proxy` routes `/api/*` to the host API at `http://localhost:8000`, so the frontend at `http://localhost:5173` calls the API transparently — same code path as prod behind nginx.
+In dev mode the nginx edge serves the placeholder UI and proxies `/api/v1/*` to the host API at `http://localhost`; Vite additionally routes `/api/*` to `http://localhost:8000` for the React app at `http://localhost:5173`. Behind nginx the API is mounted under the versioned `/api/v1` prefix.
 
 In ~30 seconds you have:
 
@@ -167,11 +167,15 @@ curl -X PUT "$UPLOAD_URL" \
   -H "Content-Type: image/jpeg" \
   --data-binary @./site-footage.zip
 
-# Confirm the upload (triggers blob hash verification)
+# Confirm the upload. The backend registers the blob and, if the project has a
+# default_ingest_workflow_id set, auto-dispatches that workflow (params.source_id)
+# and returns its run_id — no manual run creation needed. The blob hash is
+# verified lazily when extract_frames reads the bytes.
 curl -s -X POST http://localhost:8000/data-sources/$SOURCE_ID/confirm-upload \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"blob_hash":"sha256:e3b0c4..."}'
+# → {"data_source": {...}, "run_id": "..." | null}
 ```
 
 ### 2. Define an ontology
@@ -497,7 +501,7 @@ pytest tests/ -s --tb=long
 | Frontend | React 18 + TypeScript | Vite, TanStack Query, Zustand |
 | DAG editor | @xyflow/react | Visual workflow builder |
 | JSON schema forms | @rjsf/core | Step config editor |
-| Reverse proxy | nginx | Routes `/api/*` and `/` |
+| Reverse proxy | nginx | Routes `/api/v1/*` to the API and serves `/` |
 | Container runtime | Docker Compose | Dev + prod configurations |
 | Testing | pytest + testcontainers | Real postgres, moto S3 |
 | Linting | Ruff 0.4 | 100-char lines, py312 |

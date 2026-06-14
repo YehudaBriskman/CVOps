@@ -5,7 +5,11 @@
 #   • Stateful infra (postgres, redis, garage) → containers via docker_compose.
 #   • App code (api, frontend)                → host processes via local_resource
 #                                                (uvicorn --reload, npm run dev).
-#   • Nothing else. No edge nginx — Vite proxies /api → http://localhost:8000.
+#   • Edge nginx (container)                   → serves the placeholder index.html
+#                                                and proxies /api/v1 → host API, so
+#                                                the stack is browser-usable at
+#                                                http://localhost (and dev VMs).
+#   Vite also proxies /api → http://localhost:8000 for the React app.
 #
 # For container-based pre-prod testing, use docker compose with profiles directly:
 #   cd manifests

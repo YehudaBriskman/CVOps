@@ -3,10 +3,12 @@
 ## 1. What's Implemented
 
 - 21 SQLAlchemy 2.0 async DB models in `src/cvops_api/db/models/`
-- Alembic migration: `alembic/versions/0001_initial_schema.py`
+- Alembic migrations in `alembic/versions/`: `0001_initial_schema`, `0002_project_default_ingest_workflow`
 - Fully implemented routers: auth, orgs, projects, data_sources, samples, ontologies, datasets, workflows, runs, models, training_containers, registry
 - Workflow engine: executor + ref_resolver in `src/cvops_api/engine/`
-- 146-test suite in `tests/` (all passing)
+- Backend-triggered ingest: `confirm-upload` registers the blob and auto-dispatches the project's `default_ingest_workflow_id`
+- `extract_frames` step implemented in `packages/steps` (ffmpeg decode + perceptual dedup + thumbnails)
+- Test suite in `tests/` (all passing; includes router + step integration tests)
 - Per-service DB documentation in `docs/db/`
 
 ## 2. Key Shared Dependencies
@@ -59,6 +61,13 @@ url = await get_storage().get_presigned_put(blob_hash)   # PUT URL, 60-min TTL
 
 Immutable blobs and commits get `Cache-Control: immutable, max-age=31536000`.
 
+**Presign host.** The URL must be reachable by the *browser*, not just the API.
+`S3_ENDPOINT` (e.g. `http://garage:3900`) is internal, so presigned URLs are
+signed against `S3_PUBLIC_ENDPOINT` if set, otherwise a host derived per-request
+from the `Host` header (`http://<host>:S3_PUBLIC_PORT`). Endpoints that presign
+pass it through: `get_presigned_*(..., endpoint=public_s3_endpoint(request.url.hostname))`.
+The bucket gets a permissive CORS rule at startup so browsers can PUT/GET directly.
+
 ## 7. Soft-Delete Convention
 
 - Most models use `deleted_at: datetime | None`
@@ -87,7 +96,8 @@ open http://localhost:8000/docs
 ## 9. What's NOT Done Yet
 
 - `POST /internal/cvat/webhook` — stub only; Phase 2 CVAT integration pending
-- `cvops_steps` package — step implementations (extract_frames, auto_label, etc.) live in a separate package, not in this repo; the workflow engine is ready to execute them once registered
+- `cvops_steps` (`packages/steps`) — `extract_frames` is implemented; `auto_label`, `human_review`, `commit_dataset`, `export_yolo`, `train` still raise `NotImplementedError`. Installed into the API env via Tilt's `steps-install` (heavy deps like ultralytics are in the `[ml]`/`[train]` extras, not installed by default).
+- Cross-upload dedup: blob bytes and byte-identical frames are deduped, but source-video re-ingest detection and cross-run perceptual dedup are not wired yet.
 
 ## 10. Adding a New Step Type
 
