@@ -84,6 +84,10 @@ services:
       context: ../services/api
       dockerfile: Dockerfile
       target: production
+      # cvops-steps is a sibling package; expose it as a named build context so
+      # the image's step registry is populated (see services/api/Dockerfile).
+      additional_contexts:
+        steps: ../packages/steps
     restart: unless-stopped
     ports: ["8000:8000"]
     depends_on:
