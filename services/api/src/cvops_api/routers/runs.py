@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime, UTC
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,8 +17,8 @@ from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.db.models.runs import Run, Event
+from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
-from cvops_api.engine.executor import execute_workflow
 from cvops_api.schemas.runs import RunCreate, RunOut, RunDetail, EventOut, GateResolve
 
 router = APIRouter()
@@ -46,7 +46,6 @@ async def _check_project(
 async def create_run(
     workflow_id: uuid.UUID,
     body: RunCreate,
-    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> RunOut:
@@ -57,7 +56,8 @@ async def create_run(
     await _check_project(wf.project_id, current_user, session)
 
     run = await create_workflow_run(session, wf, body.params, current_user.id)
-    background_tasks.add_task(execute_workflow, run.id, current_user.id)
+    await advance_workflow(session, run.id, current_user.id)
+    await session.refresh(run)
     return RunOut.model_validate(run)
 
 
@@ -180,7 +180,6 @@ async def cancel_run(
 @router.post("/runs/{id}/retry", response_model=RunOut, status_code=status.HTTP_201_CREATED)
 async def retry_run(
     id: uuid.UUID,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> RunOut:
@@ -190,6 +189,9 @@ async def retry_run(
         raise HTTPException(status_code=404, detail="Run not found")
     await _check_project(run.project_id, current_user, session)
 
+    # A fresh parent run with no children: advance_workflow re-creates every
+    # step child from scratch and enqueues the ready ones. Idempotency reuse on
+    # _idem_key means unchanged, already-succeeded steps are copied, not re-run.
     new_run = Run(
         project_id=run.project_id,
         workflow_id=run.workflow_id,
@@ -204,7 +206,8 @@ async def retry_run(
     await session.flush()
     await session.commit()
 
-    background_tasks.add_task(execute_workflow, new_run.id, current_user.id)
+    await advance_workflow(session, new_run.id, current_user.id)
+    await session.refresh(new_run)
     return RunOut.model_validate(new_run)
 
 
@@ -213,7 +216,6 @@ async def resolve_gate(
     id: uuid.UUID,
     step_id: str,
     body: GateResolve,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -239,5 +241,6 @@ async def resolve_gate(
     child.finished_at = datetime.now(UTC)
     await session.commit()
 
-    background_tasks.add_task(execute_workflow, run.id, current_user.id)
+    # Gate cleared — enqueue whatever became ready downstream.
+    await advance_workflow(session, run.id, current_user.id)
     return {"status": "resumed"}

@@ -5,7 +5,7 @@
 - 21 SQLAlchemy 2.0 async DB models in `src/cvops_api/db/models/`
 - Alembic migrations in `alembic/versions/`: `0001_initial_schema`, `0002_project_default_ingest_workflow`
 - Fully implemented routers: auth, orgs, projects, data_sources, samples, ontologies, datasets, workflows, runs, models, training_containers, registry
-- Workflow engine: executor + ref_resolver in `src/cvops_api/engine/`
+- Workflow engine: coordinator (`advance_workflow`/`process_step`) + ref_resolver in `src/cvops_api/engine/` — steps run out-of-process on Redis Streams (`docs/services/redis-streams.md`), not as in-process BackgroundTasks
 - Backend-triggered ingest: `confirm-upload` registers the blob and auto-dispatches the project's `default_ingest_workflow_id`
 - `extract_frames` step implemented in `packages/steps` (ffmpeg decode + perceptual dedup + thumbnails)
 - Test suite in `tests/` (all passing; includes router + step integration tests)
@@ -102,6 +102,6 @@ open http://localhost:8000/docs
 ## 10. Adding a New Step Type
 
 1. Create a subclass of `Step` in `cvops_steps` (separate package)
-2. Set `type_key`, `config_schema`, `category`, `is_gate`
+2. Set `type_key`, `config_schema`, `category`, `is_gate` (and `queue` if it should run on a non-`preprocessing` worker)
 3. Register via `registry.register(MyStep())` in `cvops_steps.register_all()`
-4. The executor picks it up automatically at runtime
+4. The coordinator picks it up automatically at runtime

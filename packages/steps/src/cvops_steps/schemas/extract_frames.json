@@ -10,10 +10,6 @@
     "max_frames": {
       "type": "integer", "minimum": 1,
       "description": "Cap on total frames extracted (optional)"
-    },
-    "dedup_threshold": {
-      "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05,
-      "description": "Perceptual-hash Hamming distance threshold for near-duplicate suppression"
     }
   },
   "required": ["interval_seconds"],

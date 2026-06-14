@@ -1,0 +1,31 @@
+metadata:
+  name: cvat-yolo-base
+  namespace: cvat
+  annotations:
+    name: YOLO Base
+    type: detector
+    framework: pytorch
+    spec: '[]'
+
+spec:
+  description: Base image for YOLO detectors
+  runtime: python:3.9
+  handler: main:handler
+
+platform:
+  attributes:
+    restartPolicy:
+      name: always
+      maximumRetryCount: 3
+    mountMode: volume
+
+build:
+  image: cvat/nuclio-processor-base:latest
+
+triggers:
+  myHttpTrigger:
+    maxWorkers: 1
+    kind: http
+    workerAvailabilityTimeoutMilliseconds: 10000
+    attributes:
+      maxRequestBodySize: 33554432

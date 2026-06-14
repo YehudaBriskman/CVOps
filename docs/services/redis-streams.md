@@ -1,7 +1,7 @@
 # ICD — Redis Streams (Job Message Format)
 
 **Owner:** Yehuda
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-14
 
 ---
 
@@ -18,7 +18,11 @@ API creates runs row in PG  →  XADD thin message to Redis Stream
                                          ↓
                                Worker executes, writes results to PG
                                          ↓
-                               Worker XACK message
+                               Worker POSTs /internal/runs/{id}/advance
+                                         ↓
+                               Executor enqueues next step → XADD next stream
+                                         ↓
+                               Worker XACKs message
 ```
 
 ---
@@ -28,7 +32,7 @@ API creates runs row in PG  →  XADD thin message to Redis Stream
 | Stream | Consumed by |
 |---|---|
 | `preprocessing` | worker-preprocessing |
-| `labeling` | worker-labeling |
+| `cvat` | worker-cvat |
 | `training` | worker-training |
 
 ---
@@ -51,20 +55,22 @@ That is the entire message. Workers use `job_id` to fetch the full config and in
 
 ## Producer (API)
 
-Phase 1 — API does NOT write to Redis. Executor runs in-process via `BackgroundTasks`.
-
-Phase 2 — after inserting the `runs` row:
+The API's `advance_workflow` coordinator (`services/api/src/cvops_api/engine/coordinator.py`)
+creates the child `runs` row, then — for each ready step — rings the queue:
 
 ```python
 await redis.xadd(
-    step.queue,
+    queue,                       # step.queue or "preprocessing" by default
     {
-        "job_id":    str(run_id),
+        "job_id":    str(child_run_id),
         "step_type": step.type_key,
-        "queue":     step.queue,
+        "queue":     queue,
     }
 )
 ```
+
+This is synchronous in-request (just row creation + `XADD`; no step runs in the API
+process). The in-process `BackgroundTasks` executor has been removed.
 
 ---
 
@@ -102,6 +108,30 @@ for stream, msgs in messages:
 
 ---
 
+## Auto-Chain Contract
+
+Workers do not enqueue the next step directly. Instead, on successful step completion a worker calls:
+
+```
+POST /internal/runs/{workflow_run_id}/advance
+Body: { "step_run_id": "<uuid>", "output_refs": { ... } }
+```
+
+The executor then:
+1. Marks the child run `succeeded`
+2. Resolves the next steps in the workflow DAG
+3. Creates their `runs` rows in PG
+4. Does `XADD` to the appropriate stream for each
+
+This keeps all DAG orchestration logic in the executor. Workers are dumb executors — they never know what comes next.
+
+```
+extract_frames (preprocessing) → auto_label (cvat) → human_review (cvat, gate)
+    → commit_dataset (preprocessing) → export_yolo (cvat) → train (training)
+```
+
+---
+
 ## Orphan Recovery
 
 Redis can lose messages on restart if persistence is not configured. PostgreSQL is the safety net.
@@ -115,7 +145,7 @@ WHERE status = 'pending'
   AND created_at < now() - interval '30 seconds'
 ```
 
-For each result, re-enqueue into the Redis Stream. If the job is already in Redis, the consumer group deduplication prevents double-processing.
+For each result, re-enqueue into the Redis Stream. Consumer group deduplication prevents double-processing if the message is already in Redis.
 
 ---
 

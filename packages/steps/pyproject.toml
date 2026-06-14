@@ -12,9 +12,7 @@ requires-python = ">=3.12"
 # importing cvops_steps (for register_all) never requires the extras.
 dependencies = [
   "cvops-api",          # Step contract, StorageBackend, registry
-  "ffmpeg-python>=0.2", # extract_frames: video decode
-  "imagehash>=4.3",     # extract_frames: perceptual dedup
-  "pillow>=10.3",       # extract_frames: image handling
+  "opencv-python-headless>=4.9", # extract_frames: video decode + frame encoding
 ]
 
 [project.optional-dependencies]

@@ -11,7 +11,7 @@ CVOps is an ML-lifecycle dashboard that collapses dataset versioning, workflow o
 | `services/api` | Python 3.12 / FastAPI — REST API, workflow engine, DB layer | implemented |
 | `services/frontend` | TypeScript / React 18 + Vite — dashboard UI | in progress |
 | `packages/steps` | Python — step implementations loaded by the engine (`extract_frames` implemented; `auto_label`, `human_review`, `commit_dataset`, `export_yolo`, `train` are stubs) | partial |
-| `services/worker` | Python / Celery — async worker queue | Phase 2 |
+| `services/worker-preprocessing` | Python — Redis-Streams worker; consumes the `preprocessing` stream and runs steps out of the API process | implemented |
 
 Standalone CLI prototypes for the same lifecycle steps live in `tools/frame-extractor/` (`extract_frames.py`, `auto_label.py`, `upload_to_cvat.py`).
 
@@ -31,8 +31,7 @@ Two distinct entry points — keep them straight:
 cd manifests
 
 docker compose up                                                            # infra only (matches what Tilt uses)
-docker compose --profile app up                                              # + api, frontend, nginx (prod-target builds)
-docker compose --profile app --profile worker up                             # + celery worker
+docker compose --profile app up                                              # + api, frontend, nginx, worker-preprocessing (prod-target builds)
 docker compose --profile all up                                              # everything
 
 # Force dev-target containers (rare — for reproducing CI failures):
@@ -41,7 +40,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 
 All compose, env, and config files live under `manifests/`. Paths inside the compose files are relative to that directory.
 
-The `worker` service is gated behind the `phase2` profile and does not start by default.
+The `worker-preprocessing` service runs in the `app`/`all` profiles (and as a host process under `tilt up`), so the ingest flow works end-to-end out of the API process.
 
 ### API (`services/api`)
 
@@ -89,12 +88,16 @@ Client ──► nginx ──► FastAPI ──► Depends(get_current_user)  �
 - Garage (S3-compatible object store) holds every byte payload (images, annotations, model weights). Blobs are content-addressed by SHA-256; the API never proxies bytes — clients get presigned PUT/GET URLs. Presigned URLs are signed against a browser-reachable host (derived per-request from the `Host` header, or `S3_PUBLIC_ENDPOINT` if set), not the internal `S3_ENDPOINT`.
 - Redis holds the JWT `jti` revocation list and any transient cache.
 
-**Workflow engine** (`engine/executor.py`, `engine/ref_resolver.py`, `engine/step.py`):
+**Workflow engine** (`engine/coordinator.py`, `engine/ref_resolver.py`, `engine/step.py`):
+
+Steps execute **out of process** on Redis Streams (doorbell) with Postgres as the authority — see `docs/services/redis-streams.md`. There is no in-process `execute_workflow` anymore.
 
 - A workflow is a DAG: `{steps: [...], edges: [...]}` stored on `Workflow.definition`.
-- `POST /workflows/{id}/runs` returns immediately with `status: pending`; `execute_workflow(run_id, actor_id)` runs as a FastAPI `BackgroundTask` and creates its own `async_session_factory()` session.
-- Execution: Kahn's topological sort → for each step, compute idempotency key `sha256(type + config + resolved inputs)`, reuse outputs of identical prior child runs, resolve `$steps.<id>.outputs.<name>` refs, call the registered step implementation.
-- `GateException` from a step pauses the run (`status = waiting`); `POST /runs/{id}/gates/{step_id}/resolve` resumes it. Any other exception fails the run; the executor's outer `except` opens a fresh session and writes `status=failed` so transient session state can't swallow the error.
+- `POST /workflows/{id}/runs` (and the `confirm-upload` auto-trigger) create a `pending` parent run, then call `advance_workflow(session, run_id, actor_id)` **synchronously in-request**. That creates a child `runs` row for every ready step, **freezes** resolved inputs onto `child.input_refs`, and `XADD`s a thin `{job_id, step_type, queue}` message onto each step's queue (default `preprocessing`). It runs no step.
+- A per-queue worker (`services/worker-preprocessing`) consumes the stream, claims one `pending` child via `SELECT … FOR UPDATE SKIP LOCKED`, runs it through `process_step`, writes results to PG, `XACK`s, and calls `advance_workflow` again to enqueue whatever became ready.
+- Idempotency key `sha256(type + config + resolved inputs)` still reuses outputs of identical prior succeeded child runs (created already `succeeded`, no enqueue).
+- `GateException` from a step pauses the run (`status = waiting`); `POST /runs/{id}/gates/{step_id}/resolve` resumes it by calling `advance_workflow`. Any other exception fails the child + parent on a fresh transaction so transient session state can't swallow the error.
+- A step's queue is `Step.queue` (empty → `preprocessing`), so routing needs no edit to the step package.
 - Step implementations live in `cvops_steps` (separate package, dynamically loaded at startup). If it fails to import, the engine still runs — just with an empty registry.
 
 **Multi-tenancy** is enforced at the query level: every resource has an `org_id` and routers filter on `current_user.org_id`. Do not rely on application-layer checks.
@@ -116,7 +119,7 @@ These are the conventions that are easy to violate without realising it. Most ar
 1. Subclass `Step` in `cvops_steps` (the `packages/steps` package in this monorepo, installed into the API env separately).
 2. Set `type_key`, `config_schema` (JSON Schema), `category`, `is_gate`.
 3. Register in `cvops_steps.register_all()` via `registry.register(MyStep())`.
-4. The executor picks it up at runtime — no API changes needed.
+4. The coordinator picks it up at runtime — no API changes needed. Override `queue` on the step to route it to a non-`preprocessing` worker.
 
 ## Git workflow (enforced by hooks)
 

@@ -1,13 +1,12 @@
 """Integration test for the extract_frames step.
 
-Exercises the real path: a synthetic ffmpeg video → S3Backend (moto) →
+Exercises the real path: a synthetic mp4 (generated with OpenCV) → S3Backend (moto) →
 ExtractFramesStep.run() → samples/blobs rows in testcontainers Postgres.
-Requires ffmpeg on PATH (the step depends on it).
+No external binaries required — OpenCV handles both video generation and processing.
 """
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -42,19 +41,25 @@ def _mocked_backend() -> S3Backend:
 
 
 def _make_test_video() -> bytes:
-    """2s 64x64 test pattern at 10fps → ~20 frames; 1fps sampling yields ~2."""
-    with tempfile.TemporaryDirectory() as td:
-        out = Path(td) / "v.mp4"
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-f", "lavfi",
-                "-i", "testsrc=duration=2:size=64x64:rate=10",
-                "-pix_fmt", "yuv420p", str(out),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        return out.read_bytes()
+    """2s 64x64 synthetic video at 10fps → 20 frames; 1fps sampling yields ~2."""
+    import cv2
+    import numpy as np
+
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    writer = cv2.VideoWriter(
+        tmp_path, cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (64, 64)
+    )
+    for i in range(20):
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        frame[:, :, i % 3] = min(255, 50 + i * 10)
+        writer.write(frame)
+    writer.release()
+
+    data = Path(tmp_path).read_bytes()
+    Path(tmp_path).unlink(missing_ok=True)
+    return data
 
 
 async def test_extract_frames_creates_samples(session: AsyncSession) -> None:

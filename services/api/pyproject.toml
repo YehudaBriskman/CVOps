@@ -45,6 +45,7 @@ dev = [
   "httpx>=0.27",
   "moto[s3]>=5",
   "testcontainers[postgres]>=4",
+  "fakeredis>=2.23",
   "ruff>=0.4",
   "mypy>=1.10",
 ]
