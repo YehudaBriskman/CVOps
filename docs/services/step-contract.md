@@ -85,8 +85,8 @@ All inputs and outputs are **artifact references** — UUIDs and blob hashes. Ra
 | `step.auto_label` | `{data_item_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
 | `step.human_review` | `{annotation_revision_ids: [uuid, ...]}` | `{annotation_revision_ids: [uuid, ...]}` |
 | `step.commit_dataset` | `{data_item_ids: [uuid, ...], annotation_revision_ids: [uuid, ...]}` | `{commit_id: uuid, ref_id: uuid}` |
-| `step.export_yolo` | `{commit_id: uuid}` | `{export_blob_hash: "sha256:..."}` |
-| `step.train` | `{export_blob_hash: "sha256:..."}` | `{model_version_id: uuid}` |
+| `step.export_yolo` | `{commit_id: uuid}` | `{export_blob_hash: "sha256:...", commit_id: uuid}` |
+| `step.train` | `{export_blob_hash: "sha256:...", commit_id: uuid}` | `{model_version_id: uuid}` |
 
 ---
 

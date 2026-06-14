@@ -12,6 +12,6 @@ class ExportYoloStep(Step):
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
         # Phase 1: E7 — Nati/Yahav
         # inputs: {commit_id: str}
-        # Returns: {export_blob_hash: str}
+        # Returns: {export_blob_hash: str, commit_id: str}
         # Idempotent: same (commit_id, ontology_id) = same export hash
         raise NotImplementedError
