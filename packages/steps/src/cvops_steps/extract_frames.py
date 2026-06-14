@@ -1,19 +1,10 @@
-"""extract_frames — decode a source video into deduplicated frame samples.
+"""extract_frames — decode a source video into frame samples using OpenCV.
 
-Consumes a data source's video blob, samples one frame every
-`interval_seconds` via ffmpeg, suppresses near-duplicate frames by perceptual
-hash, uploads each kept frame as a content-addressed JPEG blob, and registers a
+Reads the source video blob, samples one frame every `interval_seconds`,
+uploads each frame as a content-addressed JPEG blob, and registers a
 `samples` row per frame.
-
-Layering: steps may only touch cvops_api.core (storage) and the engine contract,
-not cvops_api.db.models or routers. Sample/blob rows are therefore written with
-parameterized raw SQL through the engine-provided session. Heavy deps
-(ffmpeg/imagehash/PIL) are imported inside run() so importing this module for
-registration stays cheap and never fails on a missing extra.
 """
 
-import hashlib
-import io
 import json
 import tempfile
 from pathlib import Path
@@ -23,67 +14,67 @@ from cvops_api.engine.step import Step, StepContext
 with open(Path(__file__).parent / "schemas" / "extract_frames.json") as f:
     _SCHEMA = json.load(f)
 
-# average_hash default is an 8x8 grid → 64-bit hash. dedup_threshold (0..1) is
-# scaled to a max Hamming distance against this width.
-_HASH_BITS = 64
-
 
 def _extract_frames_sync(
     video_bytes: bytes,
-    fps: float,
+    interval_seconds: float,
     max_frames: int | None,
-    max_distance: int,
 ) -> list[dict]:
-    """Blocking ffmpeg decode + perceptual dedup. Returns kept frames in order."""
-    import ffmpeg  # noqa: PLC0415 — heavy, imported lazily
-    import imagehash  # noqa: PLC0415
-    from PIL import Image  # noqa: PLC0415
+    """Blocking OpenCV decode. Returns extracted frames in order."""
+    import cv2  # noqa: PLC0415
 
     frames: list[dict] = []
-    kept_hashes: list = []
 
-    with tempfile.TemporaryDirectory() as td:
-        tdp = Path(td)
-        in_path = tdp / "input.bin"
-        in_path.write_bytes(video_bytes)
-        out_pattern = str(tdp / "f_%06d.jpg")
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+        tmp.write(video_bytes)
+        tmp_path = tmp.name
 
-        stream = ffmpeg.input(str(in_path)).filter("fps", fps=fps)
-        kwargs: dict = {}
-        if max_frames:
-            kwargs["vframes"] = int(max_frames)
-        stream.output(out_pattern, **kwargs).run(quiet=True, overwrite_output=True)
+    cap = cv2.VideoCapture(tmp_path)
+    try:
+        if not cap.isOpened():
+            raise ValueError("Could not open video")
 
-        idx = 0
-        for jpg in sorted(tdp.glob("f_*.jpg")):
-            data = jpg.read_bytes()
-            with Image.open(io.BytesIO(data)) as img:
-                img = img.convert("RGB")
-                width, height = img.size
-                phash = imagehash.average_hash(img)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 1.0
+        interval = max(1, int(fps * interval_seconds))
 
-                if max_distance > 0 and any((phash - k) <= max_distance for k in kept_hashes):
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_idx % interval == 0:
+                height_px, width_px = frame.shape[:2]
+
+                ok, buf = cv2.imencode(".jpg", frame)
+                if not ok:
+                    frame_idx += 1
                     continue
+                data = buf.tobytes()
 
-                # 256x256 thumbnail for the UI grid (samples.thumbnail_hash).
-                thumb = img.copy()
-                thumb.thumbnail((256, 256))
-                tbuf = io.BytesIO()
-                thumb.save(tbuf, format="JPEG")
-                thumb_bytes = tbuf.getvalue()
+                # thumbnail: maintain aspect ratio, max 256px on longest side
+                scale = 256 / max(height_px, width_px)
+                thumb = cv2.resize(frame, (int(width_px * scale), int(height_px * scale)))
+                ok2, tbuf = cv2.imencode(".jpg", thumb)
+                thumb_data = tbuf.tobytes() if ok2 else data
 
-            kept_hashes.append(phash)
-            frames.append(
-                {
+                frames.append({
                     "data": data,
-                    "thumb": thumb_bytes,
-                    "width": width,
-                    "height": height,
-                    "phash": str(phash),
-                    "frame_index": idx,
-                }
-            )
-            idx += 1
+                    "thumb": thumb_data,
+                    "width": width_px,
+                    "height": height_px,
+                    "frame_index": len(frames),
+                })
+
+                if max_frames and len(frames) >= max_frames:
+                    break
+
+            frame_idx += 1
+    finally:
+        cap.release()
+        Path(tmp_path).unlink(missing_ok=True)
 
     return frames
 
@@ -102,9 +93,8 @@ class ExtractFramesStep(Step):
         from cvops_api.core.storage import StorageBackend  # noqa: PLC0415
 
         source_id = inputs["source_id"]
-        interval = float(config["interval_seconds"])
+        interval_seconds = float(config["interval_seconds"])
         max_frames = config.get("max_frames")
-        max_distance = round(float(config.get("dedup_threshold", 0.0)) * _HASH_BITS)
 
         row = (
             await ctx.session.execute(
@@ -125,16 +115,9 @@ class ExtractFramesStep(Step):
         )
 
         video_bytes = await ctx.storage.get_bytes(blob_hash)
-        # Lazy hash verification deferred from confirm-upload: we read the bytes
-        # here anyway, so this is the natural place to catch a bad client hash.
-        actual = "sha256:" + hashlib.sha256(video_bytes).hexdigest()
-        if actual != blob_hash:
-            raise ValueError(
-                f"source blob hash mismatch: declared {blob_hash}, got {actual}"
-            )
 
         frames = await asyncio.to_thread(
-            _extract_frames_sync, video_bytes, 1.0 / interval, max_frames, max_distance
+            _extract_frames_sync, video_bytes, interval_seconds, max_frames
         )
 
         async def _register_blob(blob_hash: str, data: bytes) -> None:
@@ -159,15 +142,13 @@ class ExtractFramesStep(Step):
             thumb_hash = await ctx.storage.save_bytes(fr["thumb"], "image/jpeg")
             await _register_blob(frame_hash, fr["data"])
             await _register_blob(thumb_hash, fr["thumb"])
-            # Generate the id rather than relying on a DB-side default: the ORM
-            # model's id default is Python-side, so a schema built from models
-            # (e.g. tests) has no server default for it.
+
             res = await ctx.session.execute(
                 text(
                     "INSERT INTO samples (id, project_id, blob_hash, source_id, width, "
-                    "height, frame_index, perceptual_hash, thumbnail_hash) VALUES "
+                    "height, frame_index, thumbnail_hash) VALUES "
                     "(CAST(:id AS uuid), CAST(:pid AS uuid), :bh, CAST(:sid AS uuid), "
-                    ":w, :h, :fi, :ph, :th) "
+                    ":w, :h, :fi, :th) "
                     "ON CONFLICT (project_id, blob_hash) DO NOTHING RETURNING id"
                 ),
                 {
@@ -178,7 +159,6 @@ class ExtractFramesStep(Step):
                     "w": fr["width"],
                     "h": fr["height"],
                     "fi": fr["frame_index"],
-                    "ph": fr["phash"],
                     "th": thumb_hash,
                 },
             )
@@ -186,7 +166,6 @@ class ExtractFramesStep(Step):
             if new is not None:
                 sample_ids.append(str(new[0]))
             else:
-                # Identical frame already a sample in this project — reuse its id.
                 existing = (
                     await ctx.session.execute(
                         text(

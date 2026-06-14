@@ -3,10 +3,6 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# ffmpeg is required by the extract_frames step's decode path.
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && \
-    rm -rf /var/lib/apt/lists/*
-
 RUN pip install --no-cache-dir hatchling
 
 # Install the three packages editable, deps first so layers cache well. Each

@@ -34,7 +34,6 @@ require('node',     'install Node 20+')
 require('npm',      'usually bundled with node')
 require('docker',   'install Docker — needed for the infra containers')
 require('openssl',  'install openssl — needed to generate dev secrets')
-require('ffmpeg',   'install ffmpeg — needed by the extract_frames step')
 
 # ── Bootstrap manifests/.env from manifests/.env.example ────────────────────
 if not os.path.exists('manifests/.env'):
@@ -269,7 +268,7 @@ local_resource('git-hooks',
 local_resource('worker-install',
     cmd='cd services/api && .venv/bin/python -m pip install -e ../worker-preprocessing >/dev/null',
     deps=['services/worker-preprocessing/pyproject.toml'],
-    resource_deps=['steps-install'],
+    resource_deps=['api-install', 'steps-install'],
     labels=['5-setup'],
 )
 

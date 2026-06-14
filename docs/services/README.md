@@ -13,7 +13,7 @@ An ICD defines what a service needs, what it reads, what it writes, and what it 
 |---|---|---|
 | [api.md](./api.md) | API (FastAPI) | Yehuda |
 | [worker-preprocessing.md](./worker-preprocessing.md) | Preprocessing Worker | Nati / Yahav |
-| [worker-labeling.md](./worker-labeling.md) | Labeling Worker | TBD |
+| [worker-cvat.md](./worker-cvat.md) | CVAT Worker | TBD |
 | [worker-training.md](./worker-training.md) | Training Worker | Nati / Yahav |
 | [frontend.md](./frontend.md) | Frontend (React) | TBD |
 | [step-contract.md](./step-contract.md) | Step ABC (shared library) | Itai |
@@ -76,7 +76,7 @@ The API is the gatekeeper (auth + authorization). MinIO is the byte store. They 
      ┌─────┼─────┐       │    │         │
      ▼     ▼     ▼       │    │         │
   worker worker worker   │    │         │
-  prep  label train      │    │         │
+  prep  cvat  train      │    │         │
      │     │     │       │    │         │
      │     │     └───────┼────┘         │
      │     │             │              │
@@ -86,7 +86,7 @@ The API is the gatekeeper (auth + authorization). MinIO is the byte store. They 
        PostgreSQL ─────────────────────►│
        (facts, job state)     presigned URL generation
 
-  worker-labeling  ──► CVAT           (push tasks, pull annotations)
+  worker-cvat  ──► CVAT           (push tasks, pull annotations)
   worker-training  ──► Docker daemon  (launch training containers)
 ```
 
@@ -103,10 +103,10 @@ The API is the gatekeeper (auth + authorization). MinIO is the byte store. They 
 | worker-preprocessing | PostgreSQL | asyncpg | job pickup + result write |
 | worker-preprocessing | MinIO | boto3 | read source blobs, write outputs |
 | worker-preprocessing | Redis | redis-py | XREADGROUP, XACK |
-| worker-labeling | PostgreSQL | asyncpg | job pickup + revision write |
-| worker-labeling | Redis | redis-py | XREADGROUP, XACK |
-| worker-labeling | CVAT | httpx REST | push tasks, pull annotations |
-| worker-labeling | API | httpx REST | `POST /runs/{id}/gates/{step}/resolve` |
+| worker-cvat | PostgreSQL | asyncpg | job pickup + revision write |
+| worker-cvat | Redis | redis-py | XREADGROUP, XACK |
+| worker-cvat | CVAT | httpx REST | push tasks, pull annotations |
+| worker-cvat | API | httpx REST | `POST /runs/{id}/gates/{step}/resolve` |
 | worker-training | PostgreSQL | asyncpg | job pickup + model_version write |
 | worker-training | MinIO | boto3 | read dataset, write weights |
 | worker-training | Redis | redis-py | XREADGROUP, XACK |
