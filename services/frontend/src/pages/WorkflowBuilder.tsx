@@ -25,6 +25,7 @@ import { useRegistryTypes } from '../api/registry'
 import { STEP_TYPES } from '../lib/stepCatalog'
 import { Button, Drawer, Field, Input } from '../components/ui'
 import { toast } from '../store/toast'
+import { validateDag, layeredLayout, type GraphNode, type GraphEdge } from '../lib/workflowGraph'
 
 const MINIMAP_COLORS: Record<string, string> = {
   'step.extract_frames': '#3b82f6',
@@ -88,8 +89,38 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
   const [loaded, setLoaded] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
+  const [showIssues, setShowIssues] = useState(false)
+
   const selectedNode = nodes.find(n => n.id === selectedId) ?? null
   const selectedType = registryTypes?.find(rt => rt.type_key === selectedNode?.data.type_key)
+
+  const schemaByType = useMemo(() => {
+    const m = new Map<string, Record<string, unknown>>()
+    for (const rt of registryTypes ?? []) m.set(rt.type_key, rt.json_schema)
+    return m
+  }, [registryTypes])
+
+  const graph = useMemo(() => {
+    const gNodes: GraphNode[] = nodes.map(n => ({
+      id: n.id,
+      type_key: n.data.type_key,
+      label: n.data.label,
+      config: n.data.config ?? {},
+    }))
+    const gEdges: GraphEdge[] = edges.map(e => ({ source: e.source, target: e.target }))
+    return { gNodes, gEdges }
+  }, [nodes, edges])
+
+  const issues = useMemo(
+    () => validateDag(graph.gNodes, graph.gEdges, schemaByType),
+    [graph, schemaByType],
+  )
+  const errorCount = issues.filter(i => i.level === 'error').length
+
+  const handleTidy = useCallback(() => {
+    const pos = layeredLayout(graph.gNodes, graph.gEdges)
+    setNodes(nds => nds.map(n => (pos.has(n.id) ? { ...n, position: pos.get(n.id)! } : n)))
+  }, [graph, setNodes])
 
   const onNodeClick = useCallback(
     (_e: React.MouseEvent, node: StepNodeType) => setSelectedId(node.id),
@@ -189,13 +220,67 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
   return (
     <div className="relative flex-1">
       <div className="absolute right-4 top-4 z-10 flex gap-2">
+        <Button variant="secondary" onClick={handleTidy} disabled={nodes.length === 0} className="shadow-sm">
+          Tidy
+        </Button>
         <Button variant="secondary" onClick={handleSave} loading={updateWorkflow.isPending} className="shadow-sm">
           Save
         </Button>
-        <Button onClick={handleRun} loading={createRun.isPending} className="shadow-sm">
+        <Button
+          onClick={handleRun}
+          loading={createRun.isPending}
+          disabled={errorCount > 0 || nodes.length === 0}
+          title={errorCount > 0 ? 'Fix validation errors before running' : undefined}
+          className="shadow-sm"
+        >
           ▶ Run Workflow
         </Button>
       </div>
+
+      {nodes.length > 0 && (
+        <div className="absolute bottom-4 left-4 z-10 max-w-sm">
+          {issues.length === 0 ? (
+            <div className="rounded-lg border border-border bg-surface-2 px-3 py-1.5 text-xs font-medium text-success shadow-sm">
+              ✓ Valid DAG · {nodes.length} step{nodes.length === 1 ? '' : 's'}
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border bg-surface-2 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowIssues(v => !v)}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-3"
+              >
+                <span
+                  aria-hidden
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: errorCount > 0 ? '#EF4444' : '#F59E0B' }}
+                />
+                {issues.length} issue{issues.length === 1 ? '' : 's'}
+                {errorCount > 0 && ` · ${errorCount} blocking`}
+                <span className="ml-1 text-text-muted">{showIssues ? '▾' : '▸'}</span>
+              </button>
+              {showIssues && (
+                <ul className="border-t border-border">
+                  {issues.map((issue, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => issue.nodeId && setSelectedId(issue.nodeId)}
+                        className="flex w-full items-start gap-2 px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-surface-3"
+                      >
+                        <span style={{ color: issue.level === 'error' ? '#EF4444' : '#F59E0B' }}>
+                          {issue.level === 'error' ? '✕' : '!'}
+                        </span>
+                        <span>{issue.message}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <ReactFlow
         nodes={nodes}
