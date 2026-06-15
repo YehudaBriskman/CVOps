@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
+import { sha256Hex } from '../lib/hash'
 
 interface DataSource {
   id: string
@@ -61,10 +62,7 @@ export default function DataSources() {
       }
 
       setProgress('Computing hash…')
-      const buf = await file.arrayBuffer()
-      const digest = await crypto.subtle.digest('SHA-256', buf)
-      const hex = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
-      const blobHash = `sha256:${hex}`
+      const blobHash = `sha256:${await sha256Hex(file)}`
 
       setProgress('Confirming upload…')
       await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, { blob_hash: blobHash })
