@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
 import { client } from '../lib/client'
-import type { CursorPage } from './samples'
+import type { CursorPage, Sample } from './samples'
 import type { RunOut } from './runs'
 
 export interface TrainCommitRequest {
@@ -75,6 +75,24 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
     },
     enabled: !!datasetId && !!commitId,
     staleTime: Infinity,
+  })
+}
+
+/** The samples frozen into a specific commit (cursor-paginated). */
+export function useCommitSamples(datasetId: string | undefined, commitId: string | null | undefined) {
+  return useInfiniteQuery<CursorPage<Sample>>({
+    queryKey: ['commit-samples', datasetId, commitId],
+    queryFn: async ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: '100' })
+      if (pageParam) params.set('cursor', pageParam as string)
+      const { data } = await client.get<CursorPage<Sample>>(
+        `/datasets/${datasetId}/commits/${commitId}/samples?${params}`,
+      )
+      return data
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: !!datasetId && !!commitId,
   })
 }
 
