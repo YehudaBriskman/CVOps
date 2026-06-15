@@ -149,7 +149,8 @@ users(id PK, email, ...)
 memberships(org_id FK, user_id FK, role)             -- RBAC, see doc 08
 projects(id PK, org_id FK, name, task_type, default_ontology_id FK, settings JSONB)
 
-data_sources(id PK, project_id FK, type, blob_hash FK?, external_uri?, metadata JSONB)
+data_sources(id PK, project_id FK, type, blob_hash FK?, external_uri?, metadata JSONB,
+        UNIQUE(project_id, blob_hash) WHERE deleted_at IS NULL AND blob_hash IS NOT NULL)
 samples(id PK, project_id FK, blob_hash FK, source_id FK, width, height,
         frame_index?, perceptual_hash, metadata JSONB)
 
@@ -182,6 +183,7 @@ runs(id PK, kind, parent_run_id FK?, project_id FK, workflow_id FK?, workflow_ve
 - `commit_samples (commit_id)` and a derived index for `(commit_id, split)` — assembling a version.
 - A way to filter a version by class and review status — either denormalize `class_key`/`review_status` onto `commit_samples`, or maintain a derived per-commit class index. (Commits are immutable, so these derived indexes never need invalidation.)
 - `samples (project_id, perceptual_hash)` — near-duplicate detection on ingest.
+- `data_sources (project_id, blob_hash)` partial unique (live, hashed rows) — one source per video per project; backs exact-hash re-ingest detection. The client probes it pre-upload via `POST /projects/{id}/data-sources/check`.
 - `refs (dataset_id, ref_type, name)` unique — fast head lookup + CAS target.
 - `runs (workflow_id, status)` and `runs (parent_run_id)` — dashboard run views.
 - `events (entity_type, entity_id, created_at)` — lineage/history of any entity.

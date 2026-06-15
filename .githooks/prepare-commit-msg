@@ -1,6 +1,9 @@
 #!/bin/sh
-# ── prepare-commit-msg hook ────────────────────────────────────────────────
+# ── prepare-commit-msg (git provider) ──────────────────────────────────────
 # Injects a commit message template for fresh commits (not merge/amend/squash).
+#
+# jj equivalent: the `templates.draft_commit_description` config installed by
+# scripts/jj-setup.sh pre-fills the `jj describe` editor with the same guide.
 
 COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"   # merge | squash | commit (amend) | empty = new commit

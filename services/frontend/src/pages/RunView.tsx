@@ -1,20 +1,16 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useRun, useRunSSE, useCancelRun, useRetryRun } from '../api/runs'
 import { StepRunCard } from '../components/runs/StepRunCard'
 import { GateResolutionBanner } from '../components/runs/GateResolutionBanner'
 import type { RunStep } from '../components/runs/types'
-
-const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-slate-100 text-slate-500',
-  running:   'bg-amber-100 text-amber-700',
-  succeeded: 'bg-green-100 text-green-700',
-  failed:    'bg-red-100 text-red-700',
-  cancelled: 'bg-slate-100 text-slate-500',
-  waiting:   'bg-orange-100 text-orange-700',
-}
+import { Breadcrumbs, Button, Card, EmptyState, SkeletonList, StatusPill } from '../components/ui'
 
 function stepLabel(typeKey: string) {
-  return typeKey.replace('step.', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  return typeKey.replace('step.', '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
 
 export default function RunView() {
@@ -26,92 +22,102 @@ export default function RunView() {
   const retryRun = useRetryRun()
 
   if (isLoading) {
-    return <div className="p-6 text-sm text-slate-400">Loading…</div>
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <SkeletonList rows={3} />
+      </div>
+    )
   }
 
   const run = detail?.run
   const steps = detail?.steps ?? []
+  const waitingStep = steps.find((s) => s.status === 'waiting')
 
-  const waitingStep = steps.find(s => s.status === 'waiting')
+  const stepCards: RunStep[] = steps.map((s) => {
+    const outputs = asRecord(s.output_refs)
+    return {
+      id: s.id,
+      type_key: s.kind === 'step' ? (s.step_id ?? s.kind) : s.kind,
+      label: stepLabel(s.step_id ?? s.kind ?? ''),
+      status: s.status,
+      started_at: s.started_at,
+      finished_at: s.finished_at,
+      duration:
+        s.started_at && s.finished_at
+          ? `${Math.round((new Date(s.finished_at).getTime() - new Date(s.started_at).getTime()) / 1000)}s`
+          : null,
+      config: asRecord(s.config),
+      inputs: asRecord(s.input_refs),
+      outputs,
+      metrics: asRecord(s.metrics),
+      error: s.error,
+      // The coordinator nests gate data under output_refs.gate_data; fall back
+      // to a top-level cvat_url for any older shape.
+      cvat_url:
+        ((outputs?.gate_data as Record<string, unknown> | undefined)?.cvat_url as string) ??
+        (outputs?.cvat_url as string) ??
+        undefined,
+    }
+  })
 
-  const stepCards: RunStep[] = steps.map(s => ({
-    id: s.id,
-    type_key: s.kind === 'step' ? (s.step_id ?? s.kind) : s.kind,
-    label: stepLabel(s.step_id ?? s.kind ?? ''),
-    status: s.status as RunStep['status'],
-    started_at: s.started_at,
-    finished_at: s.finished_at,
-    duration: s.started_at && s.finished_at
-      ? `${Math.round((new Date(s.finished_at).getTime() - new Date(s.started_at).getTime()) / 1000)}s`
-      : null,
-    outputs: s.output_refs as RunStep['outputs'],
-    logs: null,
-    cvat_url: (s.output_refs?.cvat_url as string) ?? undefined,
-  }))
+  const isActive = run?.status === 'pending' || run?.status === 'running'
+  const isRetryable = run?.status === 'failed' || run?.status === 'cancelled' || run?.status === 'canceled'
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-slate-400 mb-4">
-        <Link to="/projects" className="hover:text-indigo-600">Projects</Link>
-        <span>/</span>
-        <span className="text-slate-700 font-medium">Run {id?.slice(0, 8)}</span>
-      </div>
+    <div className="mx-auto max-w-3xl p-6">
+      <Breadcrumbs items={[{ label: 'Projects', to: '/projects' }, { label: `Run ${id?.slice(0, 8)}`, mono: true }]} />
 
       {run && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 mb-4 flex items-center justify-between">
+        <Card className="mb-4 flex items-center justify-between px-5 py-4">
           <div>
             <div className="flex items-center gap-2">
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[run.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                {run.status}
-                {run.status === 'running' && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
-              </span>
-              <span className="text-xs text-slate-400">Attempt {run.attempt}</span>
+              <StatusPill status={run.status} />
+              <span className="text-xs text-text-muted">Attempt {run.attempt}</span>
             </div>
-            {run.error && (
-              <p className="text-xs text-red-600 mt-1">{run.error}</p>
-            )}
+            {run.error && <p className="mt-1 text-xs text-error">{run.error}</p>}
           </div>
           <div className="flex gap-2">
-            {(run.status === 'pending' || run.status === 'running') && (
-              <button
-                onClick={() => id && cancelRun.mutate(id)}
-                className="text-xs border border-slate-300 text-slate-600 px-3 py-1.5 rounded-lg hover:bg-slate-50"
-              >
+            {isActive && (
+              <Button variant="secondary" size="sm" loading={cancelRun.isPending} onClick={() => id && cancelRun.mutate(id)}>
                 Cancel
-              </button>
+              </Button>
             )}
-            {(run.status === 'failed' || run.status === 'cancelled') && (
-              <button
-                onClick={() => id && retryRun.mutate(id)}
-                className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700"
-              >
+            {isRetryable && (
+              <Button size="sm" loading={retryRun.isPending} onClick={() => id && retryRun.mutate(id)}>
                 Retry
-              </button>
+              </Button>
             )}
           </div>
-        </div>
+        </Card>
       )}
 
       {waitingStep && id && (
         <GateResolutionBanner
           runId={id}
           stepId={waitingStep.step_id ?? waitingStep.id}
-          cvatUrl={(waitingStep.output_refs?.cvat_url as string) ?? null}
+          cvatUrl={
+            ((asRecord(waitingStep.output_refs)?.gate_data as Record<string, unknown> | undefined)?.cvat_url
+              ?? asRecord(waitingStep.output_refs)?.cvat_url) as string ?? null
+          }
         />
       )}
 
-      {stepCards.length === 0 && run?.status === 'pending' && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
-          <div className="w-6 h-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">Starting…</p>
+      {stepCards.length === 0 ? (
+        <EmptyState
+          title={run?.status === 'pending' ? 'Starting…' : 'No steps yet'}
+          description={
+            run?.status === 'pending'
+              ? 'The workflow is being scheduled. Steps appear here as they are created.'
+              : 'This run has no step records.'
+          }
+        />
+      ) : (
+        <div className="space-y-3">
+          {stepCards.map((step, i) => (
+            <StepRunCard key={step.id} step={step} defaultOpen={i === 0} />
+          ))}
         </div>
       )}
-
-      <div className="space-y-3">
-        {stepCards.map((step, i) => (
-          <StepRunCard key={step.id} step={step} defaultOpen={i === 0} />
-        ))}
-      </div>
     </div>
   )
 }

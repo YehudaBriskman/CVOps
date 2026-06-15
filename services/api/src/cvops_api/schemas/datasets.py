@@ -32,9 +32,23 @@ class CommitOut(BaseModel):
     dataset_id: uuid.UUID
     message: str | None = None
     stats: dict[str, Any] | None = None
-    ontology_id: uuid.UUID
-    ontology_version: int
+    ontology_id: uuid.UUID | None = None
+    ontology_version: int | None = None
     created_at: datetime
+
+
+class CommitFromSamples(BaseModel):
+    message: str = ""
+    sample_ids: list[uuid.UUID]
+    branch_name: str = "main"
+    split_strategy: dict[str, Any] = {}
+    ontology_id: uuid.UUID | None = None
+
+
+class CommitFromSamplesOut(BaseModel):
+    commit_id: uuid.UUID
+    committed_count: int
+    skipped_count: int
 
 
 class RefCreate(BaseModel):

@@ -1,102 +1,114 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { RunStep } from './types'
+import { StatusPill } from '../ui'
 
-const STATUS_STYLE: Record<string, { badge: string; dot: string }> = {
-  completed: { badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
-  running:   { badge: 'bg-amber-100 text-amber-700',  dot: 'bg-amber-400' },
-  failed:    { badge: 'bg-red-100   text-red-700',    dot: 'bg-red-500'   },
-  pending:   { badge: 'bg-slate-100 text-slate-500',  dot: 'bg-slate-300' },
+// Category accent colors (saturated dots read on both themes).
+const ACCENT: Record<string, string> = {
+  'step.extract_frames': 'bg-blue-500',
+  'step.auto_label': 'bg-purple-500',
+  'step.human_review': 'bg-orange-500',
+  'step.commit_dataset': 'bg-green-600',
+  'step.export_yolo': 'bg-yellow-500',
+  'step.train': 'bg-red-500',
 }
 
-const ACCENT: Record<string, string> = {
-  'step.extract_frames':  'bg-blue-500',
-  'step.auto_label':      'bg-purple-500',
-  'step.human_review':    'bg-orange-500',
-  'step.commit_dataset':  'bg-green-600',
-  'step.export_yolo':     'bg-yellow-500',
-  'step.train':           'bg-red-500',
+function isScalar(v: unknown): v is string | number | boolean {
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+}
+
+/** Render a refs/metrics/config record: scalars as a key/value grid, nested values as JSON. */
+function DetailSection({ title, values }: { title: string; values: Record<string, unknown> }) {
+  const entries = Object.entries(values)
+  if (entries.length === 0) return null
+  return (
+    <div>
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-text-muted">{title}</p>
+      <div className="grid grid-cols-2 gap-2">
+        {entries.map(([k, v]) => (
+          <div key={k} className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+            <p className="text-xs capitalize text-text-muted">{k.replace(/_/g, ' ')}</p>
+            {isScalar(v) ? (
+              <p className="break-words font-mono text-sm text-text-primary">{String(v)}</p>
+            ) : (
+              <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-text-secondary">
+                {JSON.stringify(v, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function StepRunCard({ step, defaultOpen = false }: { step: RunStep; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)
-  const style  = STATUS_STYLE[step.status] ?? STATUS_STYLE['pending']
   const accent = ACCENT[step.type_key] ?? 'bg-slate-400'
 
-  return (
-    <div className={clsx(
-      'rounded-xl border bg-white shadow-sm overflow-hidden',
-      step.status === 'running' ? 'border-amber-300' : 'border-slate-200',
-    )}>
-      {/* Header row */}
-      <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
-        onClick={() => setOpen(o => !o)}
-      >
-        <div className={`w-1.5 h-10 rounded-full flex-shrink-0 ${accent}`} />
+  const hasDetail =
+    step.error ||
+    step.cvat_url ||
+    (step.metrics && Object.keys(step.metrics).length > 0) ||
+    (step.outputs && Object.keys(step.outputs).length > 0) ||
+    (step.inputs && Object.keys(step.inputs).length > 0) ||
+    (step.config && Object.keys(step.config).length > 0)
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-slate-800">{step.label}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${style.badge}`}>
-              {step.status}
-            </span>
+  return (
+    <div
+      className={clsx(
+        'overflow-hidden rounded-xl border bg-surface-2 shadow-sm',
+        step.status === 'running' ? 'border-warning/50' : 'border-border',
+      )}
+    >
+      <button
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-3"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div className={`h-10 w-1.5 flex-shrink-0 rounded-full ${accent}`} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-text-primary">{step.label}</span>
+            <StatusPill status={step.status} />
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="mt-0.5 text-xs text-text-muted">
             {step.duration ?? (step.status === 'pending' ? 'Waiting…' : 'In progress')}
           </p>
         </div>
-
-        <div className={clsx('w-2 h-2 rounded-full flex-shrink-0', style.dot, step.status === 'running' && 'animate-pulse')} />
-        <span className="text-slate-400 text-[10px] ml-1">{open ? '▲' : '▼'}</span>
+        <span className="ml-1 text-[10px] text-text-muted">{open ? '▲' : '▼'}</span>
       </button>
 
-      {/* Expanded detail */}
       {open && (
-        <div className="border-t border-slate-100 bg-slate-50 px-4 py-4 space-y-4">
-          {/* CVAT gate */}
+        <div className="space-y-4 border-t border-border bg-surface-1 px-4 py-4">
+          {step.error && (
+            <div className="rounded-lg border border-error/30 bg-error/5 p-3">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-error">Error</p>
+              <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-error">
+                {step.error}
+              </pre>
+            </div>
+          )}
+
           {step.cvat_url && (
-            <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
-              <p className="text-xs font-semibold text-orange-900 mb-1">Waiting for human review in CVAT</p>
+            <div className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+              <p className="mb-1 text-xs font-semibold text-text-primary">Waiting for human review in CVAT</p>
               <a
                 href={step.cvat_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-orange-600 underline hover:text-orange-800"
+                className="text-xs text-iris-400 underline hover:opacity-80"
               >
                 Open CVAT Task →
               </a>
             </div>
           )}
 
-          {/* Outputs */}
-          {step.outputs && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Outputs</p>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(step.outputs).map(([k, v]) => (
-                  <div key={k} className="bg-white rounded-lg border border-slate-200 px-3 py-2">
-                    <p className="text-xs text-slate-400 capitalize">{k.replace(/_/g, ' ')}</p>
-                    <p className="text-sm font-bold text-slate-800">{String(v)}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {step.metrics && <DetailSection title="Metrics" values={step.metrics} />}
+          {step.outputs && <DetailSection title="Outputs" values={step.outputs} />}
+          {step.inputs && <DetailSection title="Resolved inputs" values={step.inputs} />}
+          {step.config && <DetailSection title="Config" values={step.config} />}
 
-          {/* Logs */}
-          {step.logs && (
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Logs</p>
-              <pre className="text-xs bg-slate-900 text-green-400 rounded-lg p-3 overflow-x-auto leading-relaxed whitespace-pre-wrap">
-                {step.logs}
-              </pre>
-            </div>
-          )}
-
-          {!step.logs && !step.outputs && !step.cvat_url && (
-            <p className="text-xs text-slate-400 italic">No output yet.</p>
-          )}
+          {!hasDetail && <p className="text-xs italic text-text-muted">No details yet.</p>}
         </div>
       )}
     </div>

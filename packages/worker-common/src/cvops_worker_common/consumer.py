@@ -31,6 +31,9 @@ from cvops_worker_common.session import async_session_factory
 logger = logging.getLogger(__name__)
 
 JobHandler = Callable[[str, str], Coroutine[Any, Any, None]]
+# A sync handler receives the full message fields (not a runs row) — used for
+# out-of-band doorbells like CVAT completion that carry no job_id/step_type.
+SyncHandler = Callable[[dict[str, str]], Coroutine[Any, Any, None]]
 
 
 class ConsumerLoop:
@@ -39,6 +42,7 @@ class ConsumerLoop:
         stream: str,
         step_types: list[str],
         handler: JobHandler | None = None,
+        sync_handler: SyncHandler | None = None,
     ) -> None:
         self.stream = stream
         self.step_types = step_types
@@ -48,6 +52,8 @@ class ConsumerLoop:
 
         from cvops_worker_common.runner import run_job
         self.handler: JobHandler = handler or run_job
+        # Messages carrying a "kind" field route here instead of the run handler.
+        self.sync_handler: SyncHandler | None = sync_handler
 
     async def run_forever(self) -> None:
         redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -104,14 +110,23 @@ class ConsumerLoop:
 
             for _stream, messages in results:
                 for msg_id, fields in messages:
+                    kind = fields.get("kind", "")
                     job_id = fields.get("job_id", "")
                     step_type = fields.get("step_type", "")
                     try:
-                        await self.handler(job_id, step_type)
+                        if kind:
+                            if self.sync_handler is None:
+                                logger.warning(
+                                    "No sync_handler for %r message — dropping", kind
+                                )
+                            else:
+                                await self.sync_handler(fields)
+                        else:
+                            await self.handler(job_id, step_type)
                     except Exception as exc:
                         logger.exception(
-                            "Unhandled error in job %s (%s): %s",
-                            job_id, step_type, exc,
+                            "Unhandled error in message %s (kind=%r job=%s type=%s): %s",
+                            msg_id, kind, job_id, step_type, exc,
                         )
                     finally:
                         await redis.xack(self.stream, self.group, msg_id)

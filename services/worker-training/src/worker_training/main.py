@@ -6,7 +6,7 @@ import logging
 from cvops_api.core.registry import registry
 from cvops_worker_common import ConsumerLoop
 
-from worker_training.steps.train import TrainStep
+from cvops_steps.train import TrainStep
 
 logging.basicConfig(
     level=logging.INFO,

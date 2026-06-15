@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from cvat_client import annotate, list_models
+from cvops_cvat_client import annotate, list_models
 from deployer import deploy
 
 app = FastAPI(title="Model Deployer", docs_url="/docs")

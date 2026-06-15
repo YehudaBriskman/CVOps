@@ -45,3 +45,10 @@ class EventOut(BaseModel):
 
 class GateResolve(BaseModel):
     resolution: str
+
+
+class TrainCommitRequest(BaseModel):
+    git_url: str
+    entry_point: str = "train.py"
+    branch: str | None = None
+    hyperparams: dict[str, Any] | None = None

@@ -3,13 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>CVOps</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <script>
       // Apply theme before React mounts to avoid a flash-of-wrong-theme.
+      // Dark is the default when nothing is stored (this is a dark-first product).
       (function () {
         try {
           var stored = localStorage.getItem('cvops:theme');
-          var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+          var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'dark';
           var resolved = mode === 'system'
             ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
             : mode;
