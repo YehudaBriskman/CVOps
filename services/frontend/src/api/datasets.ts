@@ -8,6 +8,7 @@ export interface TrainCommitRequest {
   entry_point?: string
   branch?: string | null
   hyperparams?: Record<string, string | number | boolean> | null
+  training_container_id?: string
 }
 
 export interface Dataset {
