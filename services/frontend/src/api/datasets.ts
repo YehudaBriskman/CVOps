@@ -70,6 +70,17 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
   })
 }
 
+export function useReviewDataset() {
+  return useMutation({
+    mutationFn: async (datasetId: string) => {
+      const { data } = await client.post<{ run_id: string }>(
+        `/datasets/${datasetId}/review`,
+      )
+      return data
+    },
+  })
+}
+
 export function useCreateDataset() {
   const qc = useQueryClient()
   return useMutation({
