@@ -1,6 +1,6 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useWorkflows, useCreateWorkflow, useDeleteWorkflow } from '../api/workflows'
-import { Button, Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Button, Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
 
 export default function Workflows() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -21,11 +21,9 @@ export default function Workflows() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/projects/${projectId}`} className="hover:text-cobalt">Project</Link>
-        <span>/</span>
-        <span className="font-medium text-text-secondary">Workflows</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: 'Project', to: `/projects/${projectId}` }, { label: 'Workflows' }]}
+      />
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-bold text-text-primary">Workflows</h2>

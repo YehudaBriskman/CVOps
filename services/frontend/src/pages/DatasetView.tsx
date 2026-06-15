@@ -1,7 +1,7 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useDataset, useCommits } from '../api/datasets'
 import { CommitGraph } from '../components/dataset/CommitGraph'
-import { Button, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Button, ErrorState, SkeletonList } from '../components/ui'
 
 export default function DatasetView() {
   const { id } = useParams<{ id: string }>()
@@ -28,11 +28,12 @@ export default function DatasetView() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/projects/${dataset.project_id}/datasets`} className="hover:text-cobalt">Datasets</Link>
-        <span>/</span>
-        <span className="font-medium text-text-secondary">{dataset.name}</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { label: 'Datasets', to: `/projects/${dataset.project_id}/datasets` },
+          { label: dataset.name },
+        ]}
+      />
 
       <h2 className="mb-4 text-xl font-bold text-text-primary">{dataset.name}</h2>
 

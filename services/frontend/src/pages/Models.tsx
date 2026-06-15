@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useModels } from '../api/models'
-import { Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
 
 export default function Models() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -8,11 +8,9 @@ export default function Models() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/projects/${projectId}`} className="hover:text-cobalt">Project</Link>
-        <span>/</span>
-        <span className="font-medium text-text-secondary">Models</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: 'Project', to: `/projects/${projectId}` }, { label: 'Models' }]}
+      />
 
       <h2 className="mb-4 text-xl font-bold text-text-primary">Models</h2>
 

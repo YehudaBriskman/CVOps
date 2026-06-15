@@ -1,7 +1,7 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useSamples } from '../api/samples'
 import { SampleGrid } from '../components/dataset/SampleGrid'
-import { Badge, ErrorState } from '../components/ui'
+import { Badge, Breadcrumbs, ErrorState } from '../components/ui'
 
 export default function SampleBrowser() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -15,11 +15,9 @@ export default function SampleBrowser() {
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/projects/${projectId}`} className="hover:text-cobalt">Project</Link>
-        <span>/</span>
-        <span className="font-medium text-text-secondary">Samples</span>
-      </nav>
+      <Breadcrumbs
+        items={[{ label: 'Project', to: `/projects/${projectId}` }, { label: 'Samples' }]}
+      />
 
       <div className="mb-4 flex items-center justify-between">
         <div>

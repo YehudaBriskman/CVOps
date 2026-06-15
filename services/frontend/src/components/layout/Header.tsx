@@ -1,6 +1,8 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeMode } from '../../lib/theme'
 import { logout, useMe } from '../../api/auth'
+import { useUIStore } from '../../store/ui'
+import { queryClient } from '../../lib/queryClient'
 
 function getTitle(pathname: string): string {
   if (pathname.endsWith('/data-sources')) return 'Data Sources'
@@ -27,17 +29,29 @@ export function Header() {
   const navigate = useNavigate()
   const { mode, toggle } = useTheme()
   const { data: me } = useMe()
+  const setCommandOpen = useUIStore((s) => s.setCommandOpen)
   const title = getTitle(location.pathname)
   const initial = me?.email?.[0]?.toUpperCase() ?? 'U'
 
   async function handleLogout() {
     await logout()
+    queryClient.clear()
     navigate('/login', { replace: true })
   }
 
   return (
     <header className="h-14 border-b border-border bg-surface-2 flex items-center px-6 flex-shrink-0 gap-3">
       <h1 className="text-text-primary font-semibold text-base flex-1 truncate">{title}</h1>
+
+      <button
+        type="button"
+        onClick={() => setCommandOpen(true)}
+        aria-label="Open command palette"
+        className="flex h-8 items-center gap-2 rounded-lg border border-border-strong px-3 text-xs text-text-muted transition-colors hover:bg-surface-1 hover:text-text-secondary flex-shrink-0"
+      >
+        <span>Search…</span>
+        <kbd className="rounded border border-border bg-surface-1 px-1.5 py-0.5 font-mono text-[10px] text-text-muted">⌘K</kbd>
+      </button>
 
       <button
         type="button"

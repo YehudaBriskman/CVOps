@@ -1,6 +1,6 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useModel, useWeightsUrl } from '../api/models'
-import { Card, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
 
 export default function ModelDetail() {
   const { id } = useParams<{ id: string }>()
@@ -25,11 +25,12 @@ export default function ModelDetail() {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/projects/${model.project_id}/models`} className="hover:text-cobalt">Models</Link>
-        <span>/</span>
-        <span className="font-mono text-text-secondary">{id?.slice(0, 8)}</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { label: 'Models', to: `/projects/${model.project_id}/models` },
+          { label: id?.slice(0, 8) ?? '', mono: true },
+        ]}
+      />
 
       <Card className="mb-4 p-6">
         <div className="mb-4 flex items-center justify-between">

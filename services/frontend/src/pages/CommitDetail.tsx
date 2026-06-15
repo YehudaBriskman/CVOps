@@ -1,7 +1,7 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useCommit } from '../api/datasets'
 import { CommitStats } from '../components/dataset/CommitStats'
-import { Card, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
 
 export default function CommitDetail() {
   const { id: datasetId, cid: commitId } = useParams<{ id: string; cid: string }>()
@@ -25,11 +25,12 @@ export default function CommitDetail() {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to={`/datasets/${datasetId}`} className="hover:text-cobalt">Dataset</Link>
-        <span>/</span>
-        <span className="font-mono text-text-secondary">{commitId?.slice(0, 8)}</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { label: 'Dataset', to: `/datasets/${datasetId}` },
+          { label: commitId?.slice(0, 8) ?? '', mono: true },
+        ]}
+      />
 
       <Card className="mb-4 p-6">
         <h2 className="mb-1 text-lg font-bold text-text-primary">{commit.message ?? 'Commit'}</h2>

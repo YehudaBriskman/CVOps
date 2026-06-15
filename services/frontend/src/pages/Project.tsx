@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useProject } from '../api/projects'
 import { useWorkflows } from '../api/workflows'
-import { Card, ErrorState, SkeletonList } from '../components/ui'
+import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
 
 const SECTIONS = [
   { label: 'Data Sources', path: 'data-sources', desc: 'Uploaded videos and images' },
@@ -35,11 +35,7 @@ export default function Project() {
 
   return (
     <div className="mx-auto max-w-5xl p-6">
-      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
-        <Link to="/projects" className="transition-colors hover:text-cobalt">Projects</Link>
-        <span>/</span>
-        <span className="font-medium text-text-secondary">{project.name}</span>
-      </nav>
+      <Breadcrumbs items={[{ label: 'Projects', to: '/projects' }, { label: project.name }]} />
 
       <div className="mb-6">
         <h2 className="text-xl font-bold text-text-primary">{project.name}</h2>
