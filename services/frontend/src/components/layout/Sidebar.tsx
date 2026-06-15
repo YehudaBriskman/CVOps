@@ -5,8 +5,8 @@ function navClass({ isActive }: { isActive: boolean }) {
   return clsx(
     'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
     isActive
-      ? 'bg-slate-700 text-white'
-      : 'text-mist hover:bg-slate-800 hover:text-white',
+      ? 'bg-surface-3 text-white'
+      : 'text-text-muted hover:bg-surface-3 hover:text-white',
   )
 }
 
@@ -23,7 +23,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
 
   return (
     <div className="mt-5">
-      <p className="px-3 mb-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-widest truncate">
+      <p className="px-3 mb-1.5 text-[10px] font-bold text-text-secondary uppercase tracking-widest truncate">
         Project
       </p>
       <nav className="space-y-0.5">
@@ -43,11 +43,11 @@ export function Sidebar() {
   const projectId  = (matchDeep ?? matchExact)?.params.id
 
   return (
-    <aside className="w-60 bg-ink flex flex-col flex-shrink-0 overflow-hidden">
+    <aside className="w-60 bg-surface-2 flex flex-col flex-shrink-0 overflow-hidden">
       {/* Logo */}
-      <div className="h-14 flex items-center px-4 border-b border-slate-800 flex-shrink-0">
+      <div className="h-14 flex items-center px-4 border-b border-border flex-shrink-0">
         <Link to="/projects" className="flex items-center gap-2 text-white font-bold text-lg">
-          <span className="text-aqua text-xl">◈</span>
+          <span className="text-iris-400 text-xl">◈</span>
           CVOps
         </Link>
       </div>
