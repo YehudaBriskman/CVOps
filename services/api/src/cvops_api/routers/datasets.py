@@ -11,6 +11,7 @@ from typing import Any, cast
 
 from cvops_api.core.auth import get_current_user
 from cvops_api.core.audit import emit_event
+from cvops_api.core.sample_view import build_sample_outs
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
@@ -37,7 +38,7 @@ from cvops_api.schemas.datasets import (
     DatasetLinkUpdate,
     DiffOut,
 )
-from cvops_api.schemas.samples import CursorPage
+from cvops_api.schemas.samples import CursorPage, SampleOut
 
 router = APIRouter()
 
@@ -171,6 +172,43 @@ async def get_commit(
         media_type="application/json",
         headers={"Cache-Control": "immutable, max-age=31536000"},
     )
+
+
+@router.get(
+    "/datasets/{id}/commits/{commit_id}/samples",
+    response_model=CursorPage[SampleOut],
+)
+async def list_commit_samples(
+    id: uuid.UUID,
+    commit_id: uuid.UUID,
+    cursor: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CursorPage[SampleOut]:
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    q = (
+        select(Sample)
+        .join(CommitSample, CommitSample.sample_id == Sample.id)
+        .where(CommitSample.commit_id == commit_id, Sample.deleted_at.is_(None))
+    )
+    if cursor is not None:
+        cursor_uuid = uuid.UUID(base64.b64decode(cursor).decode())
+        q = q.where(Sample.id > cursor_uuid)
+    q = q.order_by(Sample.id).limit(limit + 1)
+
+    rows = await session.execute(q)
+    items = list(rows.scalars().all())
+    next_cursor: str | None = None
+    if len(items) == limit + 1:
+        next_cursor = base64.b64encode(str(items[-1].id).encode()).decode()
+        items = items[:limit]
+    return CursorPage(items=await build_sample_outs(session, items), next_cursor=next_cursor)
 
 
 @router.post(
@@ -323,26 +361,30 @@ async def create_commit_from_samples(
     for sample_id, revision_id, ont_id in rows.all():
         winning[sample_id] = (revision_id, ont_id)
 
-    committed = [sid for sid in valid if sid in winning]
-    skipped_count = len(valid) - len(committed)
+    # Commit ALL selected samples: annotated ones pin their winning revision,
+    # raw (unannotated) images commit with a null revision — a dataset of raw
+    # images is valid.
+    committed = valid
     if not committed:
-        raise HTTPException(status_code=422, detail="no annotated samples to commit")
+        raise HTTPException(status_code=422, detail="no samples to commit")
+    annotated_count = sum(1 for sid in committed if sid in winning)
 
-    # Derive ontology_id: (1) body; (2) shared across winning revisions; (3) project default.
+    # Optional ontology: (1) body; (2) shared across winning revisions; (3)
+    # project default; else None (raw-image commits have no ontology).
     ontology_id = body.ontology_id
     if ontology_id is None:
-        ont_ids = {winning[sid][1] for sid in committed}
+        ont_ids = {winning[sid][1] for sid in committed if sid in winning}
         if len(ont_ids) == 1:
             ontology_id = next(iter(ont_ids))
         elif project.default_ontology_id is not None:
             ontology_id = project.default_ontology_id
-        else:
-            raise HTTPException(status_code=422, detail="ontology_id required")
 
-    r_ont = await session.execute(select(Ontology.version).where(Ontology.id == ontology_id))
-    ont_version = r_ont.scalar_one_or_none()
-    if ont_version is None:
-        raise HTTPException(status_code=404, detail="Ontology not found")
+    ont_version: int | None = None
+    if ontology_id is not None:
+        r_ont = await session.execute(select(Ontology.version).where(Ontology.id == ontology_id))
+        ont_version = r_ont.scalar_one_or_none()
+        if ont_version is None:
+            raise HTTPException(status_code=404, detail="Ontology not found")
 
     # Find parent commit via branch ref
     r_ref = await session.execute(
@@ -361,7 +403,7 @@ async def create_commit_from_samples(
         ontology_id=ontology_id,
         ontology_version=ont_version,
         message=body.message,
-        stats={"sample_count": len(committed), "skipped_unannotated": skipped_count},
+        stats={"sample_count": len(committed), "annotated": annotated_count},
         parent_commit_id=parent_commit_id,
     )
     session.add(commit)
@@ -385,7 +427,7 @@ async def create_commit_from_samples(
             CommitSample(
                 commit_id=commit.id,
                 sample_id=sid,
-                annotation_revision_id=winning[sid][0],
+                annotation_revision_id=winning[sid][0] if sid in winning else None,
                 split=split,
             )
         )
@@ -430,7 +472,7 @@ async def create_commit_from_samples(
     return CommitFromSamplesOut(
         commit_id=commit.id,
         committed_count=len(committed),
-        skipped_count=skipped_count,
+        skipped_count=0,
     )
 
 
