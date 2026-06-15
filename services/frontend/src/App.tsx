@@ -7,6 +7,8 @@ import Project from './pages/Project'
 import DataSources from './pages/DataSources'
 import SampleBrowser from './pages/SampleBrowser'
 import Datasets from './pages/Datasets'
+import Collections from './pages/Collections'
+import CollectionDetail from './pages/CollectionDetail'
 import DatasetView from './pages/DatasetView'
 import CommitDetail from './pages/CommitDetail'
 import Workflows from './pages/Workflows'
@@ -48,6 +50,8 @@ export default function App() {
         <Route path="/projects/:id/data-sources"             element={<DataSources />} />
         <Route path="/projects/:id/samples"                  element={<SampleBrowser />} />
         <Route path="/projects/:id/datasets"                 element={<Datasets />} />
+        <Route path="/projects/:id/collections"              element={<Collections />} />
+        <Route path="/collections/:id"                       element={<CollectionDetail />} />
         <Route path="/datasets/:id"                          element={<DatasetView />} />
         <Route path="/datasets/:id/commits/:cid"             element={<CommitDetail />} />
         <Route path="/projects/:id/workflows"                element={<Workflows />} />
