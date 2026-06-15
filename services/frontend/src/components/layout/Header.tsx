@@ -10,6 +10,7 @@ function getTitle(pathname: string): string {
   if (pathname.endsWith('/datasets'))     return 'Datasets'
   if (pathname.endsWith('/workflows'))    return 'Workflows'
   if (pathname.endsWith('/models'))       return 'Models'
+  if (pathname.endsWith('/training-containers')) return 'Training Environments'
   if (pathname.endsWith('/settings'))     return 'Settings'
   if (pathname.startsWith('/workflows/')) return 'Workflow Builder'
   if (pathname.startsWith('/runs/'))      return 'Run View'

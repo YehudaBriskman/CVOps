@@ -19,6 +19,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
     { to: `/projects/${projectId}/workflows`,    label: 'Workflows',    end: false },
     { to: `/projects/${projectId}/runs`,         label: 'Runs',         end: false },
     { to: `/projects/${projectId}/models`,       label: 'Models',       end: false },
+    { to: `/projects/${projectId}/training-containers`, label: 'Training', end: false },
     { to: `/projects/${projectId}/settings`,     label: 'Settings',     end: false },
   ]
 
