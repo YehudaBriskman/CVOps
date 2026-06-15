@@ -418,6 +418,7 @@ Highlights:
 - `POST /runs/{id}/gates/{step_id}/resolve` - resume a paused workflow
 - `GET /datasets/{id}/diff?from=&to=` - set-diff between two commits
 - `POST /datasets/{id}/commits` - CAS branch-head advance (concurrent-safe)
+- `POST /datasets/{id}/review` - dispatch a `human_review` run over the latest commit's samples (one-click "Review in CVAT")
 
 </details>
 
