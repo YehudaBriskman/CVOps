@@ -4,6 +4,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 
 WORKDIR /app
 
+# Preinstall the common ML stack GLOBALLY so each train's `--system-site-packages`
+# venv inherits it and only layers repo-specific extras on top — keeping per-run
+# installs small. Most trainers use ultralytics (pulls torch) + mlflow. Kept in its
+# own cache layer so source changes below don't trigger a multi-GB reinstall.
+# NOTE: CPU wheels by default; for GPU swap to an nvidia/cuda base + torch CUDA index.
+RUN pip install --no-cache-dir \
+      "mlflow>=2.12,<3" \
+      "ultralytics>=8.2,<9"
+
 COPY packages/worker-common ./packages/worker-common
 COPY services/api ./services/api
 RUN pip install --no-cache-dir ./packages/worker-common ./services/api
