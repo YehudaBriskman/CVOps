@@ -27,3 +27,4 @@ packages = ["src/worker_cvat"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]  # make `tests` importable (shared seed helpers in tests.conftest)

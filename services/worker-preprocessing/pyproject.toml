@@ -12,5 +12,16 @@ dependencies = [
   "redis>=5.0",   # stream consumer
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "fakeredis>=2.20",  # in-memory Redis Streams for the consumer-loop tests
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/cvops_worker"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
