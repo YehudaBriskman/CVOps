@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import { sha256Hex } from '../lib/hash'
+import { toast } from '../store/toast'
 import { putWithProgress } from '../lib/upload'
 import { INGEST_WORKFLOW_DEFINITION, INGEST_WORKFLOW_NAME } from '../lib/ingest'
 import { useProject } from '../api/projects'
@@ -15,7 +16,14 @@ import {
   useDataSourceUrl,
   useDataSources,
   useDeleteDataSource,
+  useUploadImages,
 } from '../api/data-sources'
+
+function errMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  return 'Upload failed'
+}
 
 function StatusBadge({ ds }: { ds: DataSource }) {
   let label: string
@@ -47,6 +55,7 @@ function StatusBadge({ ds }: { ds: DataSource }) {
       spinner = true
       break
     case 'ingested':
+    case 'ready':
       label = 'Ready'
       cls = 'bg-success/10 text-success'
       break
@@ -65,6 +74,14 @@ function StatusBadge({ ds }: { ds: DataSource }) {
 
 function SourcePreview({ ds }: { ds: DataSource }) {
   const { data, isLoading, isError } = useDataSourceUrl(ds.id, ds.blob_hash != null)
+
+  if (ds.type === 'image_folder') {
+    return (
+      <div className="aspect-video flex items-center justify-center bg-surface-1 text-4xl text-text-muted">
+        🖼️
+      </div>
+    )
+  }
 
   if (ds.external_uri && !ds.blob_hash) {
     return (
@@ -119,7 +136,9 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
       <div className="p-4 flex flex-col gap-3 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-medium text-text-primary capitalize">{ds.type.replace('_', ' ')}</p>
+            <p className="text-sm font-medium text-text-primary capitalize">
+              {typeof ds.metadata?.name === 'string' ? ds.metadata.name : ds.type.replace('_', ' ')}
+            </p>
             <p className="text-xs text-text-muted mt-0.5 font-mono">{ds.id.slice(0, 8)}…</p>
           </div>
           <StatusBadge ds={ds} />
@@ -128,13 +147,13 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
         <div className="flex items-center justify-between mt-auto">
           {frames > 0 ? (
             <Link
-              to={`/projects/${projectId}/samples?source=${ds.id}`}
+              to={`/projects/${projectId}/samples?source_id=${ds.id}`}
               className="text-xs font-medium text-iris-400 hover:text-iris-400"
             >
-              View {frames} frame{frames === 1 ? '' : 's'} →
+              View {frames} sample{frames === 1 ? '' : 's'} →
             </Link>
           ) : (
-            <span className="text-xs text-text-muted">No frames yet</span>
+            <span className="text-xs text-text-muted">No samples yet</span>
           )}
           <div className="flex items-center gap-3">
             {ds.latest_run_id && (
@@ -161,7 +180,9 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
 export default function DataSources() {
   const { id: projectId } = useParams<{ id: string }>()
   const qc = useQueryClient()
-  const fileRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLInputElement>(null)
+  const imageRef = useRef<HTMLInputElement>(null)
+  const folderRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   // Upload fraction [0,1] during the direct-to-storage PUT, or null for the
@@ -181,17 +202,27 @@ export default function DataSources() {
   const { data: project } = useProject(projectId)
   const { data: workflows } = useWorkflows(projectId)
   const deleteMutation = useDeleteDataSource(projectId)
+  const uploadImages = useUploadImages(projectId)
   const createWorkflow = useCreateWorkflow()
 
-  // Which workflow to run on the next upload. null = uninitialised; once the
-  // project loads we preselect its default ingest workflow (empty string means
-  // "just store, no processing"). The dropdown surfaces this choice instead of
-  // hiding it behind a project setting.
+  // Which workflow to run on the next video upload. null = uninitialised; once
+  // the project loads we preselect its default ingest workflow (empty string
+  // means "just store, no processing"). The dropdown surfaces this choice
+  // instead of hiding it behind a project setting.
   const [selectedWf, setSelectedWf] = useState<string | null>(null)
   if (selectedWf === null && project) {
     setSelectedWf(project.default_ingest_workflow_id ?? '')
   }
   const wfValue = selectedWf ?? ''
+
+  function resetInputs() {
+    setUploading(false)
+    setProgress(null)
+    setPct(null)
+    if (videoRef.current) videoRef.current.value = ''
+    if (imageRef.current) imageRef.current.value = ''
+    if (folderRef.current) folderRef.current.value = ''
+  }
 
   async function handleCreateIngestWorkflow() {
     if (!projectId) return
@@ -204,12 +235,12 @@ export default function DataSources() {
   }
 
   // Full path for genuinely new content: create source, PUT the bytes, confirm.
+  // The confirm dispatches the selected ingest workflow (frame extraction).
   async function doFreshUpload(file: File, blobHash: string) {
-    const type = file.type.startsWith('image/') ? 'image' : 'video'
     setProgress('Creating data source…')
     const { data: upload } = await client.post<UploadResponse>(
       `/projects/${projectId}/data-sources`,
-      { type },
+      { type: 'video' },
     )
 
     if (upload.presigned_put_url) {
@@ -229,12 +260,11 @@ export default function DataSources() {
 
   // "Add without re-uploading": the bytes already exist in the org, so create
   // the source and confirm against the known hash — no PUT, instant.
-  async function doRegisterExisting(file: File, blobHash: string) {
-    const type = file.type.startsWith('image/') ? 'image' : 'video'
+  async function doRegisterExisting(blobHash: string) {
     setProgress('Creating data source…')
     const { data: upload } = await client.post<UploadResponse>(
       `/projects/${projectId}/data-sources`,
-      { type },
+      { type: 'video' },
     )
     setProgress('Registering existing video…')
     await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
@@ -245,18 +275,16 @@ export default function DataSources() {
 
   function finishUpload() {
     qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
-    setProgress(null)
-    setUploading(false)
-    setPct(null)
-    if (fileRef.current) fileRef.current.value = ''
+    resetInputs()
   }
 
-  async function handleUpload(file: File) {
+  // Video: hash first so a duplicate is caught before any bytes go over the
+  // wire; on a hit, pause and let the user add-without-reuploading or skip.
+  async function handleVideo(file: File) {
     setError(null)
     setUploading(true)
     setPct(null)
     try {
-      // Hash first so a duplicate is caught before any bytes go over the wire.
       setProgress('Computing hash…')
       const blobHash = `sha256:${await sha256Hex(file)}`
 
@@ -274,35 +302,51 @@ export default function DataSources() {
       }
 
       await doFreshUpload(file, blobHash)
+      toast.success('Video uploaded')
       finishUpload()
     } catch (err: unknown) {
-      setError((err as Error).message ?? 'Upload failed')
-      setUploading(false)
-      setPct(null)
-      if (fileRef.current) fileRef.current.value = ''
+      toast.error('Video upload failed', errMessage(err))
+      setError(errMessage(err))
+      resetInputs()
+    }
+  }
+
+  // Images (single / group / folder): all land in the shared "Uploads" folder
+  // and become samples immediately. `group` sub-labels the batch.
+  async function handleImages(files: File[], group?: string) {
+    if (files.length === 0) return
+    setError(null)
+    setUploading(true)
+    setProgress(`Uploading ${files.length} image${files.length === 1 ? '' : 's'}…`)
+    try {
+      const res = await uploadImages.mutateAsync({ files, group })
+      toast.success(`Uploaded ${res.created} image${res.created === 1 ? '' : 's'}`)
+    } catch (err: unknown) {
+      toast.error('Image upload failed', errMessage(err))
+      setError(errMessage(err))
+    } finally {
+      resetInputs()
     }
   }
 
   async function handleAddExisting() {
     if (!dupPrompt) return
-    const { file, blobHash } = dupPrompt
+    const { blobHash } = dupPrompt
     setDupPrompt(null)
     try {
-      await doRegisterExisting(file, blobHash)
+      await doRegisterExisting(blobHash)
+      toast.success('Video added')
       finishUpload()
     } catch (err: unknown) {
-      setError((err as Error).message ?? 'Upload failed')
-      setUploading(false)
-      if (fileRef.current) fileRef.current.value = ''
+      toast.error('Could not add video', errMessage(err))
+      setError(errMessage(err))
+      resetInputs()
     }
   }
 
   function dismissDupPrompt() {
     setDupPrompt(null)
-    setUploading(false)
-    setPct(null)
-    setProgress(null)
-    if (fileRef.current) fileRef.current.value = ''
+    resetInputs()
   }
 
   const hasWorkflows = workflows && workflows.length > 0
@@ -378,54 +422,92 @@ export default function DataSources() {
         <span className="text-text-primary font-medium">Data Sources</span>
       </div>
 
-      <div className="flex items-start justify-between mb-4 gap-4">
+      <div className="flex items-start justify-between gap-4 mb-4">
         <h2 className="text-xl font-bold text-text-primary">Data Sources</h2>
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-2">
-            {hasWorkflows ? (
-              <select
-                value={wfValue}
-                onChange={e => setSelectedWf(e.target.value)}
-                disabled={uploading}
-                title="Workflow to run automatically when the upload finishes"
-                className="border border-border-strong bg-surface-2 rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-iris disabled:opacity-60"
-              >
-                <option value="">Just store (no processing)</option>
-                {workflows.map(wf => (
-                  <option key={wf.id} value={wf.id}>Run: {wf.name}</option>
-                ))}
-              </select>
+            {uploading ? (
+              <span className="inline-flex items-center gap-2 bg-iris/10 text-iris-400 px-4 py-2 rounded-lg text-sm font-medium">
+                <span className="w-3.5 h-3.5 border-2 border-iris-400 border-t-transparent rounded-full animate-spin" />
+                {progress ?? 'Uploading…'}
+              </span>
             ) : (
-              <button
-                onClick={handleCreateIngestWorkflow}
-                disabled={createWorkflow.isPending}
-                title="Create a one-step workflow that extracts frames from uploads"
-                className="border border-iris/40 text-iris-400 px-3 py-2 rounded-lg text-sm font-medium hover:bg-iris/10 disabled:opacity-60 transition-colors"
-              >
-                {createWorkflow.isPending ? 'Creating…' : '+ Add extract-frames workflow'}
-              </button>
+              <>
+                {hasWorkflows ? (
+                  <select
+                    value={wfValue}
+                    onChange={e => setSelectedWf(e.target.value)}
+                    disabled={uploading}
+                    title="Workflow to run automatically when a video upload finishes"
+                    className="border border-border-strong bg-surface-2 rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-iris disabled:opacity-60"
+                  >
+                    <option value="">Just store (no processing)</option>
+                    {workflows.map(wf => (
+                      <option key={wf.id} value={wf.id}>Run: {wf.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <button
+                    onClick={handleCreateIngestWorkflow}
+                    disabled={createWorkflow.isPending}
+                    title="Create a one-step workflow that extracts frames from uploads"
+                    className="border border-iris/40 text-iris-400 px-3 py-2 rounded-lg text-sm font-medium hover:bg-iris/10 disabled:opacity-60 transition-colors"
+                  >
+                    {createWorkflow.isPending ? 'Creating…' : '+ Add extract-frames workflow'}
+                  </button>
+                )}
+                <label className="cursor-pointer bg-iris text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-iris-hover transition-colors whitespace-nowrap">
+                  + Video
+                  <input
+                    ref={videoRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (file) handleVideo(file)
+                    }}
+                  />
+                </label>
+                <label className="cursor-pointer bg-surface-3 text-text-primary border border-border px-4 py-2 rounded-lg text-sm font-medium hover:bg-surface-1 transition-colors whitespace-nowrap">
+                  + Images
+                  <input
+                    ref={imageRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => handleImages(Array.from(e.target.files ?? []))}
+                  />
+                </label>
+                <label className="cursor-pointer bg-surface-3 text-text-primary border border-border px-4 py-2 rounded-lg text-sm font-medium hover:bg-surface-1 transition-colors whitespace-nowrap">
+                  + Folder
+                  <input
+                    ref={folderRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    // @ts-expect-error — non-standard but widely supported directory picker
+                    webkitdirectory=""
+                    className="hidden"
+                    onChange={e => {
+                      // A directory picker yields every file in the tree; keep only images.
+                      const imgs = Array.from(e.target.files ?? []).filter(f => f.type.startsWith('image/'))
+                      const rel = (imgs[0] as File & { webkitRelativePath?: string })?.webkitRelativePath
+                      const group = rel ? rel.split('/')[0] : undefined
+                      handleImages(imgs, group)
+                    }}
+                  />
+                </label>
+              </>
             )}
-            <label className={`cursor-pointer bg-iris text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-iris-hover transition-colors whitespace-nowrap ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}>
-              {uploading ? (progress ?? 'Uploading…') : '+ Upload video or image'}
-              <input
-                ref={fileRef}
-                type="file"
-                accept="video/*,image/*"
-                className="hidden"
-                disabled={uploading}
-                onChange={e => {
-                  const file = e.target.files?.[0]
-                  if (file) handleUpload(file)
-                }}
-              />
-            </label>
           </div>
           <p className="text-xs text-text-muted">
             {hasWorkflows
               ? wfValue
-                ? 'The selected workflow runs automatically once the upload completes.'
-                : 'Uploads are stored only — no frames extracted.'
-              : 'No workflow yet — uploads are stored only until you add one.'}
+                ? 'The selected workflow runs automatically once a video upload completes.'
+                : 'Videos are stored only — no frames extracted. Images always become samples.'
+              : 'No workflow yet — videos are stored only until you add one. Images always become samples.'}
           </p>
         </div>
       </div>

@@ -150,6 +150,38 @@ services:
     networks:
       - cvat
 
+  # CVAT ships no superuser, so worker-cvat's login (CVAT_USERNAME/CVAT_PASSWORD)
+  # fails out of the box. One-shot, idempotent provisioner: reuses the cvat
+  # server image (Django app + DB env via *backend-env, exactly like the
+  # cvat_worker_* services), waits for cvat_server to apply migrations, then
+  # get_or_create + set_password an admin matching .env. Runs in every path
+  # (tilt up and `docker compose --profile app`) since it has no profile, just
+  # like cvat_server. Mirrors garage-init / mlflow-init.
+  cvat_admin_init:
+    container_name: cvat_admin_init
+    image: cvat/server:dev
+    restart: "no"
+    depends_on:
+      cvat_server: { condition: service_started }
+    environment:
+      <<: *backend-env
+      DJANGO_SUPERUSER_USERNAME: ${CVAT_USERNAME:-admin}
+      DJANGO_SUPERUSER_PASSWORD: ${CVAT_PASSWORD:-Admin1234!}
+      DJANGO_SUPERUSER_EMAIL: admin@cvops.local
+    entrypoint: ["bash", "-euc"]
+    command:
+      # $$ escapes Compose interpolation so the shell (not Compose) expands these.
+      - |
+        for i in $$(seq 1 120); do
+          if python3 /home/django/manage.py shell -c "import os; from django.contrib.auth import get_user_model as G; U=G(); u,c=U.objects.get_or_create(username=os.environ['DJANGO_SUPERUSER_USERNAME'], defaults={'email': os.environ['DJANGO_SUPERUSER_EMAIL']}); u.is_superuser=True; u.is_staff=True; u.set_password(os.environ['DJANGO_SUPERUSER_PASSWORD']); u.save(); print('cvat admin ensured:', u.username)"; then
+            exit 0
+          fi
+          echo "cvat_admin_init: waiting for cvat db/migrations ($$i)"; sleep 5
+        done
+        echo "cvat_admin_init: gave up waiting for cvat_server" >&2; exit 1
+    networks:
+      - cvat
+
   traefik:
     image: traefik:v3.6
     container_name: traefik
@@ -298,6 +330,11 @@ services:
       - ../services/cvat/components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro,z
       - type: tmpfs
         target: /vector-data-dir
+    # Analytics log shipper — bind-mounts a config file from the services/cvat
+    # submodule, which `tilt up` doesn't init. Not needed for the review flow,
+    # so gate it: Tilt skips it; start_env.sh (--profile app, inits the
+    # submodule) still runs it. Same for cvat_grafana below.
+    profiles: ["app", "all"]
 
   cvat_grafana:
     container_name: cvat_grafana
@@ -353,6 +390,8 @@ services:
       cvat:
         aliases:
           - grafana
+    # Analytics dashboards — submodule-backed, not needed for the review flow.
+    profiles: ["app", "all"]
 
   # ── Nuclio (AI model serving for CVAT) ────────────────────────────────────
   nuclio:
@@ -378,6 +417,10 @@ services:
       options:
         max-size: 100m
         max-file: "3"
+    # Auto-label serving layer — not needed for the human-review (View in CVAT)
+    # flow, and first start bootstraps a YOLO image. Profile-gated so the Tilt
+    # inner loop skips it; start_env.sh (--profile app) still brings it up.
+    profiles: ["app", "all"]
 
   # ── model-deployer (replaces the profiles:cvat entry in docker-compose.yml) ─
   model-deployer:
@@ -399,7 +442,8 @@ services:
     networks:
       - default
       - cvat
-    profiles: []
+    # Auto-label model deployment — same as nuclio above, gated so Tilt skips it.
+    profiles: ["app", "all"]
 
   worker-cvat:
     # CVAT-queue worker: runs step.human_review (push gate) and, on a CVAT
@@ -449,6 +493,9 @@ volumes:
   cvat_cache_db:
 
 networks:
+  # Compose-managed (was external) so `tilt up` and start_env.sh both create it
+  # without a manual `docker network create`. The Docker network name stays
+  # `cvat_cvat`, so nuctl deploys (--platform-config network: cvat_cvat) and
+  # traefik's provider network still resolve it by name.
   cvat:
     name: cvat_cvat
-    external: true

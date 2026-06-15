@@ -95,7 +95,12 @@ def envreq(key):
 # ── Infra containers (docker compose, no profile = infra only) ──────────────
 # Paths inside the compose files are relative to manifests/ (their own dir).
 docker_compose(
-    ['manifests/docker-compose.yml'],
+    # The override adds the CVAT stack (server, ui, traefik:8080, db, redis,
+    # opa, workers + analytics). Its profile-less services come up with the
+    # infra; the auto-label layer (nuclio, model-deployer) and the containerised
+    # worker-cvat stay profile-gated, so Tilt skips them — worker-cvat runs as a
+    # host process below instead.
+    ['manifests/docker-compose.yml', 'manifests/docker-compose.override.yml'],
     env_file='manifests/.env',
     project_name='cvops',
 )
@@ -134,6 +139,44 @@ dc_resource('mlflow',
     labels=['1-infra'],
     resource_deps=['mlflow-init', 'garage-bootstrap'],
     links=[link('http://localhost:5000', 'mlflow ui')],
+)
+
+# ── CVAT stack (containers, from docker-compose.override.yml) ────────────────
+# The override's profile-less services come up here (cvat_server/ui, the data
+# layer, workers, traefik). The analytics layer (cvat_vector/grafana) and the
+# auto-label layer (nuclio/model-deployer) stay profile-gated, so Tilt skips
+# them. Reach CVAT at :8080 (traefik).
+#
+# CVAT's compose bind-mounts a few config files from the services/cvat
+# submodule (traefik's routing rules). `tilt up` doesn't init submodules, so do
+# it here (shallow, idempotent) before the CVAT containers mount them —
+# otherwise Docker auto-creates root-owned junk dirs at those paths. start_env.sh
+# does the same init for its full-analytics run.
+local_resource('cvat-submodule',
+    cmd='git submodule update --init --depth 1 services/cvat',
+    deps=['.gitmodules'],
+    labels=['3-cvat'],
+)
+
+dc_resource('traefik',
+    labels=['3-cvat'],
+    resource_deps=['cvat-submodule'],
+)
+dc_resource('cvat_server',
+    labels=['3-cvat'],
+    links=[link('http://localhost:8080', 'cvat')],
+)
+dc_resource('cvat_ui',
+    labels=['3-cvat'],
+    resource_deps=['cvat_server'],
+)
+
+# CVAT admin provisioning runs as the one-shot `cvat_admin_init` compose service
+# (docker-compose.override.yml), so it happens under both `tilt up` and
+# `docker compose --profile app` — not just here. dc_resource only labels it.
+dc_resource('cvat_admin_init',
+    labels=['3-cvat'],
+    resource_deps=['cvat_server'],
 )
 
 # ── Garage S3 bootstrap (cluster layout + bucket + key) ─────────────────────
@@ -224,6 +267,10 @@ api_env = {
     'S3_REGION':       'garage',
     'JWT_SECRET':      envreq('JWT_SECRET'),
     'WORKER_TOKEN':    envreq('WORKER_TOKEN'),
+    # The API's /internal/cvat/webhook verifies the HMAC signature CVAT signs
+    # review-completion callbacks with; must match the secret worker-cvat
+    # registers the webhook with (below).
+    'CVAT_WEBHOOK_SECRET': envreq('CVAT_WEBHOOK_SECRET'),
     'PYTHONUNBUFFERED': '1',
 }
 
@@ -288,6 +335,20 @@ local_resource('worker-install',
     labels=['5-setup'],
 )
 
+# Install the CVAT worker (and its siblings worker-common + cvat-client, which
+# pulls cvat-sdk) into the API venv so the host worker-cvat process can import
+# them. Shares the venv with the API + steps, same as worker-preprocessing.
+local_resource('worker-cvat-install',
+    cmd='cd services/api && .venv/bin/python -m pip install -e ../../packages/worker-common -e ../../packages/cvat-client -e ../worker-cvat >/dev/null',
+    deps=[
+        'services/worker-cvat/pyproject.toml',
+        'packages/worker-common/pyproject.toml',
+        'packages/cvat-client/pyproject.toml',
+    ],
+    resource_deps=['api-install', 'steps-install'],
+    labels=['5-setup'],
+)
+
 # ── Worker processes (host) ─────────────────────────────────────────────────
 # Redis-Streams preprocessing worker: consumes the `preprocessing` stream and
 # runs extract_frames (and future preprocessing steps) out of the API process.
@@ -300,6 +361,37 @@ local_resource('worker-preprocessing',
     deps=['services/worker-preprocessing/src'],
     resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-install', 'migrate-up'],
     labels=['2-app'],
+)
+
+# CVAT-queue worker (host): consumes the `cvat` stream, runs step.human_review
+# (pushes the review batch into CVAT, parks the run at the gate) and, on a CVAT
+# completion webhook, pulls reviewed annotations back and resumes the run.
+# worker_cvat hardcodes its stream name to `cvat`, so no REDIS_STREAM here.
+# CVAT_URL hits traefik on the host's published :8080; the webhook target points
+# CVAT back at the host API via host.docker.internal (cvat_server has the
+# host-gateway alias).
+worker_cvat_env = dict(api_env)
+worker_cvat_env.update({
+    'CVAT_URL':            'http://localhost:8080',
+    'CVAT_PUBLIC_URL':     env.get('CVAT_PUBLIC_URL', 'http://localhost:8080'),
+    'CVAT_USERNAME':       envreq('CVAT_USERNAME'),
+    'CVAT_PASSWORD':       envreq('CVAT_PASSWORD'),
+    'CVAT_WEBHOOK_TARGET': 'http://host.docker.internal:8000/api/v1/internal/cvat/webhook',
+})
+
+local_resource('worker-cvat',
+    serve_cmd='cd services/api && .venv/bin/python -m worker_cvat.main',
+    serve_env=worker_cvat_env,
+    # Watch the step + cvat-client sources too — they're editable-installed into
+    # the venv, so the worker must restart to pick up changes to the human_review
+    # step or the CVAT client (Python doesn't hot-reload like uvicorn --reload).
+    deps=[
+        'services/worker-cvat/src',
+        'packages/steps/src/cvops_steps',
+        'packages/cvat-client/src/cvops_cvat_client',
+    ],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-cvat-install', 'migrate-up', 'cvat_server', 'cvat_admin_init'],
+    labels=['3-cvat'],
 )
 
 # ── Quality gates ───────────────────────────────────────────────────────────

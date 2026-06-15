@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -16,8 +17,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.config import settings
+from cvops_api.core.audit import emit_event
 from cvops_api.core.auth import get_current_user
-from cvops_api.core.storage import get_storage, public_s3_endpoint
+from cvops_api.core.storage import StorageBackend, get_storage, public_s3_endpoint
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.blobs import Blob
@@ -35,8 +37,16 @@ from cvops_api.schemas.data_sources import (
     DataSourceConfirm,
     DataSourceMatch,
     DataSourceOut,
+    ImageConfirmRequest,
+    ImageConfirmResponse,
+    ImagePresignOut,
+    ImagePresignRequest,
+    ImagePresignResponse,
     UploadResponse,
 )
+
+# Per-project shared data source that holds manually uploaded images.
+UPLOADS_SOURCE_TYPE = "image_folder"
 
 router = APIRouter()
 
@@ -68,7 +78,9 @@ async def list_data_sources(
     await _check_project(project_id, current_user, session)
     r = await session.execute(
         select(DataSource)
-        .where(DataSource.project_id == project_id)
+        # Show videos and the Uploads folder; legacy per-image sources are hidden
+        # (their images live under the shared Uploads folder now).
+        .where(DataSource.project_id == project_id, DataSource.type != "image")
         .order_by(DataSource.created_at.desc())
     )
     sources = list(r.scalars().all())
@@ -246,7 +258,9 @@ async def confirm_upload(
     # means "just store, no processing".
     target_wf_id = body.workflow_id or proj.default_ingest_workflow_id
     run_id: uuid.UUID | None = None
-    if target_wf_id is not None:
+    # Only videos go through the workflow (frame extraction). Manual images are
+    # ingested directly via the image-upload endpoints, never here.
+    if target_wf_id is not None and ds.type == "video":
         wf_r = await session.execute(
             select(Workflow).where(
                 Workflow.id == target_wf_id,
@@ -271,6 +285,145 @@ async def confirm_upload(
 
     return ConfirmResponse(
         data_source=DataSourceOut.model_validate(ds), run_id=run_id
+    )
+
+
+# ── Direct image upload → samples (no workflow) ──────────────────────────────
+
+
+async def _get_or_create_uploads_source(
+    project_id: uuid.UUID, session: AsyncSession
+) -> DataSource:
+    """The per-project shared 'Uploads' folder that holds manual images.
+
+    Query-then-insert (data_sources has no unique on (project_id, type)); a rare
+    duplicate from a concurrent first upload is harmless since samples carry
+    their own upload-group metadata.
+    """
+    r = await session.execute(
+        select(DataSource)
+        .where(
+            DataSource.project_id == project_id,
+            DataSource.type == UPLOADS_SOURCE_TYPE,
+        )
+        .limit(1)
+    )
+    src = r.scalar_one_or_none()
+    if src is not None:
+        return src
+    src = DataSource(
+        project_id=project_id,
+        type=UPLOADS_SOURCE_TYPE,
+        status="ready",
+        metadata_={"name": "Uploads"},
+    )
+    session.add(src)
+    await session.flush()
+    return src
+
+
+@router.post(
+    "/projects/{project_id}/image-uploads/presign",
+    response_model=ImagePresignResponse,
+)
+async def presign_images(
+    project_id: uuid.UUID,
+    body: ImagePresignRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ImagePresignResponse:
+    await _check_project(project_id, current_user, session)
+    endpoint = public_s3_endpoint(request.url.hostname)
+    storage = get_storage()
+    items = [
+        ImagePresignOut(
+            filename=it.filename,
+            blob_hash=it.sha256,
+            put_url=await storage.get_presigned_put(it.sha256, endpoint=endpoint),
+        )
+        for it in body.items
+    ]
+    return ImagePresignResponse(items=items)
+
+
+@router.post(
+    "/projects/{project_id}/image-uploads/confirm",
+    response_model=ImageConfirmResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def confirm_images(
+    project_id: uuid.UUID,
+    body: ImageConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> ImageConfirmResponse:
+    await _check_project(project_id, current_user, session)
+    src = await _get_or_create_uploads_source(project_id, session)
+
+    now_iso = datetime.now(UTC).isoformat()
+    group = body.group or f"Upload {now_iso}"
+    meta = {"group": group, "uploaded_at": now_iso}
+
+    sample_ids: list[uuid.UUID] = []
+    for it in body.items:
+        await session.execute(
+            pg_insert(Blob)
+            .values(
+                hash=it.blob_hash,
+                storage_backend=settings.S3_BACKEND,
+                storage_key=StorageBackend._bucket_key(it.blob_hash),
+                size_bytes=it.size_bytes or 0,
+                media_type=it.content_type or "image/jpeg",
+            )
+            .on_conflict_do_nothing(index_elements=["hash"])
+        )
+        sid = uuid.uuid4()
+        res = await session.execute(
+            pg_insert(Sample)
+            .values(
+                id=sid,
+                project_id=project_id,
+                blob_hash=it.blob_hash,
+                source_id=src.id,
+                width=it.width,
+                height=it.height,
+                frame_index=None,
+                thumbnail_hash=it.blob_hash,
+                metadata_=meta,
+            )
+            .on_conflict_do_nothing(index_elements=["project_id", "blob_hash"])
+            .returning(Sample.id)
+        )
+        row = res.first()
+        if row is not None:
+            sample_ids.append(row[0])
+        else:
+            existing = (
+                await session.execute(
+                    select(Sample.id).where(
+                        Sample.project_id == project_id,
+                        Sample.blob_hash == it.blob_hash,
+                    )
+                )
+            ).first()
+            if existing is not None:
+                sample_ids.append(existing[0])
+
+    if sample_ids:
+        await emit_event(
+            session,
+            actor_id=str(current_user.id),
+            actor_type="user",
+            entity_type="data_source",
+            entity_id=src.id,
+            action="images.uploaded",
+            payload={"count": len(sample_ids), "group": group},
+        )
+    await session.commit()
+
+    return ImageConfirmResponse(
+        source_id=src.id, created=len(sample_ids), sample_ids=sample_ids
     )
 
 

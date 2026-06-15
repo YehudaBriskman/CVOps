@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
+import { sha256Hex } from '../lib/hash'
 
 export interface DataSource {
   id: string
@@ -96,5 +97,94 @@ export function useDeleteDataSource(projectId: string | undefined) {
       await client.delete(`/data-sources/${id}`)
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['data-sources', projectId] }),
+  })
+}
+
+// ── Direct image upload (single / group / folder → samples) ──────────────────
+
+interface PresignItem {
+  filename: string
+  blob_hash: string
+  put_url: string
+}
+
+interface ImageUploadResult {
+  source_id: string
+  created: number
+  sample_ids: string[]
+}
+
+async function readImageSize(file: File): Promise<{ width: number; height: number }> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error(`Could not read image ${file.name}`))
+      img.src = url
+    })
+    return { width: img.naturalWidth, height: img.naturalHeight }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/**
+ * Upload images directly into the project's shared "Uploads" folder and create
+ * samples immediately: hash + measure each file client-side, presign, PUT to
+ * storage, then confirm. No ingest workflow involved.
+ */
+export function useUploadImages(projectId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { files: File[]; group?: string }): Promise<ImageUploadResult> => {
+      const metas = await Promise.all(
+        vars.files.map(async (file) => ({
+          file,
+          blob_hash: `sha256:${await sha256Hex(file)}`,
+          ...(await readImageSize(file)),
+        })),
+      )
+      const byHash = new Map(metas.map((m) => [m.blob_hash, m.file]))
+
+      const { data: presign } = await client.post<{ items: PresignItem[] }>(
+        `/projects/${projectId}/image-uploads/presign`,
+        {
+          items: metas.map((m) => ({
+            filename: m.file.name,
+            content_type: m.file.type || 'image/jpeg',
+            sha256: m.blob_hash,
+          })),
+        },
+      )
+
+      await Promise.all(
+        presign.items.map(async (it) => {
+          const file = byHash.get(it.blob_hash)
+          if (!file) return
+          const put = await fetch(it.put_url, { method: 'PUT', body: file })
+          if (!put.ok) throw new Error(`Upload failed: ${put.status}`)
+        }),
+      )
+
+      const { data } = await client.post<ImageUploadResult>(
+        `/projects/${projectId}/image-uploads/confirm`,
+        {
+          group: vars.group,
+          items: metas.map((m) => ({
+            blob_hash: m.blob_hash,
+            width: m.width,
+            height: m.height,
+            content_type: m.file.type || 'image/jpeg',
+            size_bytes: m.file.size,
+          })),
+        },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
+      qc.invalidateQueries({ queryKey: ['samples', projectId] })
+    },
   })
 }

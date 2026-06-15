@@ -116,3 +116,31 @@ export function useCreateDataset() {
     onSuccess: (data) => qc.invalidateQueries({ queryKey: ['datasets', data.project_id] }),
   })
 }
+
+export interface CommitFromSamplesResult {
+  commit_id: string
+  committed_count: number
+  skipped_count: number
+}
+
+export function useCommitFromSamples() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      datasetId: string
+      message?: string
+      sample_ids: string[]
+      branch_name?: string
+      split_strategy?: { train_ratio?: number; val_ratio?: number }
+      ontology_id?: string
+    }) => {
+      const { datasetId, ...body } = vars
+      const { data } = await client.post<CommitFromSamplesResult>(
+        `/datasets/${datasetId}/commits/from-samples`,
+        body,
+      )
+      return data
+    },
+    onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ['commits', vars.datasetId] }),
+  })
+}

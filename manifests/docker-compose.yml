@@ -259,10 +259,11 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── External tools (Phase 2) ────────────────────────────────────────────
-  # cvat:
-  #   image: cvat/server:v2.14.3
-  #   ... see docs/design/11-cvat-integration.md for full CVAT compose config
+  # ── External tools ──────────────────────────────────────────────────────
+  # The CVAT stack (server, ui, traefik:8080, db, redis, opa, workers,
+  # analytics) + nuclio/model-deployer + the containerised worker-cvat live in
+  # docker-compose.override.yml, which Compose auto-merges. `tilt up` loads it
+  # explicitly (see Tiltfile); start_env.sh brings it up with --profile app.
 
 volumes:
   postgres_data:
