@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useProjects, useCreateProject } from '../api/projects'
+import { Button, Card, Dialog, EmptyState, ErrorState, Field, Input, Select, SkeletonList } from '../components/ui'
 
 export default function Projects() {
-  const { data: projects, isLoading, error } = useProjects()
+  const { data: projects, isLoading, isError, refetch } = useProjects()
   const createProject = useCreateProject()
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
@@ -17,92 +18,68 @@ export default function Projects() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-5xl p-6">
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Projects</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Each project is one ML problem domain</p>
+          <h2 className="text-xl font-bold text-text-primary">Projects</h2>
+          <p className="mt-0.5 text-sm text-text-muted">Each project is one ML problem domain</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-        >
-          + New Project
-        </button>
+        <Button onClick={() => setShowForm(true)}>+ New Project</Button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-4 flex gap-3 items-end">
-          <div className="flex-1">
-            <label className="block text-xs font-medium text-slate-600 mb-1">Name</label>
-            <input
+      <Dialog open={showForm} onClose={() => setShowForm(false)} title="New project">
+        <form onSubmit={handleCreate} className="space-y-4">
+          <Field label="Name" htmlFor="project-name">
+            <Input
+              id="project-name"
               required
               autoFocus
               value={name}
-              onChange={e => setName(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              onChange={(e) => setName(e.target.value)}
               placeholder="My project"
             />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Task type</label>
-            <select
-              value={taskType}
-              onChange={e => setTaskType(e.target.value)}
-              className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
+          </Field>
+          <Field label="Task type" htmlFor="project-task">
+            <Select id="project-task" value={taskType} onChange={(e) => setTaskType(e.target.value)}>
               <option value="detection">Detection</option>
               <option value="segmentation">Segmentation</option>
               <option value="classification">Classification</option>
-            </select>
+            </Select>
+          </Field>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" loading={createProject.isPending}>
+              Create
+            </Button>
           </div>
-          <button
-            type="submit"
-            disabled={createProject.isPending}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60"
-          >
-            Create
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowForm(false)}
-            className="border border-slate-300 text-slate-600 px-4 py-2 rounded-lg text-sm hover:bg-slate-50"
-          >
-            Cancel
-          </button>
         </form>
-      )}
+      </Dialog>
 
-      {isLoading && (
-        <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>
-      )}
+      {isLoading && <SkeletonList rows={3} />}
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          Failed to load projects
-        </div>
-      )}
+      {isError && <ErrorState description="Could not load your projects." onRetry={() => refetch()} />}
 
       {projects && projects.length === 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">No projects yet</p>
-          <p className="text-xs text-slate-400 mt-1">Create your first project to get started</p>
-        </div>
+        <EmptyState
+          title="No projects yet"
+          description="Create your first project to get started."
+          action={<Button onClick={() => setShowForm(true)}>+ New Project</Button>}
+        />
       )}
 
       {projects && projects.length > 0 && (
         <div className="grid gap-3">
-          {projects.map(p => (
-            <Link
-              key={p.id}
-              to={`/projects/${p.id}`}
-              className="flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 hover:border-indigo-300 hover:shadow-md transition-all"
-            >
-              <div>
-                <p className="font-semibold text-slate-800">{p.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5 capitalize">{p.task_type}</p>
-              </div>
-              <span className="text-slate-300 text-lg">›</span>
+          {projects.map((p) => (
+            <Link key={p.id} to={`/projects/${p.id}`}>
+              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-cobalt hover:shadow-md">
+                <div>
+                  <p className="font-semibold text-text-primary">{p.name}</p>
+                  <p className="mt-0.5 text-xs capitalize text-text-muted">{p.task_type}</p>
+                </div>
+                <span className="text-lg text-text-muted">›</span>
+              </Card>
             </Link>
           ))}
         </div>

@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useProject } from '../api/projects'
 import { useWorkflows } from '../api/workflows'
+import { Card, ErrorState, SkeletonList } from '../components/ui'
 
 const SECTIONS = [
   { label: 'Data Sources', path: 'data-sources', desc: 'Uploaded videos and images' },
@@ -13,53 +14,63 @@ const SECTIONS = [
 
 export default function Project() {
   const { id } = useParams<{ id: string }>()
-  const { data: project, isLoading } = useProject(id)
+  const { data: project, isLoading, isError, refetch } = useProject(id)
   const { data: workflows } = useWorkflows(id)
 
   if (isLoading) {
-    return <div className="p-6 text-sm text-slate-400">Loading…</div>
+    return (
+      <div className="mx-auto max-w-5xl p-6">
+        <SkeletonList rows={4} />
+      </div>
+    )
+  }
+
+  if (isError || !project) {
+    return (
+      <div className="mx-auto max-w-5xl p-6">
+        <ErrorState description="Could not load this project." onRetry={() => refetch()} />
+      </div>
+    )
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-        <Link to="/projects" className="hover:text-indigo-600 transition-colors">Projects</Link>
+    <div className="mx-auto max-w-5xl p-6">
+      <nav className="mb-6 flex items-center gap-2 text-sm text-text-muted">
+        <Link to="/projects" className="transition-colors hover:text-cobalt">Projects</Link>
         <span>/</span>
-        <span className="text-slate-700 font-medium">{project?.name ?? id}</span>
-      </div>
+        <span className="font-medium text-text-secondary">{project.name}</span>
+      </nav>
 
       <div className="mb-6">
-        <h2 className="text-xl font-bold text-slate-800">{project?.name}</h2>
-        <p className="text-sm text-slate-400 mt-0.5 capitalize">{project?.task_type}</p>
+        <h2 className="text-xl font-bold text-text-primary">{project.name}</h2>
+        <p className="mt-0.5 text-sm capitalize text-text-muted">{project.task_type}</p>
       </div>
 
       {workflows && workflows.length > 0 && (
-        <div className="mb-6 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Workflows</p>
+        <Card className="mb-6 p-4">
+          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-text-muted">Workflows</p>
           <div className="space-y-2">
-            {workflows.map(wf => (
+            {workflows.map((wf) => (
               <Link
                 key={wf.id}
                 to={`/workflows/${wf.id}`}
-                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+                className="flex items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-surface-3"
               >
-                <span className="text-sm text-slate-700 font-medium">{wf.name}</span>
-                <span className="text-xs text-slate-400">v{wf.version}</span>
+                <span className="text-sm font-medium text-text-secondary">{wf.name}</span>
+                <span className="text-xs text-text-muted">v{wf.version}</span>
               </Link>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {SECTIONS.map(s => (
-          <Link
-            key={s.path}
-            to={`/projects/${id}/${s.path}`}
-            className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:border-indigo-300 hover:shadow-md transition-all"
-          >
-            <p className="font-semibold text-slate-800 text-sm">{s.label}</p>
-            <p className="text-xs text-slate-400 mt-1">{s.desc}</p>
+        {SECTIONS.map((s) => (
+          <Link key={s.path} to={`/projects/${id}/${s.path}`}>
+            <Card className="p-5 transition-all hover:border-cobalt hover:shadow-md">
+              <p className="text-sm font-semibold text-text-primary">{s.label}</p>
+              <p className="mt-1 text-xs text-text-muted">{s.desc}</p>
+            </Card>
           </Link>
         ))}
       </div>
