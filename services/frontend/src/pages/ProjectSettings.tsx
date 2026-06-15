@@ -11,7 +11,7 @@ const INGEST_WORKFLOW_DEFINITION = {
     {
       id: 'extract',
       type: 'step.extract_frames',
-      config: { interval_seconds: 2, dedup_threshold: 0.05 },
+      config: { interval_seconds: 2 },
       inputs: { source_id: '$run.params.source_id' },
     },
   ],
