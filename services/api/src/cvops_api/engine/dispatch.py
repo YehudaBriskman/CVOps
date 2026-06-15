@@ -44,3 +44,34 @@ async def create_workflow_run(
     await session.flush()
     await session.commit()
     return run
+
+
+async def create_adhoc_run(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    definition: dict[str, Any],
+    params: dict[str, Any],
+    actor_id: uuid.UUID,
+) -> Run:
+    """Insert a pending workflow run whose DAG is carried inline and commit it.
+
+    Mirrors `create_workflow_run`, but with no saved `Workflow`: the step DAG
+    lives on `config["definition"]` and `advance_workflow` sources it from there
+    when `workflow_id` is None. Used by the ad-hoc "Train this commit" trigger,
+    where the per-trigger git_url/entry_point/hyperparams are baked into the
+    inline definition rather than frozen from a workflow row.
+    """
+    run = Run(
+        project_id=project_id,
+        workflow_id=None,
+        kind="workflow",
+        status="pending",
+        attempt=1,
+        input_refs={"params": params},
+        output_refs={},
+        config={"definition": definition},
+    )
+    session.add(run)
+    await session.flush()
+    await session.commit()
+    return run

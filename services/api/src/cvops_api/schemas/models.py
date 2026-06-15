@@ -15,4 +15,5 @@ class ModelVersionOut(BaseModel):
     hyperparams: dict[str, Any] | None = None
     metrics: dict[str, Any] | None = None
     code_version: str | None = None
+    mlflow_run_id: str | None = None
     created_at: datetime

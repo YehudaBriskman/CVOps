@@ -4,7 +4,7 @@ import { StepRunCard } from '../components/runs/StepRunCard'
 import { GateResolutionBanner } from '../components/runs/GateResolutionBanner'
 import type { RunStep } from '../components/runs/types'
 
-const STATUS_BADGE: Record<string, string> = {
+export const STATUS_BADGE: Record<string, string> = {
   pending:   'bg-slate-100 text-slate-500',
   running:   'bg-amber-100 text-amber-700',
   succeeded: 'bg-green-100 text-green-700',
@@ -46,7 +46,10 @@ export default function RunView() {
       : null,
     outputs: s.output_refs as RunStep['outputs'],
     logs: null,
-    cvat_url: (s.output_refs?.cvat_url as string) ?? undefined,
+    // The coordinator nests gate data under output_refs.gate_data; fall back to
+    // a top-level cvat_url for any older shape.
+    cvat_url: ((s.output_refs?.gate_data as Record<string, unknown> | undefined)?.cvat_url
+      ?? s.output_refs?.cvat_url) as string | undefined,
   }))
 
   return (
@@ -96,7 +99,8 @@ export default function RunView() {
         <GateResolutionBanner
           runId={id}
           stepId={waitingStep.step_id ?? waitingStep.id}
-          cvatUrl={(waitingStep.output_refs?.cvat_url as string) ?? null}
+          cvatUrl={((waitingStep.output_refs?.gate_data as Record<string, unknown> | undefined)?.cvat_url
+            ?? waitingStep.output_refs?.cvat_url) as string ?? null}
         />
       )}
 

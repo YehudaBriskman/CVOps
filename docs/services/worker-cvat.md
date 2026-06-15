@@ -91,6 +91,21 @@ Triggered via auto-chain from the preprocessing worker after `step.extract_frame
 
 ---
 
+## Entry Point (starting a review)
+
+A review is kicked off from the dataset page: **`POST /datasets/{id}/review`**
+(`services/api/.../routers/datasets.py`). It resolves the review set from the
+dataset's current commit — the `main` branch ref, falling back to the newest
+commit — reading `commit_samples` for the sample ids and their pre-label
+`annotation_revision_id`s. It find-or-creates the project's `human_review`
+workflow (a fixed single `step.human_review` node whose inputs are
+`$run.params.sample_ids` / `$run.params.annotation_revision_ids`), dispatches a
+run via `create_workflow_run` + `advance_workflow`, and returns `{run_id}`. The
+frontend navigates to the run view, where the gate banner renders "Open in CVAT"
+once this worker pushes the task. 400 if the dataset has no committed samples.
+
+---
+
 ## Push Flow (step.human_review)
 
 ```

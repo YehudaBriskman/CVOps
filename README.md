@@ -101,7 +101,7 @@ tilt up
 
 # 2b. Pre-prod / integration test (everything containerised):
 cd manifests
-docker compose --profile app up           # prod-target api + frontend + nginx + infra
+docker compose --profile app up           # prod-target api + frontend + nginx + mlflow + infra
 ```
 
 In dev mode the nginx edge serves the placeholder UI and proxies `/api/v1/*` to the host API at `http://localhost`; Vite additionally routes `/api/*` to `http://localhost:8000` for the React app at `http://localhost:5173`. Behind nginx the API is mounted under the versioned `/api/v1` prefix.
@@ -113,6 +113,7 @@ In ~30 seconds you have:
 | REST API | http://localhost:8000 |
 | Interactive API docs | http://localhost:8000/docs |
 | Garage admin API | http://localhost:3903 |
+| MLflow tracking UI | http://localhost:5000 |
 
 **Smoke test - register and make your first project:**
 
@@ -419,6 +420,7 @@ Highlights:
 - `POST /runs/{id}/gates/{step_id}/resolve` - resume a paused workflow
 - `GET /datasets/{id}/diff?from=&to=` - set-diff between two commits
 - `POST /datasets/{id}/commits` - CAS branch-head advance (concurrent-safe)
+- `POST /datasets/{id}/review` - dispatch a `human_review` run over the latest commit's samples (one-click "Review in CVAT")
 
 </details>
 
@@ -501,6 +503,7 @@ pytest tests/ -s --tb=long
 | DAG editor | @xyflow/react | Visual workflow builder |
 | JSON schema forms | @rjsf/core | Step config editor |
 | Reverse proxy | nginx | Routes `/api/v1/*` to the API and serves `/` |
+| Experiment tracking | MLflow | Postgres backend + Garage proxied artifacts, UI on :5000 |
 | Container runtime | Docker Compose | Dev + prod configurations |
 | Testing | pytest + testcontainers | Real postgres, moto S3 |
 | Linting | Ruff 0.4 | 100-char lines, py312 |
