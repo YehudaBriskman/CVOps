@@ -62,16 +62,6 @@ export function Sidebar() {
 
         {projectId && <ProjectNav projectId={projectId} />}
       </div>
-
-      {/* User */}
-      <div className="p-3 border-t border-slate-800 flex-shrink-0">
-        <div className="flex items-center gap-2.5 px-3 py-2">
-          <div className="w-7 h-7 rounded-full bg-cobalt flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-            U
-          </div>
-          <span className="text-mist text-sm truncate">user@cvops.io</span>
-        </div>
-      </div>
     </aside>
   )
 }
