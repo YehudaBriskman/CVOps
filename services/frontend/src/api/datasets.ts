@@ -1,6 +1,14 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import type { CursorPage } from './samples'
+import type { RunOut } from './runs'
+
+export interface TrainCommitRequest {
+  git_url: string
+  entry_point?: string
+  branch?: string | null
+  hyperparams?: Record<string, string | number | boolean> | null
+}
 
 export interface Dataset {
   id: string
@@ -67,6 +75,19 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
     },
     enabled: !!datasetId && !!commitId,
     staleTime: Infinity,
+  })
+}
+
+export function useTrainCommit(datasetId: string | undefined) {
+  return useMutation({
+    mutationFn: async (body: { commitId: string } & TrainCommitRequest) => {
+      const { commitId, ...payload } = body
+      const { data } = await client.post<RunOut>(
+        `/datasets/${datasetId}/commits/${commitId}/train`,
+        payload,
+      )
+      return data
+    },
   })
 }
 
