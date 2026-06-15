@@ -229,10 +229,16 @@ def register_webhook(task_id: int, target_url: str, secret: str) -> int:
     """Register a CVAT webhook firing on annotation/job updates for a task.
 
     Returns the created webhook id. The receiver must validate ``secret``.
+
+    NOTE: CVAT removed task-scoped webhooks — ``WebhookType`` now only allows
+    ``organization``/``project``, so this task-scoped registration fails against
+    CVAT >= 2.x. Callers (human_review) treat failure as non-fatal and fall back
+    to polling/manual gate resolution. Re-scoping to a project webhook (and
+    creating tasks under a CVAT project) is the proper fix for auto-resume.
     """
     from cvat_sdk.api_client.models import (
         EventsEnum,
-        WebhookContentTypeEnum,
+        WebhookContentType,
         WebhookWriteRequest,
     )
 
@@ -241,7 +247,7 @@ def register_webhook(task_id: int, target_url: str, secret: str) -> int:
         WebhookWriteRequest(
             target_url=target_url,
             type="task",
-            content_type=WebhookContentTypeEnum("application/json"),
+            content_type=WebhookContentType("application/json"),
             secret=secret,
             events=[EventsEnum("update:job"), EventsEnum("update:task")],
             task_id=task_id,

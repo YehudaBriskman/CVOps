@@ -169,6 +169,27 @@ async def test_push_tolerates_none_revision_ids(session, fake_cvat_client):
     assert pushed["images"][0].annotations == []  # no pre-label for this sample
 
 
+async def test_push_gate_survives_webhook_failure(session, fake_cvat_client, monkeypatch):
+    """A failing webhook registration must not abort the push: the gate still
+    opens (regression: ImportError in register_webhook failed the whole run
+    before the CVAT link could surface)."""
+    monkeypatch.setenv("CVAT_WEBHOOK_TARGET", "http://api:8000/api/v1/internal/cvat/webhook")
+    monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")
+
+    def _boom(task_id, target, secret):
+        raise ImportError("cannot import name 'WebhookContentTypeEnum'")
+
+    sys.modules["cvops_cvat_client"].register_webhook = _boom
+
+    proj_id, sample_id, rev_id, run_id = await _seed(session)
+    inputs = {"sample_ids": [sample_id], "annotation_revision_ids": [rev_id]}
+
+    with pytest.raises(GateException) as exc:
+        await HumanReviewStep().run(_ctx(session, proj_id, run_id), {}, inputs)
+    # Gate opened despite the webhook blowing up.
+    assert exc.value.gate_data["cvat_url"].endswith("/tasks/4242/jobs/99")
+
+
 async def test_push_registers_webhook_when_configured(session, fake_cvat_client, monkeypatch):
     monkeypatch.setenv("CVAT_WEBHOOK_TARGET", "http://api:8000/api/v1/internal/cvat/webhook")
     monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")

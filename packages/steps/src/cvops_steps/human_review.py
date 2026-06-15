@@ -27,7 +27,11 @@ runs on worker-cvat, which has the client installed.
 
 from __future__ import annotations
 
+import logging
+
 from cvops_api.engine.step import GateException, Step, StepContext
+
+logger = logging.getLogger(__name__)
 
 
 class HumanReviewStep(Step):
@@ -152,10 +156,23 @@ class HumanReviewStep(Step):
             pushed = push_review_task(task_name, images)
 
         # ── Register completion webhook if configured (else poll fallback) ───
+        # Best-effort: the webhook only enables auto-resume on CVAT completion.
+        # If it fails (e.g. CVAT API drift — task-scoped webhooks were removed in
+        # newer CVAT), the gate must still be raised so the run parks at `waiting`
+        # and surfaces the "Open in CVAT" link; completion is then resolved by the
+        # poll fallback or manually. Never let it abort the push.
         target = os.environ.get("CVAT_WEBHOOK_TARGET")
         secret = os.environ.get("CVAT_WEBHOOK_SECRET")
         if target and secret:
-            register_webhook(pushed["task_id"], target, secret)
+            try:
+                register_webhook(pushed["task_id"], target, secret)
+            except Exception:
+                logger.warning(
+                    "CVAT webhook registration failed for task %s; review gate "
+                    "still opens — resolve completion via poll/manual.",
+                    pushed["task_id"],
+                    exc_info=True,
+                )
 
         # ── Record the push ─────────────────────────────────────────────────
         labeling_job_id = str(uuid.uuid4())
