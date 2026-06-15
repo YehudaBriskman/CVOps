@@ -440,7 +440,7 @@ async def test_data_source_url_404_without_blob(factory) -> None:
     assert res.status_code == 404
 
 
-async def test_confirm_dedups_blob_across_sources(factory) -> None:
+async def test_confirm_duplicate_in_same_project_returns_409(factory) -> None:
     user, project, ds1 = await _seed(factory, with_workflow=False)
     # Second data source in the same project, same content hash.
     async with factory() as s:
@@ -449,20 +449,159 @@ async def test_confirm_dedups_blob_across_sources(factory) -> None:
         await s.commit()
         ds2_id = ds2.id
 
+    h = _unique_hash()
     async with _client(factory, user) as c:
         r1 = await c.post(
-            f"/data-sources/{ds1.id}/confirm-upload", json={"blob_hash": _HASH_A}
+            f"/data-sources/{ds1.id}/confirm-upload", json={"blob_hash": h}
+        )
+        # Same content, same project → blocked by uq_data_sources_project_blob.
+        r2 = await c.post(
+            f"/data-sources/{ds2_id}/confirm-upload", json={"blob_hash": h}
+        )
+
+    assert r1.status_code == 200
+    assert r2.status_code == 409
+
+
+async def test_confirm_same_blob_different_projects_both_succeed(factory) -> None:
+    # The same content in two projects of the same org: both confirm, and the
+    # blob is stored once (blob-level dedup still works across projects).
+    user, p1, ds1 = await _seed(factory, with_workflow=False)
+    async with factory() as s:
+        org_id = (await s.get(Project, p1.id)).org_id
+        p2 = Project(org_id=org_id, name=f"proj2-{uuid.uuid4().hex[:8]}")
+        s.add(p2)
+        await s.flush()
+        ds2 = DataSource(project_id=p2.id, type="video", status="pending")
+        s.add(ds2)
+        await s.commit()
+        ds2_id = ds2.id
+
+    h = _unique_hash()
+    async with _client(factory, user) as c:
+        r1 = await c.post(
+            f"/data-sources/{ds1.id}/confirm-upload", json={"blob_hash": h}
         )
         r2 = await c.post(
-            f"/data-sources/{ds2_id}/confirm-upload", json={"blob_hash": _HASH_A}
+            f"/data-sources/{ds2_id}/confirm-upload", json={"blob_hash": h}
         )
 
     assert r1.status_code == r2.status_code == 200
 
     async with factory() as s:
         blobs = (
-            (await s.execute(select(Blob).where(Blob.hash == _HASH_A)))
+            (await s.execute(select(Blob).where(Blob.hash == h)))
             .scalars()
             .all()
         )
-        assert len(blobs) == 1  # ON CONFLICT DO NOTHING
+        assert len(blobs) == 1  # one Blob row despite two sources
+
+
+async def test_confirm_reuses_preregistered_blob_without_upload(factory) -> None:
+    # "Add without re-uploading": the blob is already registered (a copy exists
+    # elsewhere in the org), so confirm must NOT promote a staged upload.
+    user, _project, ds = await _seed(factory, with_workflow=False)
+    h = _unique_hash()
+    async with factory() as s:
+        s.add(
+            Blob(
+                hash=h,
+                storage_backend="s3",
+                storage_key=f"blobs/{h}",
+                size_bytes=4096,
+                media_type="video/mp4",
+            )
+        )
+        await s.commit()
+
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload", json={"blob_hash": h}
+        )
+
+    assert res.status_code == 200
+    assert res.json()["data_source"]["status"] == "uploaded"
+
+    async with factory() as s:
+        blobs = (
+            (await s.execute(select(Blob).where(Blob.hash == h))).scalars().all()
+        )
+        assert len(blobs) == 1  # unchanged — no second blob
+
+
+async def test_check_no_match(factory) -> None:
+    user, project, _ds = await _seed(factory, with_workflow=False)
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/projects/{project.id}/data-sources/check",
+            json={"blob_hash": _unique_hash()},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["exists"] is False
+    assert body["in_current_project"] is False
+    assert body["matches"] == []
+
+
+async def test_check_match_in_current_project(factory) -> None:
+    user, project, ds = await _seed(factory, with_workflow=False)
+    h = _unique_hash()
+    async with _client(factory, user) as c:
+        await c.post(f"/data-sources/{ds.id}/confirm-upload", json={"blob_hash": h})
+        res = await c.post(
+            f"/projects/{project.id}/data-sources/check", json={"blob_hash": h}
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["exists"] is True
+    assert body["in_current_project"] is True
+    assert len(body["matches"]) == 1
+    assert body["matches"][0]["project_id"] == str(project.id)
+
+
+async def test_check_match_in_other_project_same_org(factory) -> None:
+    user, project, ds = await _seed(factory, with_workflow=False)
+    h = _unique_hash()
+    async with factory() as s:
+        org_id = (await s.get(Project, project.id)).org_id
+        p2 = Project(org_id=org_id, name=f"proj2-{uuid.uuid4().hex[:8]}")
+        s.add(p2)
+        await s.flush()
+        p2_id = p2.id
+        ds2 = DataSource(project_id=p2_id, type="video", status="pending")
+        s.add(ds2)
+        await s.commit()
+        ds2_id = ds2.id
+
+    async with _client(factory, user) as c:
+        await c.post(f"/data-sources/{ds2_id}/confirm-upload", json={"blob_hash": h})
+        # Probe from the *first* project — the match is in a sibling project.
+        res = await c.post(
+            f"/projects/{project.id}/data-sources/check", json={"blob_hash": h}
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["exists"] is True
+    assert body["in_current_project"] is False
+    assert len(body["matches"]) == 1
+    assert body["matches"][0]["project_id"] == str(p2_id)
+
+
+async def test_check_cross_org_not_visible(factory) -> None:
+    user, project, _ds = await _seed(factory, with_workflow=False)
+    # Another org confirms the same content; it must be invisible here.
+    other, _p2, other_ds = await _seed(factory, with_workflow=False)
+    h = _unique_hash()
+    async with _client(factory, other) as c:
+        await c.post(
+            f"/data-sources/{other_ds.id}/confirm-upload", json={"blob_hash": h}
+        )
+
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/projects/{project.id}/data-sources/check", json={"blob_hash": h}
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["exists"] is False
+    assert body["matches"] == []

@@ -43,6 +43,28 @@ class UploadResponse(BaseModel):
     presigned_put_url: str | None = None
 
 
+class DataSourceCheck(BaseModel):
+    blob_hash: str
+
+
+class DataSourceMatch(BaseModel):
+    """An existing visible copy of the same content within the user's org."""
+
+    data_source_id: uuid.UUID
+    project_id: uuid.UUID
+    project_name: str
+    type: str
+
+
+class DataSourceCheckResponse(BaseModel):
+    # Any visible match in the org (a copy in another org is invisible — no
+    # cross-tenant leak).
+    exists: bool
+    # A match specifically in the project being uploaded to.
+    in_current_project: bool
+    matches: list[DataSourceMatch]
+
+
 class ConfirmResponse(BaseModel):
     data_source: DataSourceOut
     # Set when the backend auto-dispatched a run for this upload — either the
