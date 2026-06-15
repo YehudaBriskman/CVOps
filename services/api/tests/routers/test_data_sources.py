@@ -32,7 +32,7 @@ from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import Org, User
 from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
-from cvops_api.db.models.samples import DataSource
+from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.runs import Run
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.routers import data_sources
@@ -68,9 +68,20 @@ class _FakeStorage:
         key = f"blobs/{hex_part[:2]}/{hex_part[2:]}"
         return 4096, "video/mp4", key
 
+    async def get_presigned_get(
+        self, blob_hash: str, ttl_seconds: int = 900, endpoint: str | None = None
+    ) -> str:
+        return f"https://signed.example/{blob_hash}"
+
 
 _HASH_A = "sha256:" + "a" * 64
 _HASH_B = "sha256:" + "b" * 64
+
+
+def _unique_hash() -> str:
+    """Distinct content hash per call — the testcontainers DB is shared across
+    the session, so fixed hashes collide on the blobs primary key."""
+    return "sha256:" + uuid.uuid4().hex.ljust(64, "0")
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +270,79 @@ async def test_confirm_cross_org_returns_404(factory) -> None:
             f"/data-sources/{ds.id}/confirm-upload", json={"blob_hash": _HASH_A}
         )
 
+    assert res.status_code == 404
+
+
+async def test_list_data_sources_includes_sample_count(factory) -> None:
+    user, project, ds = await _seed(factory, with_workflow=False)
+
+    # Two extracted frames for this source (distinct blobs — samples are unique
+    # per (project, blob_hash)).
+    hashes = [_unique_hash(), _unique_hash()]
+    async with factory() as s:
+        for h in hashes:
+            s.add(
+                Blob(
+                    hash=h,
+                    storage_backend="s3",
+                    storage_key=f"blobs/{h}",
+                    size_bytes=10,
+                    media_type="image/png",
+                )
+            )
+        await s.flush()
+        for i, h in enumerate(hashes):
+            s.add(
+                Sample(
+                    project_id=project.id,
+                    source_id=ds.id,
+                    blob_hash=h,
+                    width=640,
+                    height=480,
+                    frame_index=i,
+                )
+            )
+        await s.commit()
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/projects/{project.id}/data-sources")
+
+    assert res.status_code == 200
+    mine = [d for d in res.json() if d["id"] == str(ds.id)]
+    assert len(mine) == 1
+    assert mine[0]["sample_count"] == 2
+
+
+async def test_data_source_url_returns_presigned(factory) -> None:
+    user, _project, ds = await _seed(factory, with_workflow=False)
+    blob_hash = _unique_hash()
+    async with factory() as s:
+        s.add(
+            Blob(
+                hash=blob_hash,
+                storage_backend="s3",
+                storage_key=f"blobs/{blob_hash}",
+                size_bytes=10,
+                media_type="video/mp4",
+            )
+        )
+        await s.flush()
+        d = await s.get(DataSource, ds.id)
+        assert d is not None
+        d.blob_hash = blob_hash
+        await s.commit()
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/data-sources/{ds.id}/url")
+
+    assert res.status_code == 200
+    assert res.json()["url"].endswith(blob_hash)
+
+
+async def test_data_source_url_404_without_blob(factory) -> None:
+    user, _project, ds = await _seed(factory, with_workflow=False)
+    async with _client(factory, user) as c:
+        res = await c.get(f"/data-sources/{ds.id}/url")
     assert res.status_code == 404
 
 

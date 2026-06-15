@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, UTC
 from typing import Any, cast
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -82,10 +82,11 @@ async def is_blacklisted(jti: str) -> bool:
     return await get_redis().exists(f"{_REVOKED_PREFIX}{jti}") == 1
 
 
-async def get_current_user(
-    token: str = Depends(_oauth2),
-    session: AsyncSession = Depends(get_session),
-) -> User:
+async def resolve_user(token: str, session: AsyncSession) -> User:
+    """Decode a token, enforce the blacklist, and load the active user.
+
+    Shared by `get_current_user` (header-only) and `get_viewer_user` (also
+    accepts the token as a query param for plain browser navigation)."""
     payload = decode_token(token)
 
     jti = payload.get("jti")
@@ -110,3 +111,33 @@ async def get_current_user(
             detail="User not found or inactive",
         )
     return user
+
+
+async def get_current_user(
+    token: str = Depends(_oauth2),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    return await resolve_user(token, session)
+
+
+async def get_viewer_user(
+    request: Request,
+    token: str | None = Query(None),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """Auth dependency for server-rendered viewer pages.
+
+    Accepts the JWT either as a `?token=` query param (so a plain browser
+    navigation works) or as the usual `Authorization: Bearer` header."""
+    if token is None:
+        header = request.headers.get("authorization", "")
+        scheme, _, value = header.partition(" ")
+        if scheme.lower() == "bearer" and value:
+            token = value
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await resolve_user(token, session)

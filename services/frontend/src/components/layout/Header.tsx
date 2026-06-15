@@ -1,5 +1,6 @@
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeMode } from '../../lib/theme'
+import { logout, useMe } from '../../api/auth'
 
 function getTitle(pathname: string): string {
   if (pathname.endsWith('/data-sources')) return 'Data Sources'
@@ -23,8 +24,16 @@ const themeLabel: Record<ThemeMode, string> = {
 
 export function Header() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { mode, toggle } = useTheme()
+  const { data: me } = useMe()
   const title = getTitle(location.pathname)
+  const initial = me?.email?.[0]?.toUpperCase() ?? 'U'
+
+  async function handleLogout() {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <header className="h-14 border-b border-border bg-surface-2 flex items-center px-6 flex-shrink-0 gap-3">
@@ -40,9 +49,14 @@ export function Header() {
         <ThemeIcon mode={mode} />
       </button>
 
-      <div className="w-8 h-8 rounded-full bg-cobalt flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0">
-        U
-      </div>
+      <button
+        type="button"
+        onClick={handleLogout}
+        title={me?.email ?? 'Sign out'}
+        className="w-8 h-8 rounded-full bg-cobalt flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0 hover:opacity-80 transition-opacity"
+      >
+        {initial}
+      </button>
     </header>
   )
 }

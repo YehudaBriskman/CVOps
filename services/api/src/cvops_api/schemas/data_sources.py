@@ -25,6 +25,9 @@ class DataSourceOut(BaseModel):
     status: str
     metadata: dict[str, Any] | None = Field(None, alias="metadata_")
     created_at: datetime
+    # Populated only by the list endpoint (number of extracted frames for this
+    # source); None elsewhere to avoid an extra query on single-item responses.
+    sample_count: int | None = None
 
 
 class UploadResponse(BaseModel):

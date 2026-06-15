@@ -16,11 +16,17 @@ def _paths() -> set[str]:
 
 def test_projects_not_double_prefixed() -> None:
     paths = _paths()
-    assert "/projects/" in paths
-    assert "/projects/projects/" not in paths
+    assert "/api/v1/projects/" in paths
+    assert "/api/v1/projects/projects/" not in paths
 
 
 def test_registry_not_double_prefixed() -> None:
     paths = _paths()
-    assert "/registry/types" in paths
-    assert "/registry/registry/types" not in paths
+    assert "/api/v1/registry/types" in paths
+    assert "/api/v1/registry/registry/types" not in paths
+
+
+def test_health_is_root_and_unversioned() -> None:
+    paths = _paths()
+    assert "/health" in paths
+    assert "/api/v1/health" not in paths

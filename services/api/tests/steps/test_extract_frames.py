@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import pytest
 from moto import mock_aws
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,3 +138,51 @@ async def test_extract_frames_creates_samples(session: AsyncSession) -> None:
         )
     ).scalar()
     assert no_thumb == 0
+
+
+async def test_extract_frames_marks_source_failed(session: AsyncSession) -> None:
+    """A step error must leave the source in a terminal 'failed' state, not
+    silently revert it to a non-terminal status when the run is rolled back."""
+    org_id, proj_id, ds_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    await session.execute(
+        text("INSERT INTO orgs (id, name) VALUES (:i, :n)"),
+        {"i": org_id, "n": f"org-{uuid.uuid4().hex[:8]}"},
+    )
+    await session.execute(
+        text("INSERT INTO projects (id, org_id, name) VALUES (:i, :o, :n)"),
+        {"i": proj_id, "o": org_id, "n": f"proj-{uuid.uuid4().hex[:8]}"},
+    )
+    # No blob → the step raises before it can extract anything.
+    await session.execute(
+        text(
+            "INSERT INTO data_sources (id, project_id, type, status) "
+            "VALUES (:i, :p, 'video', 'uploaded')"
+        ),
+        {"i": ds_id, "p": proj_id},
+    )
+    # Must be committed: the step rolls the session back on failure, and the
+    # source has to survive that rollback to be flipped to 'failed'.
+    await session.commit()
+
+    ctx = StepContext(
+        session=session,
+        storage=None,
+        project_id=str(proj_id),
+        run_id=str(uuid.uuid4()),
+        actor_id=str(uuid.uuid4()),
+        emit_event=lambda *a, **k: None,
+    )
+
+    with pytest.raises(ValueError):
+        await ExtractFramesStep().run(
+            ctx, {"interval_seconds": 1.0}, {"source_id": str(ds_id)}
+        )
+
+    status = (
+        await session.execute(
+            text("SELECT status FROM data_sources WHERE id = CAST(:i AS uuid)"),
+            {"i": str(ds_id)},
+        )
+    ).scalar()
+    assert status == "failed"

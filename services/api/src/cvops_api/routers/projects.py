@@ -91,7 +91,9 @@ async def update_project(
         proj.task_type = body.task_type
     if body.default_ontology_id is not None:
         proj.default_ontology_id = body.default_ontology_id
-    if body.default_ingest_workflow_id is not None:
+    # Distinguish "omitted" from "explicit null" so the field can be cleared:
+    # an explicit null in the PATCH body unsets the default ingest workflow.
+    if "default_ingest_workflow_id" in body.model_fields_set:
         proj.default_ingest_workflow_id = body.default_ingest_workflow_id
     if body.settings is not None:
         proj.settings = body.settings

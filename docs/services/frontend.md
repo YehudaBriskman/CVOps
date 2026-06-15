@@ -49,8 +49,11 @@ GET  /registry/types?category=step     load workflow builder palette
 POST /projects/{id}/workflows          save workflow
 POST /workflows/{id}/runs              start a run
 GET  /runs/{id}                        poll run status
-GET  /projects/{id}/samples            sample browser (cursor paginated)
+GET  /projects/{id}/data-sources       list sources (+ per-source sample_count)
+GET  /data-sources/{id}/url            presigned GET for the raw source blob (preview)
+GET  /projects/{id}/samples            sample browser (cursor paginated; ?source= filters)
 GET  /samples/{id}/thumbnail-url       get presigned thumbnail URL
+GET  /samples/{id}/image-url           get presigned full-image URL (lightbox)
 GET  /models/{id}                      model detail + MLflow link
 ```
 
@@ -88,6 +91,17 @@ The frontend never uploads or downloads files through the API. The API issues a 
    → API returns { url: "<presigned GET, 1-hr TTL>" }
 2. Browser fetches bytes directly from MinIO URL
    img src={url} — browser handles caching
+```
+
+**Source preview flow (Data Sources page):**
+```
+1. GET /api/data-sources/{id}/url
+   → API returns { url: "<presigned GET>" } for the original blob
+2. Browser renders it directly:
+   <video src={url} controls>  for type=video,  <img>  for type=image
+The data-sources list carries sample_count per source; the page polls while
+any source is still ingesting (no blob yet, or 0 frames) so extracted frames
+surface on their own, and links to /projects/{id}/samples?source={id}.
 ```
 
 ---

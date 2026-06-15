@@ -1,10 +1,13 @@
 """extract_frames — decode a source video into frame samples using OpenCV.
 
-Reads the source video blob, samples one frame every `interval_seconds`,
-uploads each frame as a content-addressed JPEG blob, and registers a
-`samples` row per frame.
+Reads the source video blob, samples one frame every `interval_seconds` with
+OpenCV, uploads each frame as a content-addressed JPEG blob, and registers a
+`samples` row per frame. The source's lifecycle status is committed up front
+(`ingesting`) and on any failure (`failed`) so a source never gets stuck in a
+non-terminal state; the declared upload hash is verified lazily here.
 """
 
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -84,6 +87,44 @@ class ExtractFramesStep(Step):
     config_schema = _SCHEMA
 
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
+        from sqlalchemy import text  # noqa: PLC0415
+
+        source_id = inputs["source_id"]
+        interval_seconds = float(config["interval_seconds"])
+        max_frames = config.get("max_frames")
+
+        async def _set_source_status(status: str) -> None:
+            await ctx.session.execute(
+                text(
+                    "UPDATE data_sources SET status=:st, updated_at=now() "
+                    "WHERE id = CAST(:sid AS uuid)"
+                ),
+                {"st": status, "sid": source_id},
+            )
+
+        try:
+            return await self._ingest(
+                ctx, config, source_id, interval_seconds, max_frames, _set_source_status
+            )
+        except Exception:
+            # The coordinator rolls the shared session back on a raised step, which
+            # would discard the in-flight 'ingesting' marker and leave the source
+            # non-terminal forever. Commit a terminal 'failed' on a clean session
+            # ourselves, then re-raise so the run is failed too.
+            await ctx.session.rollback()
+            await _set_source_status("failed")
+            await ctx.session.commit()
+            raise
+
+    async def _ingest(
+        self,
+        ctx: StepContext,
+        config: dict,
+        source_id: str,
+        interval_seconds: float,
+        max_frames: int | None,
+        set_status,
+    ) -> dict:
         import asyncio  # noqa: PLC0415
         import uuid  # noqa: PLC0415
 
@@ -91,10 +132,6 @@ class ExtractFramesStep(Step):
 
         from cvops_api.config import settings  # noqa: PLC0415
         from cvops_api.core.storage import StorageBackend  # noqa: PLC0415
-
-        source_id = inputs["source_id"]
-        interval_seconds = float(config["interval_seconds"])
-        max_frames = config.get("max_frames")
 
         row = (
             await ctx.session.execute(
@@ -106,15 +143,20 @@ class ExtractFramesStep(Step):
             raise ValueError(f"data source {source_id!r} has no uploaded blob")
         blob_hash = row[0]
 
-        await ctx.session.execute(
-            text(
-                "UPDATE data_sources SET status='ingesting', updated_at=now() "
-                "WHERE id = CAST(:sid AS uuid)"
-            ),
-            {"sid": source_id},
-        )
+        # Commit 'ingesting' immediately so the dashboard reflects the in-progress
+        # state (the rest of this step commits atomically with the samples at the
+        # end via the coordinator).
+        await set_status("ingesting")
+        await ctx.session.commit()
 
         video_bytes = await ctx.storage.get_bytes(blob_hash)
+        # Lazy hash verification deferred from confirm-upload: we read the bytes
+        # here anyway, so this is the natural place to catch a bad client hash.
+        actual = "sha256:" + hashlib.sha256(video_bytes).hexdigest()
+        if actual != blob_hash:
+            raise ValueError(
+                f"source blob hash mismatch: declared {blob_hash}, got {actual}"
+            )
 
         frames = await asyncio.to_thread(
             _extract_frames_sync, video_bytes, interval_seconds, max_frames
@@ -142,7 +184,9 @@ class ExtractFramesStep(Step):
             thumb_hash = await ctx.storage.save_bytes(fr["thumb"], "image/jpeg")
             await _register_blob(frame_hash, fr["data"])
             await _register_blob(thumb_hash, fr["thumb"])
-
+            # Generate the id rather than relying on a DB-side default: the ORM
+            # model's id default is Python-side, so a schema built from models
+            # (e.g. tests) has no server default for it.
             res = await ctx.session.execute(
                 text(
                     "INSERT INTO samples (id, project_id, blob_hash, source_id, width, "
@@ -166,6 +210,7 @@ class ExtractFramesStep(Step):
             if new is not None:
                 sample_ids.append(str(new[0]))
             else:
+                # Identical frame already a sample in this project — reuse its id.
                 existing = (
                     await ctx.session.execute(
                         text(
@@ -178,12 +223,9 @@ class ExtractFramesStep(Step):
                 if existing is not None:
                     sample_ids.append(str(existing[0]))
 
-        await ctx.session.execute(
-            text(
-                "UPDATE data_sources SET status='ingested', updated_at=now() "
-                "WHERE id = CAST(:sid AS uuid)"
-            ),
-            {"sid": source_id},
-        )
+        # Terminal success — committed atomically with the samples above by the
+        # coordinator after run() returns. Reached even when zero frames were
+        # kept, so a video that yields nothing still lands in a terminal state.
+        await set_status("ingested")
 
         return {"sample_ids": sample_ids, "frame_count": len(sample_ids)}
