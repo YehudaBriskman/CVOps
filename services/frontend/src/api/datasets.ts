@@ -1,6 +1,14 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import type { CursorPage } from './samples'
+import type { RunOut } from './runs'
+
+export interface TrainCommitRequest {
+  git_url: string
+  entry_point?: string
+  branch?: string | null
+  hyperparams?: Record<string, string | number | boolean> | null
+}
 
 export interface Dataset {
   id: string
@@ -70,6 +78,30 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
   })
 }
 
+export function useReviewDataset() {
+  return useMutation({
+    mutationFn: async (datasetId: string) => {
+      const { data } = await client.post<{ run_id: string }>(
+        `/datasets/${datasetId}/review`,
+      )
+      return data
+    },
+  })
+}
+
+export function useTrainCommit(datasetId: string | undefined) {
+  return useMutation({
+    mutationFn: async (body: { commitId: string } & TrainCommitRequest) => {
+      const { commitId, ...payload } = body
+      const { data } = await client.post<RunOut>(
+        `/datasets/${datasetId}/commits/${commitId}/train`,
+        payload,
+      )
+      return data
+    },
+  })
+}
+
 export function useCreateDataset() {
   const qc = useQueryClient()
   return useMutation({
@@ -81,5 +113,33 @@ export function useCreateDataset() {
       return data
     },
     onSuccess: (data) => qc.invalidateQueries({ queryKey: ['datasets', data.project_id] }),
+  })
+}
+
+export interface CommitFromSamplesResult {
+  commit_id: string
+  committed_count: number
+  skipped_count: number
+}
+
+export function useCommitFromSamples() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      datasetId: string
+      message?: string
+      sample_ids: string[]
+      branch_name?: string
+      split_strategy?: { train_ratio?: number; val_ratio?: number }
+      ontology_id?: string
+    }) => {
+      const { datasetId, ...body } = vars
+      const { data } = await client.post<CommitFromSamplesResult>(
+        `/datasets/${datasetId}/commits/from-samples`,
+        body,
+      )
+      return data
+    },
+    onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ['commits', vars.datasetId] }),
   })
 }

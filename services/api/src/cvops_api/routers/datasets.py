@@ -10,9 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, cast
 
 from cvops_api.core.auth import get_current_user
+from cvops_api.core.audit import emit_event
+from cvops_api.core.sample_view import build_sample_outs
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
+from cvops_api.db.models.samples import Sample
+from cvops_api.db.models.annotations import AnnotationRevision
 from cvops_api.db.models.versioning import (
     Dataset,
     Commit,
@@ -21,20 +25,46 @@ from cvops_api.db.models.versioning import (
     ProjectDatasetLink,
 )
 from cvops_api.db.models.ontologies import Ontology
+from cvops_api.db.models.workflows import Workflow
+from cvops_api.engine.coordinator import advance_workflow
+from cvops_api.engine.dispatch import create_adhoc_run, create_workflow_run
 from cvops_api.schemas.datasets import (
     DatasetCreate,
     DatasetOut,
     CommitCreate,
     CommitOut,
+    CommitFromSamples,
+    CommitFromSamplesOut,
     RefCreate,
     RefOut,
     DatasetLinkCreate,
     DatasetLinkUpdate,
     DiffOut,
 )
-from cvops_api.schemas.samples import CursorPage
+from cvops_api.schemas.samples import CursorPage, SampleOut
+from cvops_api.schemas.runs import RunOut, TrainCommitRequest
 
 router = APIRouter()
+
+# Fixed single-step workflow that pushes a review set into CVAT and parks the run
+# at a gate. Provisioned lazily per project (see get_or_create_review_workflow) so
+# the entry point needs no migration. The step's inputs pull from the run params
+# the /review endpoint sets, via the engine's `$run.params.*` resolver.
+REVIEW_WORKFLOW_NAME = "human_review"
+REVIEW_WORKFLOW_DEF: dict[str, Any] = {
+    "steps": [
+        {
+            "id": "review",
+            "type": "step.human_review",
+            "config": {},
+            "inputs": {
+                "sample_ids": "$run.params.sample_ids",
+                "annotation_revision_ids": "$run.params.annotation_revision_ids",
+            },
+        }
+    ],
+    "edges": [],
+}
 
 
 async def _check_project(
@@ -99,6 +129,110 @@ async def get_dataset(
         raise HTTPException(status_code=404, detail="Dataset not found")
     await _check_project(dataset.project_id, current_user, session)
     return DatasetOut.model_validate(dataset)
+
+
+# ── Review in CVAT ────────────────────────────────────────────────────────────
+
+
+async def _latest_commit_id(
+    session: AsyncSession, dataset_id: uuid.UUID
+) -> uuid.UUID | None:
+    """The commit whose samples make up the review set.
+
+    Prefer the `main` branch ref; fall back to the most recent commit by
+    `created_at` (a dataset committed without a `main` branch still reviews).
+    """
+    r = await session.execute(
+        select(Ref.target_commit_id).where(
+            Ref.dataset_id == dataset_id,
+            Ref.ref_type == "branch",
+            Ref.name == "main",
+        )
+    )
+    commit_id = r.scalar_one_or_none()
+    if commit_id is not None:
+        return commit_id
+
+    r2 = await session.execute(
+        select(Commit.id)
+        .where(Commit.dataset_id == dataset_id)
+        .order_by(Commit.created_at.desc())
+        .limit(1)
+    )
+    return r2.scalar_one_or_none()
+
+
+async def get_or_create_review_workflow(
+    session: AsyncSession, project_id: uuid.UUID
+) -> Workflow:
+    """Find (or lazily create) the project's `human_review` workflow."""
+    r = await session.execute(
+        select(Workflow).where(
+            Workflow.project_id == project_id,
+            Workflow.name == REVIEW_WORKFLOW_NAME,
+            Workflow.deleted_at == None,  # noqa: E711
+        )
+    )
+    wf = r.scalar_one_or_none()
+    if wf is not None:
+        return wf
+
+    wf = Workflow(
+        project_id=project_id,
+        name=REVIEW_WORKFLOW_NAME,
+        definition=REVIEW_WORKFLOW_DEF,
+    )
+    session.add(wf)
+    await session.commit()
+    await session.refresh(wf)
+    return wf
+
+
+@router.post("/datasets/{id}/review")
+async def review_dataset(
+    id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    """Dispatch a `human_review` run over the dataset's current committed samples.
+
+    The review set is the latest commit's `commit_samples`; their annotation
+    revisions ride along as CVAT pre-labels. Returns the parent run id so the UI
+    can navigate to the run view, where the gate surfaces the "Open in CVAT" link.
+    """
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    commit_id = await _latest_commit_id(session, dataset.id)
+    if commit_id is None:
+        raise HTTPException(
+            status_code=400, detail="Dataset has no commits to review"
+        )
+
+    rows = (
+        await session.execute(
+            select(CommitSample.sample_id, CommitSample.annotation_revision_id).where(
+                CommitSample.commit_id == commit_id
+            )
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(
+            status_code=400, detail="Dataset commit has no samples to review"
+        )
+
+    params: dict[str, Any] = {
+        "sample_ids": [str(sid) for sid, _ in rows],
+        "annotation_revision_ids": [str(arid) for _, arid in rows],
+    }
+
+    wf = await get_or_create_review_workflow(session, dataset.project_id)
+    run = await create_workflow_run(session, wf, params, current_user.id)
+    await advance_workflow(session, run.id, current_user.id)
+    return {"run_id": str(run.id)}
 
 
 # ── Commits ───────────────────────────────────────────────────────────────────
@@ -166,6 +300,43 @@ async def get_commit(
         media_type="application/json",
         headers={"Cache-Control": "immutable, max-age=31536000"},
     )
+
+
+@router.get(
+    "/datasets/{id}/commits/{commit_id}/samples",
+    response_model=CursorPage[SampleOut],
+)
+async def list_commit_samples(
+    id: uuid.UUID,
+    commit_id: uuid.UUID,
+    cursor: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CursorPage[SampleOut]:
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    q = (
+        select(Sample)
+        .join(CommitSample, CommitSample.sample_id == Sample.id)
+        .where(CommitSample.commit_id == commit_id, Sample.deleted_at.is_(None))
+    )
+    if cursor is not None:
+        cursor_uuid = uuid.UUID(base64.b64decode(cursor).decode())
+        q = q.where(Sample.id > cursor_uuid)
+    q = q.order_by(Sample.id).limit(limit + 1)
+
+    rows = await session.execute(q)
+    items = list(rows.scalars().all())
+    next_cursor: str | None = None
+    if len(items) == limit + 1:
+        next_cursor = base64.b64encode(str(items[-1].id).encode()).decode()
+        items = items[:limit]
+    return CursorPage(items=await build_sample_outs(session, items), next_cursor=next_cursor)
 
 
 @router.post(
@@ -264,6 +435,240 @@ async def create_commit(
     return CommitOut.model_validate(commit)
 
 
+@router.post(
+    "/datasets/{id}/commits/from-samples",
+    response_model=CommitFromSamplesOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_commit_from_samples(
+    id: uuid.UUID,
+    body: CommitFromSamples,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CommitFromSamplesOut:
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    project = await _check_project(dataset.project_id, current_user, session)
+
+    # Validate samples belong to project & not deleted. Cross-tenant ids → reject whole request.
+    valid = list(
+        (
+            await session.execute(
+                select(Sample.id).where(
+                    Sample.id.in_(body.sample_ids),
+                    Sample.project_id == dataset.project_id,
+                    Sample.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    valid_set = set(valid)
+    missing = [str(sid) for sid in body.sample_ids if sid not in valid_set]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"samples not in project: {', '.join(missing)}",
+        )
+
+    # Resolve winning (latest) revision per sample via DISTINCT ON.
+    rows = await session.execute(
+        select(
+            AnnotationRevision.sample_id,
+            AnnotationRevision.id,
+            AnnotationRevision.ontology_id,
+        )
+        .where(AnnotationRevision.sample_id.in_(valid))
+        .distinct(AnnotationRevision.sample_id)
+        .order_by(AnnotationRevision.sample_id, AnnotationRevision.revision_no.desc())
+    )
+    winning: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
+    for sample_id, revision_id, ont_id in rows.all():
+        winning[sample_id] = (revision_id, ont_id)
+
+    # Commit ALL selected samples: annotated ones pin their winning revision,
+    # raw (unannotated) images commit with a null revision — a dataset of raw
+    # images is valid.
+    committed = valid
+    if not committed:
+        raise HTTPException(status_code=422, detail="no samples to commit")
+    annotated_count = sum(1 for sid in committed if sid in winning)
+
+    # Optional ontology: (1) body; (2) shared across winning revisions; (3)
+    # project default; else None (raw-image commits have no ontology).
+    ontology_id = body.ontology_id
+    if ontology_id is None:
+        ont_ids = {winning[sid][1] for sid in committed if sid in winning}
+        if len(ont_ids) == 1:
+            ontology_id = next(iter(ont_ids))
+        elif project.default_ontology_id is not None:
+            ontology_id = project.default_ontology_id
+
+    ont_version: int | None = None
+    if ontology_id is not None:
+        r_ont = await session.execute(select(Ontology.version).where(Ontology.id == ontology_id))
+        ont_version = r_ont.scalar_one_or_none()
+        if ont_version is None:
+            raise HTTPException(status_code=404, detail="Ontology not found")
+
+    # Find parent commit via branch ref
+    r_ref = await session.execute(
+        select(Ref).where(
+            Ref.dataset_id == dataset.id,
+            Ref.name == body.branch_name,
+        )
+    )
+    ref = r_ref.scalar_one_or_none()
+    parent_commit_id = ref.target_commit_id if ref is not None else None
+
+    # Create commit
+    commit = Commit(
+        dataset_id=dataset.id,
+        project_id=dataset.project_id,
+        ontology_id=ontology_id,
+        ontology_version=ont_version,
+        message=body.message,
+        stats={"sample_count": len(committed), "annotated": annotated_count},
+        parent_commit_id=parent_commit_id,
+    )
+    session.add(commit)
+    await session.flush()
+
+    # Assign splits over committed
+    total = len(committed)
+    train_ratio = body.split_strategy.get("train_ratio", 0.7)
+    val_ratio = body.split_strategy.get("val_ratio", 0.15)
+    train_count = int(total * train_ratio)
+    val_count = int(total * val_ratio)
+
+    for idx, sid in enumerate(committed):
+        if idx < train_count:
+            split = "train"
+        elif idx < train_count + val_count:
+            split = "val"
+        else:
+            split = "test"
+        session.add(
+            CommitSample(
+                commit_id=commit.id,
+                sample_id=sid,
+                annotation_revision_id=winning[sid][0] if sid in winning else None,
+                split=split,
+            )
+        )
+
+    # Advance or create branch ref via CAS
+    if ref:
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                update(Ref)
+                .where(Ref.id == ref.id, Ref.target_commit_id == parent_commit_id)
+                .values(target_commit_id=commit.id)
+            ),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=409, detail="Concurrent branch update — retry")
+    else:
+        session.add(
+            Ref(
+                dataset_id=dataset.id,
+                ref_type="branch",
+                name=body.branch_name,
+                target_commit_id=commit.id,
+                is_mutable=True,
+            )
+        )
+
+    await emit_event(
+        session,
+        actor_id=str(current_user.id),
+        actor_type="user",
+        entity_type="commit",
+        entity_id=commit.id,
+        action="branch.advanced",
+        payload={
+            "dataset_id": str(dataset.id),
+            "branch": body.branch_name,
+            "from_samples": True,
+        },
+    )
+    await session.commit()
+    return CommitFromSamplesOut(
+        commit_id=commit.id,
+        committed_count=len(committed),
+        skipped_count=0,
+    )
+
+
+@router.post(
+    "/datasets/{id}/commits/{commit_id}/train",
+    response_model=RunOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def train_commit(
+    id: uuid.UUID,
+    commit_id: uuid.UUID,
+    body: TrainCommitRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> RunOut:
+    """Ad-hoc "Train this commit": bake a git_url/entry_point/hyperparams trainer
+    into an ephemeral export_yolo → train run scoped to this commit. No saved
+    Workflow and no pre-registered TrainingContainer required; the DAG rides
+    inline on the run's config and is advanced in-request.
+    """
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    rc = await session.execute(
+        select(Commit).where(Commit.id == commit_id, Commit.dataset_id == dataset.id)
+    )
+    commit = rc.scalar_one_or_none()
+    if commit is None:
+        raise HTTPException(status_code=404, detail="Commit not found")
+
+    train_config: dict[str, Any] = {
+        "git_url": body.git_url,
+        "entry_point": body.entry_point,
+        "hyperparams": body.hyperparams or {},
+    }
+    if body.branch:
+        train_config["branch"] = body.branch
+
+    definition = {
+        "steps": [
+            {
+                "id": "export",
+                "type": "step.export_yolo",
+                "config": {},
+                "inputs": {"commit_id": str(commit_id)},
+            },
+            {
+                "id": "train",
+                "type": "step.train",
+                "config": train_config,
+                "inputs": {
+                    "export_blob_hash": "$steps.export.outputs.export_blob_hash",
+                    "commit_id": "$steps.export.outputs.commit_id",
+                },
+            },
+        ],
+        "edges": [{"from": "export", "to": "train"}],
+    }
+
+    run = await create_adhoc_run(
+        session, dataset.project_id, definition, {}, current_user.id
+    )
+    await advance_workflow(session, run.id, current_user.id)
+    await session.refresh(run)
+    return RunOut.model_validate(run)
 # ── Refs ──────────────────────────────────────────────────────────────────────
 
 

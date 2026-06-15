@@ -59,17 +59,21 @@ def _extract_frames_sync(
 
                 # thumbnail: maintain aspect ratio, max 256px on longest side
                 scale = 256 / max(height_px, width_px)
-                thumb = cv2.resize(frame, (int(width_px * scale), int(height_px * scale)))
+                thumb = cv2.resize(
+                    frame, (int(width_px * scale), int(height_px * scale))
+                )
                 ok2, tbuf = cv2.imencode(".jpg", thumb)
                 thumb_data = tbuf.tobytes() if ok2 else data
 
-                frames.append({
-                    "data": data,
-                    "thumb": thumb_data,
-                    "width": width_px,
-                    "height": height_px,
-                    "frame_index": len(frames),
-                })
+                frames.append(
+                    {
+                        "data": data,
+                        "thumb": thumb_data,
+                        "width": width_px,
+                        "height": height_px,
+                        "frame_index": len(frames),
+                    }
+                )
 
                 if max_frames and len(frames) >= max_frames:
                     break
@@ -80,6 +84,29 @@ def _extract_frames_sync(
         Path(tmp_path).unlink(missing_ok=True)
 
     return frames
+
+
+def _process_image_sync(image_bytes: bytes) -> dict:
+    """Blocking decode of a single image. Returns its dims + a 256px thumbnail."""
+    import cv2  # noqa: PLC0415
+    import numpy as np  # noqa: PLC0415
+
+    arr = np.frombuffer(image_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Could not decode image")
+
+    height_px, width_px = img.shape[:2]
+    scale = 256 / max(height_px, width_px)
+    thumb = cv2.resize(
+        img, (max(1, int(width_px * scale)), max(1, int(height_px * scale)))
+    )
+    ok, tbuf = cv2.imencode(".jpg", thumb)
+    return {
+        "width": width_px,
+        "height": height_px,
+        "thumb": tbuf.tobytes() if ok else image_bytes,
+    }
 
 
 class ExtractFramesStep(Step):
@@ -135,13 +162,15 @@ class ExtractFramesStep(Step):
 
         row = (
             await ctx.session.execute(
-                text("SELECT blob_hash FROM data_sources WHERE id = CAST(:sid AS uuid)"),
+                text(
+                    "SELECT type, blob_hash FROM data_sources WHERE id = CAST(:sid AS uuid)"
+                ),
                 {"sid": source_id},
             )
         ).first()
-        if row is None or row[0] is None:
+        if row is None or row[1] is None:
             raise ValueError(f"data source {source_id!r} has no uploaded blob")
-        blob_hash = row[0]
+        source_type, blob_hash = row[0], row[1]
 
         # Commit 'ingesting' immediately so the dashboard reflects the in-progress
         # state (the rest of this step commits atomically with the samples at the
@@ -149,18 +178,14 @@ class ExtractFramesStep(Step):
         await set_status("ingesting")
         await ctx.session.commit()
 
-        video_bytes = await ctx.storage.get_bytes(blob_hash)
+        raw_bytes = await ctx.storage.get_bytes(blob_hash)
         # Lazy hash verification deferred from confirm-upload: we read the bytes
         # here anyway, so this is the natural place to catch a bad client hash.
-        actual = "sha256:" + hashlib.sha256(video_bytes).hexdigest()
+        actual = "sha256:" + hashlib.sha256(raw_bytes).hexdigest()
         if actual != blob_hash:
             raise ValueError(
                 f"source blob hash mismatch: declared {blob_hash}, got {actual}"
             )
-
-        frames = await asyncio.to_thread(
-            _extract_frames_sync, video_bytes, interval_seconds, max_frames
-        )
 
         async def _register_blob(blob_hash: str, data: bytes) -> None:
             await ctx.session.execute(
@@ -177,6 +202,53 @@ class ExtractFramesStep(Step):
                     "mt": "image/jpeg",
                 },
             )
+
+        # Image source: register the uploaded image itself as a single sample
+        # (no frame extraction). The original blob is already in `blobs` from
+        # confirm-upload; we only add a thumbnail.
+        if source_type == "image":
+            info = await asyncio.to_thread(_process_image_sync, raw_bytes)
+            thumb_hash = await ctx.storage.save_bytes(info["thumb"], "image/jpeg")
+            await _register_blob(thumb_hash, info["thumb"])
+            sample_id = str(uuid.uuid4())
+            res = await ctx.session.execute(
+                text(
+                    "INSERT INTO samples (id, project_id, blob_hash, source_id, width, "
+                    "height, frame_index, thumbnail_hash) VALUES "
+                    "(CAST(:id AS uuid), CAST(:pid AS uuid), :bh, CAST(:sid AS uuid), "
+                    ":w, :h, NULL, :th) "
+                    "ON CONFLICT (project_id, blob_hash) DO NOTHING RETURNING id"
+                ),
+                {
+                    "id": sample_id,
+                    "pid": ctx.project_id,
+                    "bh": blob_hash,
+                    "sid": source_id,
+                    "w": info["width"],
+                    "h": info["height"],
+                    "th": thumb_hash,
+                },
+            )
+            new = res.first()
+            if new is None:
+                existing = (
+                    await ctx.session.execute(
+                        text(
+                            "SELECT id FROM samples WHERE project_id = CAST(:pid AS uuid) "
+                            "AND blob_hash = :bh"
+                        ),
+                        {"pid": ctx.project_id, "bh": blob_hash},
+                    )
+                ).first()
+                sample_id = str(existing[0]) if existing is not None else sample_id
+            else:
+                sample_id = str(new[0])
+            await set_status("ingested")
+            return {"sample_ids": [sample_id], "frame_count": 1}
+
+        frames = await asyncio.to_thread(
+            _extract_frames_sync, raw_bytes, interval_seconds, max_frames
+        )
 
         sample_ids: list[str] = []
         for fr in frames:

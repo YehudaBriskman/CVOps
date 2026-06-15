@@ -1,7 +1,7 @@
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,7 +22,19 @@ class DataSource(Base, EntityBase):
     )
     metadata_: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSONB, nullable=True)
 
-    __table_args__ = (Index("ix_data_sources_project_status", "project_id", "status"),)
+    __table_args__ = (
+        Index("ix_data_sources_project_status", "project_id", "status"),
+        # One live, hashed source per (project, blob): re-uploading the same
+        # video into a project is a conflict. Partial so soft-deleted rows and
+        # still-pending (null-hash) sources don't collide.
+        Index(
+            "uq_data_sources_project_blob",
+            "project_id",
+            "blob_hash",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND blob_hash IS NOT NULL"),
+        ),
+    )
 
     def __repr__(self) -> str:
         return (
@@ -47,8 +59,20 @@ class Sample(Base, EntityBase):
     perceptual_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     thumbnail_hash: Mapped[Optional[str]] = mapped_column(ForeignKey("blobs.hash"), nullable=True)
     metadata_: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSONB, nullable=True)
+    # Operational curation flag, distinct from the per-revision review state stored
+    # in AnnotationRevision.provenance. Mutable even though sample *content* is not.
+    review_status: Mapped[str] = mapped_column(
+        Text, nullable=False, default="unreviewed", server_default="unreviewed"
+    )
 
-    __table_args__ = (UniqueConstraint("project_id", "blob_hash", name="uq_samples_project_blob"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "blob_hash", name="uq_samples_project_blob"),
+        CheckConstraint(
+            "review_status IN ('unreviewed','accepted','rejected')",
+            name="ck_samples_review_status",
+        ),
+        Index("ix_samples_project_review_status", "project_id", "review_status"),
+    )
 
     def __repr__(self) -> str:
         return (

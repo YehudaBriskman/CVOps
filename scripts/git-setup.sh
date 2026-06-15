@@ -12,7 +12,9 @@ echo "  ────────────────────────
 # ── hooks ─────────────────────────────────────────────────────────────────
 git config core.hooksPath .githooks
 chmod +x .githooks/commit-msg .githooks/pre-push .githooks/pre-commit .githooks/prepare-commit-msg
-echo "  [ok] hooks -> .githooks"
+chmod +x scripts/hooks/jj/validate.sh scripts/hooks/jj/pre-push.sh
+echo "  [ok] hooks -> .githooks (shared rules: scripts/hooks/lib/rules.sh)"
+echo "  [ok] using jj? run: sh scripts/jj-setup.sh  (same rules, via jj aliases)"
 
 # ── push ──────────────────────────────────────────────────────────────────
 git config push.default current

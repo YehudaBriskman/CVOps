@@ -11,6 +11,8 @@ from cvops_api.routers import (
     projects,
     data_sources,
     samples,
+    collections,
+    tags,
     ontologies,
     datasets,
     workflows,
@@ -19,7 +21,7 @@ from cvops_api.routers import (
     training_containers,
     registry as registry_router,
     internal,
-        cvat,
+    cvat,
     viewer,
 )
 
@@ -76,6 +78,8 @@ app.include_router(orgs.router, prefix=f"{API_V1}/orgs", tags=["orgs"])
 app.include_router(projects.router, prefix=f"{API_V1}/projects", tags=["projects"])
 app.include_router(data_sources.router, prefix=API_V1, tags=["data-sources"])
 app.include_router(samples.router, prefix=API_V1, tags=["samples"])
+app.include_router(collections.router, prefix=API_V1, tags=["collections"])
+app.include_router(tags.router, prefix=API_V1, tags=["tags"])
 app.include_router(ontologies.router, prefix=API_V1, tags=["ontologies"])
 app.include_router(datasets.router, prefix=API_V1, tags=["datasets"])
 app.include_router(workflows.router, prefix=API_V1, tags=["workflows"])

@@ -1,4 +1,5 @@
 import { useResolveGate } from '../../api/runs'
+import { Button } from '../ui'
 
 interface Props {
   runId: string
@@ -14,39 +15,37 @@ export function GateResolutionBanner({ runId, stepId, cvatUrl }: Props) {
   }
 
   return (
-    <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-4">
-      <p className="text-sm font-semibold text-orange-900 mb-1">
-        Waiting for human review
-      </p>
-      <p className="text-xs text-orange-700 mb-3">
-        This run is paused at a human gate. Review the annotations in CVAT then approve or reject.
+    <div className="mb-4 rounded-xl border border-warning/40 bg-warning/5 p-4">
+      <div className="mb-1 flex items-center gap-2">
+        <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-warning" />
+        <p className="text-sm font-semibold text-text-primary">Waiting for human review</p>
+      </div>
+      <p className="mb-3 text-xs text-text-secondary">
+        This run is paused at a human gate. Review the annotations in CVAT, then approve or reject.
       </p>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {cvatUrl && (
-          <a
-            href={cvatUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs border border-orange-300 text-orange-700 px-3 py-1.5 rounded-lg hover:bg-orange-100 transition-colors"
-          >
-            Open in CVAT →
+          <a href={cvatUrl} target="_blank" rel="noreferrer">
+            <Button variant="secondary" size="sm">Open in CVAT →</Button>
           </a>
         )}
-        <button
+        <Button
+          size="sm"
+          className="bg-success hover:opacity-90"
+          loading={resolve.isPending}
           onClick={() => handleResolve('approved')}
-          disabled={resolve.isPending}
-          className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-60 transition-colors"
         >
           Approve
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          loading={resolve.isPending}
           onClick={() => handleResolve('rejected')}
-          disabled={resolve.isPending}
-          className="text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors"
         >
           Reject
-        </button>
+        </Button>
       </div>
     </div>
   )

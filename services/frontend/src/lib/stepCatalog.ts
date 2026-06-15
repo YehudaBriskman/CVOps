@@ -39,7 +39,7 @@ export const STEP_TYPES: StepTypeDef[] = [
   {
     type_key: 'step.train',
     label: 'Train',
-    description: 'Launch Docker training container',
+    description: 'Clone a trainer repo and run it on the exported dataset',
     accent: 'bg-red-500',
   },
 ]

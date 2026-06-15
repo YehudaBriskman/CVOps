@@ -86,19 +86,20 @@ def ctx(run_id, project_id, mock_session, mock_storage):
 
 
 @pytest.fixture
-def base_config(training_container_id, commit_id):
+def base_config(training_container_id):
     return {
         "training_container_id": training_container_id,
         "git_url": "https://github.com/example/trainer.git",
         "branch": "main",
         "entry_point": "train.py",
         "hyperparams": {"epochs": 10, "batch_size": 16},
-        "commit_id": commit_id,
     }
 
 
 @pytest.fixture
-def base_inputs():
+def base_inputs(commit_id):
+    # commit_id is wired from the upstream export step's outputs, not config.
     return {
         "export_blob_hash": "sha256:exportdeadbeef",
+        "commit_id": commit_id,
     }
