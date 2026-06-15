@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cvops-worker-cvat"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "cvops-api",      # db session, redis client, coordinator, Step ABC, registry
+  "cvat-sdk>=2.3.0",     # list Nuclio/Lambda functions from CVAT
+  "ultralytics>=8.3.0",  # extract class labels from .pt model
+  "fastapi>=0.111.0",    # GET /models HTTP endpoint
+  "uvicorn[standard]>=0.29.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/worker_cvat"]

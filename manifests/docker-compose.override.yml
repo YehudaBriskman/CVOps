@@ -379,27 +379,6 @@ services:
         max-size: 100m
         max-file: "3"
 
-  # ── model-deployer (replaces the profiles:cvat entry in docker-compose.yml) ─
-  model-deployer:
-    build:
-      context: ../services/model-deployer
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      CVAT_NETWORK:              cvat_cvat
-      CVAT_HOST:                 http://cvat_server:8080
-      CVAT_PORT:                 8080
-      CVAT_USERNAME:             ${CVAT_USERNAME:-admin}
-      CVAT_PASSWORD:             ${CVAT_PASSWORD:-Admin1234!}
-      CVAT_FUNCTIONS_REDIS_HOST: cvat_redis_ondisk
-      CVAT_FUNCTIONS_REDIS_PORT: 6666
-      YOLO_BASE_IMAGE:           python:3.9-slim
-    networks:
-      - default
-      - cvat
-    profiles: []
 
 volumes:
   cvat_db:

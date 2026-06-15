@@ -58,6 +58,9 @@ export function Sidebar() {
           <NavLink to="/projects" end className={navClass}>
             All Projects
           </NavLink>
+          <NavLink to="/cvat-models" className={navClass}>
+            Models
+          </NavLink>
         </nav>
 
         {projectId && <ProjectNav projectId={projectId} />}
