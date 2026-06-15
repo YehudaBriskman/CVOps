@@ -343,8 +343,8 @@ POST /workflows/{id}/runs  →  201 {"id": "...", "status": "pending"}
 | Package | Language | Status | Description |
 |---|---|---|---|
 | `services/api` | Python 3.12 · FastAPI | ✅ Complete | REST API, workflow engine, DB layer - 21 models, 40+ endpoints, 146 tests |
-| `services/frontend` | TypeScript · React 18 | 🚧 In progress | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react |
-| `packages/steps` | Python | 🚧 Pending | Step implementations: `extract_frames`, `auto_label`, `export_yolo`, `train` |
+| `services/frontend` | TypeScript · React 18 | ✅ Implemented | Dashboard UI - Vite · TanStack Query · Zustand · @xyflow/react; auth, all pages, api layer, data-source/frame viewer |
+| `packages/steps` | Python | 🚧 Partial | Steps: `extract_frames`, `commit_dataset`, `export_yolo` implemented; `auto_label`, `human_review`, `train` are stubs |
 | `services/worker-preprocessing` | Python · Redis Streams | ✅ Complete | Consumes the `preprocessing` stream; runs steps out of the API process |
 
 ---
