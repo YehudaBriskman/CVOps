@@ -108,9 +108,7 @@ async def advance_workflow(
     double-create or double-enqueue the same child.
     """
     # 1. Lock the parent for the duration of this advance.
-    r = await session.execute(
-        select(Run).where(Run.id == parent_run_id).with_for_update()
-    )
+    r = await session.execute(select(Run).where(Run.id == parent_run_id).with_for_update())
     parent = r.scalar_one_or_none()
     if parent is None:
         return
@@ -118,9 +116,7 @@ async def advance_workflow(
         await session.commit()
         return
 
-    wf_result = await session.execute(
-        select(Workflow).where(Workflow.id == parent.workflow_id)
-    )
+    wf_result = await session.execute(select(Workflow).where(Workflow.id == parent.workflow_id))
     workflow = wf_result.scalar_one_or_none()
     if workflow is None:
         await _fail(session, parent, actor_id, "Workflow definition not found")
@@ -148,9 +144,7 @@ async def advance_workflow(
     # 3. Rebuild step_outputs + statuses from existing child runs.
     step_outputs: dict[str, dict[str, Any]] = {}
     child_status: dict[str, str] = {}
-    existing = await session.execute(
-        select(Run).where(Run.parent_run_id == parent_run_id)
-    )
+    existing = await session.execute(select(Run).where(Run.parent_run_id == parent_run_id))
     for prev in existing.scalars().all():
         if not prev.step_id:
             continue
@@ -206,8 +200,14 @@ async def advance_workflow(
         # Freeze inputs at create time. Predecessors are succeeded, so their
         # outputs are final — this is what makes cross-process resolution work.
         try:
-            inputs_template = step_def.get("inputs", {})
-            resolved = resolve_refs(inputs_template, step_outputs, run_params)
+            inputs_template = step_def.get("inputs")
+            if inputs_template:
+                resolved = resolve_refs(inputs_template, step_outputs, run_params)
+            else:
+                # Unwired step (e.g. one built in the canvas, which has no input-
+                # ref UI yet): forward the run params so an entry ingest step still
+                # receives source_id etc. instead of KeyError-ing on empty inputs.
+                resolved = dict(run_params)
         except ResolutionError as exc:
             await _fail(session, parent, actor_id, f"Step '{step_id}' input resolution: {exc}")
             await session.commit()
@@ -273,9 +273,7 @@ async def advance_workflow(
 
     # 6. Finalize if every step succeeded (idempotency reuse can complete the
     #    whole workflow without enqueuing anything).
-    if steps_by_id and all(
-        child_status.get(sid) == "succeeded" for sid in steps_by_id
-    ):
+    if steps_by_id and all(child_status.get(sid) == "succeeded" for sid in steps_by_id):
         parent.status = "succeeded"
         parent.finished_at = datetime.now(UTC)
         await session.flush()

@@ -32,8 +32,8 @@ class CommitOut(BaseModel):
     dataset_id: uuid.UUID
     message: str | None = None
     stats: dict[str, Any] | None = None
-    ontology_id: uuid.UUID
-    ontology_version: int
+    ontology_id: uuid.UUID | None = None
+    ontology_version: int | None = None
     created_at: datetime
 
 
