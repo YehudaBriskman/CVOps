@@ -21,6 +21,7 @@ from cvops_api.db.models.versioning import (
     ProjectDatasetLink,
 )
 from cvops_api.db.models.ontologies import Ontology
+from cvops_api.db.models.models import TrainingContainer
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
@@ -424,6 +425,19 @@ async def train_commit(
     if commit is None:
         raise HTTPException(status_code=404, detail="Commit not found")
 
+    # Optional saved training environment: load it scoped to this project so a
+    # container from another project (or org) is unreachable.
+    if body.training_container_id is not None:
+        rtc = await session.execute(
+            select(TrainingContainer).where(
+                TrainingContainer.id == body.training_container_id,
+                TrainingContainer.project_id == dataset.project_id,
+                TrainingContainer.deleted_at == None,  # noqa: E711
+            )
+        )
+        if rtc.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Training container not found")
+
     train_config: dict[str, Any] = {
         "git_url": body.git_url,
         "entry_point": body.entry_point,
@@ -431,6 +445,8 @@ async def train_commit(
     }
     if body.branch:
         train_config["branch"] = body.branch
+    if body.training_container_id is not None:
+        train_config["training_container_id"] = str(body.training_container_id)
 
     definition = {
         "steps": [

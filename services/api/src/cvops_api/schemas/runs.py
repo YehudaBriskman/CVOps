@@ -52,3 +52,4 @@ class TrainCommitRequest(BaseModel):
     entry_point: str = "train.py"
     branch: str | None = None
     hyperparams: dict[str, Any] | None = None
+    training_container_id: uuid.UUID | None = None
