@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import clsx from 'clsx'
 import { useProjectRuns } from '../api/runs'
 import type { RunOut } from '../api/runs'
-import { STATUS_BADGE } from './RunView'
+import { Breadcrumbs, Button, EmptyState, StatusPill } from '../components/ui'
 
 const FILTERS: { label: string; value?: string }[] = [
   { label: 'All' },
@@ -23,39 +22,36 @@ export default function Runs() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-        <Link to={`/projects/${projectId}`} className="hover:text-indigo-600">Project</Link>
-        <span>/</span>
-        <span className="text-slate-700 font-medium">Runs</span>
-      </div>
+      <Breadcrumbs
+        items={[
+          { label: 'Project', to: `/projects/${projectId}` },
+          { label: 'Runs' },
+        ]}
+      />
 
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-slate-800">Runs</h2>
+        <h2 className="text-xl font-bold text-text-primary">Runs</h2>
         <div className="flex gap-1.5">
           {FILTERS.map(f => (
-            <button
+            <Button
               key={f.label}
+              size="sm"
+              variant={status === f.value ? 'primary' : 'secondary'}
               onClick={() => setStatus(f.value)}
-              className={clsx(
-                'text-xs px-3 py-1.5 rounded-lg border transition-colors',
-                status === f.value
-                  ? 'bg-indigo-600 text-white border-indigo-600'
-                  : 'border-slate-300 text-slate-600 hover:bg-slate-50',
-              )}
             >
               {f.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
-      {isLoading && <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>}
+      {isLoading && <div className="text-center py-12 text-text-muted text-sm">Loading…</div>}
 
       {!isLoading && runs.length === 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">No runs yet</p>
-          <p className="text-xs text-slate-400 mt-1">Runs appear here when you dispatch a workflow</p>
-        </div>
+        <EmptyState
+          title="No runs yet"
+          description="Runs appear here when you dispatch a workflow"
+        />
       )}
 
       {runs.length > 0 && (
@@ -64,37 +60,35 @@ export default function Runs() {
             <Link
               key={run.id}
               to={`/runs/${run.id}`}
-              className="flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 hover:border-indigo-300 transition-colors"
+              className="flex items-center justify-between bg-surface-2 rounded-xl border border-border shadow-sm px-5 py-4 hover:border-iris/40 transition-colors"
             >
               <div className="flex items-center gap-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[run.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                  {run.status}
-                  {run.status === 'running' && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
-                </span>
+                <StatusPill status={run.status} />
                 <div>
-                  <p className="font-semibold text-slate-800 text-sm">
+                  <p className="font-semibold text-text-primary text-sm">
                     {run.kind} · {run.id.slice(0, 8)}
                   </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-text-muted mt-0.5">
                     {new Date(run.created_at).toLocaleString()}
                     {run.attempt > 1 && ` · attempt ${run.attempt}`}
                   </p>
                 </div>
               </div>
-              <span className="text-slate-300 text-lg">›</span>
+              <span className="text-text-muted text-lg">›</span>
             </Link>
           ))}
         </div>
       )}
 
       {hasNextPage && (
-        <button
+        <Button
+          variant="secondary"
           onClick={() => fetchNextPage()}
-          disabled={isFetchingNextPage}
-          className="mt-4 w-full border border-slate-300 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-60 transition-colors"
+          loading={isFetchingNextPage}
+          className="mt-4 w-full"
         >
           {isFetchingNextPage ? 'Loading…' : 'Load more'}
-        </button>
+        </Button>
       )}
     </div>
   )

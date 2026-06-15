@@ -1,42 +1,43 @@
 import { useParams, Link } from 'react-router-dom'
 import { useDatasets } from '../api/datasets'
+import { Breadcrumbs, Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
 
 export default function Datasets() {
   const { id: projectId } = useParams<{ id: string }>()
-  const { data: datasets, isLoading } = useDatasets(projectId)
+  const { data: datasets, isLoading, isError, refetch } = useDatasets(projectId)
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-        <Link to={`/projects/${projectId}`} className="hover:text-indigo-600">Project</Link>
-        <span>/</span>
-        <span className="text-slate-700 font-medium">Datasets</span>
-      </div>
+    <div className="mx-auto max-w-5xl p-6">
+      <Breadcrumbs
+        items={[{ label: 'Project', to: `/projects/${projectId}` }, { label: 'Datasets' }]}
+      />
 
-      <h2 className="text-xl font-bold text-slate-800 mb-4">Datasets</h2>
+      <h2 className="mb-4 text-xl font-bold text-text-primary">Datasets</h2>
 
-      {isLoading && <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>}
+      {isLoading && <SkeletonList rows={3} />}
+
+      {isError && (
+        <ErrorState description="Could not load datasets for this project." onRetry={() => refetch()} />
+      )}
 
       {datasets && datasets.length === 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">No datasets yet</p>
-          <p className="text-xs text-slate-400 mt-1">Datasets are created by workflow commit steps</p>
-        </div>
+        <EmptyState
+          title="No datasets yet"
+          description="Datasets are created by workflow commit steps."
+        />
       )}
 
       {datasets && datasets.length > 0 && (
         <div className="space-y-2">
-          {datasets.map(d => (
-            <Link
-              key={d.id}
-              to={`/datasets/${d.id}`}
-              className="flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4 hover:border-indigo-300 hover:shadow-md transition-all"
-            >
-              <div>
-                <p className="font-semibold text-slate-800">{d.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{new Date(d.created_at).toLocaleDateString()}</p>
-              </div>
-              <span className="text-slate-300 text-lg">›</span>
+          {datasets.map((d) => (
+            <Link key={d.id} to={`/datasets/${d.id}`}>
+              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-iris hover:shadow-md">
+                <div>
+                  <p className="font-semibold text-text-primary">{d.name}</p>
+                  <p className="mt-0.5 text-xs text-text-muted">{new Date(d.created_at).toLocaleDateString()}</p>
+                </div>
+                <span className="text-lg text-text-muted">›</span>
+              </Card>
             </Link>
           ))}
         </div>

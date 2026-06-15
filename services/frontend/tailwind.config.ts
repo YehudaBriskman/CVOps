@@ -4,35 +4,41 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   // CSS-variable-driven theming. Components write `bg-surface-2 text-text-primary`;
   // the actual values come from `--surface-2` / `--text-primary` set in index.css,
-  // which switch on the `data-theme` attribute on <html>.
+  // which switch on the `data-theme` attribute on <html> (dark is the default).
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Geist', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['Geist Mono', 'JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
       colors: {
-        // ── Brand primary (full tonal scale) ────────────────────────────────
-        cobalt: {
-          50:  '#EFF6FF',
-          100: '#DBEAFE',
-          200: '#BFDBFE',
-          300: '#93C5FD',
-          400: '#60A5FA',
-          500: '#3B82F6',
-          600: '#2563EB',
-          700: '#1D4ED8',
-          800: '#1E40AF',
-          900: '#1E3A8A',
-          DEFAULT: '#2563EB',
-          hover:   '#1D4ED8',
+        // ── Brand primary: iris violet (the platform) ──────────────────────
+        iris: {
+          50:  '#F1EFFE',
+          100: '#E4E0FD',
+          200: '#CAC2FB',
+          300: '#ABA0F9',
+          400: '#8E80FF',
+          500: '#7B6CF6',
+          600: '#5D4FE0',
+          700: '#4A3DC4',
+          800: '#3B319C',
+          900: '#2E2778',
+          DEFAULT: '#7B6CF6',
+          hover:   '#8E80FF',
         },
 
-        // ── Brand accents (kept as-is, used in gradient + highlights) ──────
-        aqua: '#06B6D4',
-        sky:  '#22D3EE',
+        // ── Signal: lime (your data, alive — live/active only) ─────────────
+        signal: {
+          400: '#D4F77A',
+          500: '#C6F24E',
+          600: '#B4E62B',
+          DEFAULT: '#C6F24E',
+        },
 
         // ── Neutral raw colors (still available for one-off needs) ─────────
-        ink:   '#0B1F3A',
-        mist:  '#94A3B8',
-        cloud: '#E2E8F0',
-        paper: '#F4F8FF',
+        ink:   '#0A0B0D',
+        mist:  '#A2A9B6',
 
         // ── Semantic, theme-aware tokens (resolve via CSS vars) ────────────
         // These are what app code should reach for by default.
@@ -54,22 +60,22 @@ export default {
           strong:  'var(--border-strong)',
         },
 
-        // ── Semantic feedback ──────────────────────────────────────────────
-        success: '#16A34A',
-        warning: '#F59E0B',
-        error:   '#EF4444',
-        info:    '#6366F1',  // recolored from sky-500 to avoid collision with brand `sky`
+        // ── Semantic feedback / run status ─────────────────────────────────
+        success: '#34D399',
+        warning: '#FBBF24',
+        error:   '#FB7185',
+        info:    '#38BDF8',
 
-        // ── Data-viz categorical (Okabe–Ito-derived, colorblind-safer) ────
+        // ── Data-viz categorical (iris + signal lead, colorblind-safer) ────
         chart: {
-          1: '#2563EB',  // cobalt
-          2: '#06B6D4',  // aqua
-          3: '#16A34A',  // green
-          4: '#F59E0B',  // amber
-          5: '#A855F7',  // violet
-          6: '#EC4899',  // pink
-          7: '#64748B',  // slate
-          8: '#0F766E',  // teal
+          1: '#7B6CF6',  // iris
+          2: '#38BDF8',  // sky
+          3: '#34D399',  // emerald
+          4: '#FBBF24',  // amber
+          5: '#F472B6',  // pink
+          6: '#C6F24E',  // signal
+          7: '#A2A9B6',  // mist
+          8: '#2DD4BF',  // teal
         },
       },
 
@@ -82,15 +88,14 @@ export default {
       },
 
       boxShadow: {
-        // Tinted shadows on light; flatter, darker on dark.
         sm: '0 1px 2px 0 var(--shadow-color)',
         DEFAULT: '0 1px 3px 0 var(--shadow-color), 0 1px 2px -1px var(--shadow-color)',
         md: '0 4px 6px -1px var(--shadow-color), 0 2px 4px -2px var(--shadow-color)',
-        lg: '0 10px 15px -3px var(--shadow-color), 0 4px 6px -4px var(--shadow-color)',
+        lg: '0 8px 30px var(--shadow-color)',
       },
 
       backgroundImage: {
-        'cv-signature': 'linear-gradient(135deg, #2563EB 0%, #06B6D4 100%)',
+        'cv-signature': 'linear-gradient(135deg, #7B6CF6 0%, #C6F24E 100%)',
       },
     },
   },
