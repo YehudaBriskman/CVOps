@@ -144,6 +144,31 @@ async def test_push_gate_inserts_job_and_raises_gate(session, fake_cvat_client):
     assert "webhook" not in fake_cvat_client
 
 
+async def test_push_tolerates_none_revision_ids(session, fake_cvat_client):
+    """Samples without a pre-label arrive as literal "None" in frozen input_refs.
+
+    These must be filtered before the uuid[] cast (regression: asyncpg DataError
+    'invalid UUID None'). The sample is still pushed, just with no pre-labels.
+    """
+    proj = await make_project(session)
+    sample = await make_sample(session, project_id=proj.id)
+    run = await make_run(
+        session, project_id=proj.id, kind="step", status="running", step_id="review_node"
+    )
+    inputs = {
+        "sample_ids": [str(sample.id)],
+        "annotation_revision_ids": ["None"],  # frozen form for an unlabelled sample
+    }
+
+    with pytest.raises(GateException) as exc:
+        await HumanReviewStep().run(_ctx(session, str(proj.id), str(run.id)), {}, inputs)
+
+    assert exc.value.gate_data["cvat_task_id"] == 4242
+    pushed = fake_cvat_client["push"]
+    assert len(pushed["images"]) == 1
+    assert pushed["images"][0].annotations == []  # no pre-label for this sample
+
+
 async def test_push_registers_webhook_when_configured(session, fake_cvat_client, monkeypatch):
     monkeypatch.setenv("CVAT_WEBHOOK_TARGET", "http://api:8000/api/v1/internal/cvat/webhook")
     monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")

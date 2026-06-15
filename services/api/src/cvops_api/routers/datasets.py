@@ -225,9 +225,14 @@ async def review_dataset(
             status_code=400, detail="Dataset commit has no samples to review"
         )
 
+    # Pre-labels are optional: samples without a committed annotation revision
+    # have annotation_revision_id = NULL. Drop those (don't stringify None into
+    # the literal "None", which then fails the UUID cast in human_review). The
+    # full working set rides on sample_ids; revisions are matched by their own
+    # sample_id, so the lists need not be positionally aligned.
     params: dict[str, Any] = {
         "sample_ids": [str(sid) for sid, _ in rows],
-        "annotation_revision_ids": [str(arid) for _, arid in rows],
+        "annotation_revision_ids": [str(arid) for _, arid in rows if arid is not None],
     }
 
     wf = await get_or_create_review_workflow(session, dataset.project_id)

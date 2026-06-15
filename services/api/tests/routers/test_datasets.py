@@ -83,7 +83,7 @@ def _client(factory, current_user: User) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _seed(factory, *, with_commit: bool, n_samples: int = 2):
+async def _seed(factory, *, with_commit: bool, n_samples: int = 2, with_revisions: bool = True):
     """Seed org + user + project + dataset. When with_commit, also seed an
     ontology, samples, their annotation revisions, a commit, commit_samples, and
     a `main` branch ref pointing at it.
@@ -143,26 +143,29 @@ async def _seed(factory, *, with_commit: bool, n_samples: int = 2):
                 )
                 s.add(sample)
                 await s.flush()
-                rev = AnnotationRevision(
-                    project_id=project.id,
-                    sample_id=sample.id,
-                    ontology_id=ont.id,
-                    ontology_version=1,
-                    revision_no=1,
-                    payload=[],
-                    provenance={"source": "model"},
-                )
-                s.add(rev)
-                await s.flush()
+                rev_id = None
+                if with_revisions:
+                    rev = AnnotationRevision(
+                        project_id=project.id,
+                        sample_id=sample.id,
+                        ontology_id=ont.id,
+                        ontology_version=1,
+                        revision_no=1,
+                        payload=[],
+                        provenance={"source": "model"},
+                    )
+                    s.add(rev)
+                    await s.flush()
+                    rev_id = rev.id
                 s.add(
                     CommitSample(
                         commit_id=commit.id,
                         sample_id=sample.id,
-                        annotation_revision_id=rev.id,
+                        annotation_revision_id=rev_id,
                         split="train",
                     )
                 )
-                pairs.append((sample.id, rev.id))
+                pairs.append((sample.id, rev_id))
             s.add(
                 Ref(
                     dataset_id=dataset.id,
@@ -244,6 +247,30 @@ async def test_review_dispatches_human_review_run(
         "step_type": "step.human_review",
         "queue": CVAT_STREAM,
     }
+
+
+async def test_review_omits_null_revision_ids(
+    factory, fake_redis, human_review_step
+) -> None:
+    """Samples committed without a pre-label (annotation_revision_id NULL) must
+    not stringify to "None" in the dispatched params — that later fails the
+    uuid[] cast in human_review (regression: asyncpg DataError 'invalid UUID')."""
+    user, project, dataset, pairs = await _seed(
+        factory, with_commit=True, with_revisions=False
+    )
+    sample_ids = {str(sid) for sid, _ in pairs}
+
+    async with _client(factory, user) as c:
+        res = await c.post(f"/datasets/{dataset.id}/review")
+
+    assert res.status_code == 200
+    async with factory() as s:
+        parent = await s.get(Run, uuid.UUID(res.json()["run_id"]))
+        assert set(parent.input_refs["params"]["sample_ids"]) == sample_ids
+        # All samples were unlabelled → no revision ids, and crucially no "None".
+        revs = parent.input_refs["params"]["annotation_revision_ids"]
+        assert revs == []
+        assert "None" not in revs
 
 
 async def test_review_reuses_existing_workflow(

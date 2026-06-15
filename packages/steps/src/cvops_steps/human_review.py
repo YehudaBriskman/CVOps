@@ -61,7 +61,14 @@ class HumanReviewStep(Step):
 
         session = ctx.session
 
-        revision_ids = [str(r) for r in inputs.get("annotation_revision_ids", [])]
+        # Pre-labels are optional. Drop null/"None" entries (samples without a
+        # committed revision) so they don't reach the uuid[] cast below — older
+        # frozen runs may carry the literal string "None".
+        revision_ids = [
+            str(r)
+            for r in inputs.get("annotation_revision_ids", [])
+            if r is not None and str(r) not in ("None", "")
+        ]
 
         # ── Resolve pre-labels: the latest provided revision per sample ──────
         # The highest revision_no wins when several revisions reference one
