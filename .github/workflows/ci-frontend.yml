@@ -1,0 +1,42 @@
+name: Frontend · Test, Lint & Type-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/frontend/**'
+      - '.github/workflows/ci-frontend.yml'
+
+jobs:
+  test:
+    name: vitest + eslint + tsc (Node 20)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: services/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Vitest
+        run: npm test
