@@ -401,6 +401,44 @@ services:
       - cvat
     profiles: []
 
+  worker-cvat:
+    # CVAT-queue worker: runs step.human_review (push gate) and, on a CVAT
+    # completion webhook, pulls reviewed annotations back into
+    # annotation_revisions and resumes the gated run. Lives here (not the base
+    # compose) because it needs the `cvat` network to reach cvat_server, while
+    # still depending on the base infra (postgres/redis/garage).
+    build:
+      context: ..
+      dockerfile: services/worker-cvat/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:    { condition: service_healthy }
+      redis:       { condition: service_healthy }
+      garage:      { condition: service_healthy }
+      cvat_server: { condition: service_started }
+    environment:
+      DATABASE_URL:        postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      REDIS_URL:           redis://redis:6379/0
+      REDIS_STREAM:        cvat
+      S3_ENDPOINT:         http://garage:3900
+      S3_ACCESS_KEY:       ${GARAGE_DEFAULT_ACCESS_KEY}
+      S3_SECRET_KEY:       ${GARAGE_DEFAULT_SECRET_KEY}
+      S3_BUCKET:           ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      S3_REGION:           garage
+      WORKER_TOKEN:        ${WORKER_TOKEN}
+      API_BASE_URL:        http://api:8000
+      CVAT_URL:            http://cvat_server:8080
+      CVAT_PUBLIC_URL:     ${CVAT_PUBLIC_URL:-http://localhost:8080}
+      CVAT_USERNAME:       ${CVAT_USERNAME:-admin}
+      CVAT_PASSWORD:       ${CVAT_PASSWORD:-Admin1234!}
+      CVAT_WEBHOOK_SECRET: ${CVAT_WEBHOOK_SECRET}
+      # CVAT posts review-completion webhooks back to the API at this URL.
+      CVAT_WEBHOOK_TARGET: http://api:8000/api/v1/internal/cvat/webhook
+    networks:
+      - default
+      - cvat
+    profiles: ["app", "all"]
+
 volumes:
   cvat_db:
   cvat_data:
