@@ -8,7 +8,7 @@ import { Select } from '../ui'
 /** Parse the active sample filters out of the URL search params. */
 export function parseSampleFilters(params: URLSearchParams): SampleFilters {
   const f: SampleFilters = {}
-  const source = params.get('source') ?? params.get('source_id')
+  const source = params.get('source_id')
   if (source) f.source_id = source
   if (params.get('review_status')) f.review_status = params.get('review_status') ?? undefined
   const ann = params.get('annotation')
@@ -36,8 +36,7 @@ export function SampleFilterBar({ projectId }: { projectId: string }) {
     setParams(next, { replace: true })
   }
 
-  const sourceKey = params.get('source') ? 'source' : 'source_id'
-  const hasAny = ['source', 'source_id', 'review_status', 'annotation', 'collection_id', 'tag_id', 'created_after', 'created_before'].some(
+  const hasAny = ['source_id', 'review_status', 'annotation', 'collection_id', 'tag_id', 'created_after', 'created_before'].some(
     (k) => params.get(k),
   )
 
@@ -45,8 +44,8 @@ export function SampleFilterBar({ projectId }: { projectId: string }) {
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <Select
         className="w-auto"
-        value={params.get(sourceKey) ?? ''}
-        onChange={(e) => setParam('source', e.target.value)}
+        value={params.get('source_id') ?? ''}
+        onChange={(e) => setParam('source_id', e.target.value)}
         aria-label="Filter by source"
       >
         <option value="">All sources</option>
