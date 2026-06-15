@@ -10,7 +10,7 @@ CVOps is an ML-lifecycle dashboard that collapses dataset versioning, workflow o
 |---|---|---|
 | `services/api` | Python 3.12 / FastAPI — REST API, workflow engine, DB layer | implemented |
 | `services/frontend` | TypeScript / React 18 + Vite — dashboard UI (auth, all pages, api layer, data-source/frame viewer) | implemented |
-| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo`, `train` implemented; `auto_label`, `human_review` are stubs) | partial |
+| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo`, `train`, `human_review` implemented; `auto_label` is a stub) | partial |
 | `services/worker-preprocessing` | Python — Redis-Streams worker; consumes the `preprocessing` stream and runs steps out of the API process | implemented |
 
 Standalone CLI prototypes for the same lifecycle steps live in `tools/frame-extractor/` (`extract_frames.py`, `auto_label.py`, `upload_to_cvat.py`).
