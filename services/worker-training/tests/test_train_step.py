@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import io
 import json
-import shutil
 import tarfile
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from worker_training.steps.train import (
+from cvops_steps.train import (
     TrainStep,
     _build_env,
     _download_dataset,
@@ -29,6 +28,25 @@ def _make_weights_tar(weights_dir: Path) -> bytes:
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         tf.add(str(weights_dir), arcname=weights_dir.name)
     return buf.getvalue()
+
+
+# ── Test: step metadata (registry/routing contract) ─────────────────────────
+
+
+def test_train_step_routes_to_training_queue():
+    # The API registers this same class; queue drives coordinator XADD routing.
+    assert TrainStep.queue == "training"
+
+
+def test_train_config_schema_requires_repo_fields():
+    required = set(TrainStep.config_schema["required"])
+    assert {"training_container_id", "git_url"} <= required
+    # Schema and implementation agree on the repo-based contract.
+    assert "git_url" in TrainStep.config_schema["properties"]
+    assert "entry_point" in TrainStep.config_schema["properties"]
+    # commit_id is a runtime value wired from the export edge, not config.
+    assert "commit_id" not in TrainStep.config_schema["properties"]
+    assert "commit_id" not in required
 
 
 # ── Test: _download_dataset ────────────────────────────────────────────────
@@ -87,7 +105,8 @@ def test_build_env_includes_mlflow_uri(tmp_path):
     assert env["MLFLOW_TRACKING_URI"] == "http://mlflow:5000"
 
 
-def test_build_env_does_not_include_mlflow_if_none(tmp_path):
+def test_build_env_does_not_include_mlflow_if_none(tmp_path, monkeypatch):
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     icd_config = {
         "inputs": {},
         "outputs": {},
@@ -98,6 +117,32 @@ def test_build_env_does_not_include_mlflow_if_none(tmp_path):
     env = _build_env(icd_config, hyperparams={}, dataset_dir=None, output_dir=output_dir)
 
     assert "MLFLOW_TRACKING_URI" not in env
+
+
+def test_build_env_mlflow_falls_back_to_worker_environ(tmp_path, monkeypatch):
+    # Centralized config: a worker-wide MLFLOW_TRACKING_URI applies when the
+    # training container's icd_config doesn't pin its own.
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://central-mlflow:5000")
+    icd_config = {"inputs": {}, "outputs": {}}
+    output_dir = tmp_path / "output"
+
+    env = _build_env(icd_config, hyperparams={}, dataset_dir=None, output_dir=output_dir)
+
+    assert env["MLFLOW_TRACKING_URI"] == "http://central-mlflow:5000"
+
+
+def test_build_env_activates_per_run_venv(tmp_path):
+    icd_config = {"inputs": {}, "outputs": {}}
+    output_dir = tmp_path / "output"
+    venv_python = tmp_path / "venv" / "bin" / "python"
+
+    env = _build_env(
+        icd_config, hyperparams={}, dataset_dir=None, output_dir=output_dir,
+        venv_python=venv_python,
+    )
+
+    assert env["VIRTUAL_ENV"] == str(tmp_path / "venv")
+    assert env["PATH"].startswith(str(tmp_path / "venv" / "bin"))
 
 
 def test_build_env_includes_dataset_path(tmp_path):
@@ -177,7 +222,7 @@ async def test_upload_weights_raises_if_empty_dir(ctx, tmp_path):
 async def test_write_model_version_inserts_row(ctx, mock_tc, commit_id):
     from cvops_api.db.models.models import ModelVersion
 
-    mv_id = await _write_model_version(
+    await _write_model_version(
         ctx,
         tc=mock_tc,
         commit_id=commit_id,
@@ -224,14 +269,16 @@ async def test_write_model_version_extracts_mlflow_run_id(ctx, mock_tc, commit_i
 @pytest.mark.asyncio
 async def test_run_nonzero_exit_raises_runtime_error(ctx, base_config, base_inputs, mock_tc, tmp_path):
     """Non-zero exit code from the training script raises RuntimeError."""
+    venv = (tmp_path / "venv" / "bin" / "python", tmp_path / "venv" / "bin" / "pip")
     with (
-        patch("worker_training.steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
-        patch("worker_training.steps.train._download_dataset", new=AsyncMock(return_value=None)),
-        patch("worker_training.steps.train._clone_repo", return_value=tmp_path / "repo"),
-        patch("worker_training.steps.train._install_requirements"),
-        patch("worker_training.steps.train._run_training", return_value=(1, "crash log output")),
+        patch("cvops_steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
+        patch("cvops_steps.train._download_dataset", new=AsyncMock(return_value=None)),
+        patch("cvops_steps.train._clone_repo", return_value=tmp_path / "repo"),
+        patch("cvops_steps.train._create_venv", return_value=venv),
+        patch("cvops_steps.train._install_requirements"),
+        patch("cvops_steps.train._run_training", return_value=(1, "crash log output")),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("worker_training.steps.train.shutil.rmtree"),
+        patch("cvops_steps.train.shutil.rmtree"),
     ):
         step = TrainStep()
         with pytest.raises(RuntimeError, match="crash log output"):
@@ -241,14 +288,16 @@ async def test_run_nonzero_exit_raises_runtime_error(ctx, base_config, base_inpu
 @pytest.mark.asyncio
 async def test_run_cleans_up_tmpdir_on_failure(ctx, base_config, base_inputs, mock_tc, tmp_path):
     """shutil.rmtree is called on the workdir even when training fails."""
+    venv = (tmp_path / "venv" / "bin" / "python", tmp_path / "venv" / "bin" / "pip")
     with (
-        patch("worker_training.steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
-        patch("worker_training.steps.train._download_dataset", new=AsyncMock(return_value=None)),
-        patch("worker_training.steps.train._clone_repo", return_value=tmp_path / "repo"),
-        patch("worker_training.steps.train._install_requirements"),
-        patch("worker_training.steps.train._run_training", return_value=(1, "error")),
+        patch("cvops_steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
+        patch("cvops_steps.train._download_dataset", new=AsyncMock(return_value=None)),
+        patch("cvops_steps.train._clone_repo", return_value=tmp_path / "repo"),
+        patch("cvops_steps.train._create_venv", return_value=venv),
+        patch("cvops_steps.train._install_requirements"),
+        patch("cvops_steps.train._run_training", return_value=(1, "error")),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("worker_training.steps.train.shutil.rmtree") as mock_rmtree,
+        patch("cvops_steps.train.shutil.rmtree") as mock_rmtree,
     ):
         step = TrainStep()
         with pytest.raises(RuntimeError):
@@ -258,24 +307,37 @@ async def test_run_cleans_up_tmpdir_on_failure(ctx, base_config, base_inputs, mo
 
 
 @pytest.mark.asyncio
-async def test_run_cleans_up_tmpdir_on_success(ctx, base_config, tmp_path, mock_tc, commit_id):
+async def test_run_cleans_up_tmpdir_on_success(ctx, base_config, base_inputs, tmp_path, mock_tc):
     """shutil.rmtree is called even when training succeeds."""
     model_version_id = str(uuid.uuid4())
+    venv = (tmp_path / "venv" / "bin" / "python", tmp_path / "venv" / "bin" / "pip")
 
     with (
-        patch("worker_training.steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
-        patch("worker_training.steps.train._download_dataset", new=AsyncMock(return_value=None)),
-        patch("worker_training.steps.train._clone_repo", return_value=tmp_path / "repo"),
-        patch("worker_training.steps.train._install_requirements"),
-        patch("worker_training.steps.train._run_training", return_value=(0, "")),
-        patch("worker_training.steps.train._read_metrics", return_value={"accuracy": 0.9}),
-        patch("worker_training.steps.train._upload_weights", new=AsyncMock(return_value="sha256:abc")),
-        patch("worker_training.steps.train._write_model_version", new=AsyncMock(return_value=model_version_id)),
+        patch("cvops_steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)),
+        patch("cvops_steps.train._download_dataset", new=AsyncMock(return_value=None)),
+        patch("cvops_steps.train._clone_repo", return_value=tmp_path / "repo"),
+        patch("cvops_steps.train._create_venv", return_value=venv),
+        patch("cvops_steps.train._install_requirements"),
+        patch("cvops_steps.train._run_training", return_value=(0, "")),
+        patch("cvops_steps.train._read_metrics", return_value={"accuracy": 0.9}),
+        patch("cvops_steps.train._upload_weights", new=AsyncMock(return_value="sha256:abc")),
+        patch("cvops_steps.train._write_model_version", new=AsyncMock(return_value=model_version_id)),
         patch("tempfile.mkdtemp", return_value=str(tmp_path)),
-        patch("worker_training.steps.train.shutil.rmtree") as mock_rmtree,
+        patch("cvops_steps.train.shutil.rmtree") as mock_rmtree,
     ):
         step = TrainStep()
-        result = await step.run(ctx, base_config, inputs={})
+        result = await step.run(ctx, base_config, base_inputs)
 
         mock_rmtree.assert_called_once_with(tmp_path, ignore_errors=True)
         assert result == {"model_version_id": model_version_id}
+
+
+@pytest.mark.asyncio
+async def test_run_raises_when_commit_id_missing(ctx, base_config, mock_tc):
+    """commit_id must be wired from the export edge; absent → clear error."""
+    with patch(
+        "cvops_steps.train._load_training_container", new=AsyncMock(return_value=mock_tc)
+    ):
+        step = TrainStep()
+        with pytest.raises(RuntimeError, match="commit_id"):
+            await step.run(ctx, base_config, inputs={"export_blob_hash": "sha256:x"})

@@ -116,6 +116,9 @@ class ExportYoloStep(Step):
 
         return {
             "export_blob_hash": export_blob_hash,
+            # Echo the source commit so downstream steps (e.g. train) can wire
+            # $steps.<export>.outputs.commit_id without re-plumbing it through config.
+            "commit_id": commit_id,
             "image_count": len(rows),
             "class_count": len(names),
         }

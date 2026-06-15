@@ -9,6 +9,7 @@ requires-python = ">=3.12"
 dependencies = [
   "cvops-worker-common",
   "cvops-api",
+  "cvops-steps",  # step.train implementation (shared with the API registry)
 ]
 
 [project.optional-dependencies]

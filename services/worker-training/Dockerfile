@@ -8,6 +8,11 @@ COPY packages/worker-common ./packages/worker-common
 COPY services/api ./services/api
 RUN pip install --no-cache-dir ./packages/worker-common ./services/api
 
+# cvops-steps holds the canonical step.train implementation, shared with the
+# API registry. Sibling monorepo package, not on PyPI.
+COPY packages/steps ./packages/steps
+RUN pip install --no-cache-dir ./packages/steps
+
 COPY services/worker-training ./services/worker-training
 RUN pip install --no-cache-dir ./services/worker-training
 
