@@ -1,33 +1,127 @@
-import { useState, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import { sha256Hex } from '../lib/hash'
+import {
+  type DataSource,
+  type UploadResponse,
+  useDataSourceUrl,
+  useDataSources,
+  useDeleteDataSource,
+} from '../api/data-sources'
 
-interface DataSource {
-  id: string
-  type: string
-  status: string
-  blob_hash: string | null
-  external_uri: string | null
-  created_at: string
+function StatusBadge({ ds }: { ds: DataSource }) {
+  let label: string
+  let cls: string
+  let spinner = false
+
+  if (ds.status === 'failed') {
+    label = 'Failed'
+    cls = 'bg-red-100 text-red-700'
+  } else if (ds.status === 'pending') {
+    label = 'Uploading'
+    cls = 'bg-amber-100 text-amber-700'
+  } else if (ds.type !== 'image' && (ds.sample_count ?? 0) === 0) {
+    label = 'Extracting frames'
+    cls = 'bg-indigo-100 text-indigo-700'
+    spinner = true
+  } else {
+    label = 'Ready'
+    cls = 'bg-green-100 text-green-700'
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>
+      {spinner && <span className="w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />}
+      {label}
+    </span>
+  )
 }
 
-function useDataSources(projectId: string | undefined) {
-  return useQuery<DataSource[]>({
-    queryKey: ['data-sources', projectId],
-    queryFn: async () => {
-      const { data } = await client.get<DataSource[]>(`/projects/${projectId}/data-sources`)
-      return data
-    },
-    enabled: !!projectId,
-  })
+function SourcePreview({ ds }: { ds: DataSource }) {
+  const { data, isLoading, isError } = useDataSourceUrl(ds.id, ds.blob_hash != null)
+
+  if (ds.external_uri && !ds.blob_hash) {
+    return (
+      <div className="aspect-video bg-slate-50 flex items-center justify-center px-4">
+        <a href={ds.external_uri} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:underline break-all text-center">
+          {ds.external_uri}
+        </a>
+      </div>
+    )
+  }
+
+  if (ds.blob_hash == null) {
+    return <div className="aspect-video bg-slate-100" />
+  }
+
+  if (isLoading) {
+    return (
+      <div className="aspect-video bg-slate-100 flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (isError || !data?.url) {
+    return (
+      <div className="aspect-video bg-slate-50 flex items-center justify-center text-xs text-slate-400">
+        Preview unavailable
+      </div>
+    )
+  }
+
+  if (ds.type === 'image') {
+    return (
+      <div className="aspect-video bg-slate-900">
+        <img src={data.url} alt="source" className="w-full h-full object-contain" loading="lazy" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="aspect-video bg-black">
+      <video src={data.url} controls preload="metadata" className="w-full h-full object-contain" />
+    </div>
+  )
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-amber-100 text-amber-700',
-  confirmed: 'bg-green-100 text-green-700',
-  failed:    'bg-red-100 text-red-700',
+function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: string; onDelete: (id: string) => void }) {
+  const frames = ds.sample_count ?? 0
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+      <SourcePreview ds={ds} />
+      <div className="p-4 flex flex-col gap-3 flex-1">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-slate-800 capitalize">{ds.type.replace('_', ' ')}</p>
+            <p className="text-xs text-slate-400 mt-0.5 font-mono">{ds.id.slice(0, 8)}…</p>
+          </div>
+          <StatusBadge ds={ds} />
+        </div>
+
+        <div className="flex items-center justify-between mt-auto">
+          {frames > 0 ? (
+            <Link
+              to={`/projects/${projectId}/samples?source=${ds.id}`}
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+            >
+              View {frames} frame{frames === 1 ? '' : 's'} →
+            </Link>
+          ) : (
+            <span className="text-xs text-slate-400">No frames yet</span>
+          )}
+          <button
+            onClick={() => onDelete(ds.id)}
+            className="text-xs text-red-400 hover:text-red-600 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function DataSources() {
@@ -39,21 +133,18 @@ export default function DataSources() {
   const [error, setError] = useState<string | null>(null)
 
   const { data: sources, isLoading } = useDataSources(projectId)
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => { await client.delete(`/data-sources/${id}`) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['data-sources', projectId] }),
-  })
+  const deleteMutation = useDeleteDataSource(projectId)
 
   async function handleUpload(file: File) {
     setError(null)
     setUploading(true)
     try {
+      const type = file.type.startsWith('image/') ? 'image' : 'video'
       setProgress('Creating data source…')
-      const { data: upload } = await client.post<{
-        data_source: DataSource
-        presigned_put_url: string | null
-      }>(`/projects/${projectId}/data-sources`, { type: 'video' })
+      const { data: upload } = await client.post<UploadResponse>(
+        `/projects/${projectId}/data-sources`,
+        { type },
+      )
 
       if (upload.presigned_put_url) {
         setProgress('Uploading to storage…')
@@ -78,7 +169,7 @@ export default function DataSources() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
         <Link to={`/projects/${projectId}`} className="hover:text-indigo-600">Project</Link>
         <span>/</span>
@@ -88,11 +179,11 @@ export default function DataSources() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-slate-800">Data Sources</h2>
         <label className={`cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}>
-          {uploading ? (progress ?? 'Uploading…') : '+ Upload video'}
+          {uploading ? (progress ?? 'Uploading…') : '+ Upload video or image'}
           <input
             ref={fileRef}
             type="file"
-            accept="video/*"
+            accept="video/*,image/*"
             className="hidden"
             disabled={uploading}
             onChange={e => {
@@ -114,30 +205,19 @@ export default function DataSources() {
       {sources && sources.length === 0 && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
           <p className="text-sm font-medium text-slate-700">No data sources yet</p>
-          <p className="text-xs text-slate-400 mt-1">Upload a video to get started</p>
+          <p className="text-xs text-slate-400 mt-1">Upload a video or image to get started</p>
         </div>
       )}
 
       {sources && sources.length > 0 && (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {sources.map(ds => (
-            <div key={ds.id} className="flex items-center justify-between bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-3">
-              <div>
-                <p className="text-sm font-medium text-slate-800 capitalize">{ds.type}</p>
-                <p className="text-xs text-slate-400 mt-0.5 font-mono">{ds.id.slice(0, 8)}…</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[ds.status] ?? 'bg-slate-100 text-slate-500'}`}>
-                  {ds.status}
-                </span>
-                <button
-                  onClick={() => deleteMutation.mutate(ds.id)}
-                  className="text-xs text-red-400 hover:text-red-600 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
+            <SourceCard
+              key={ds.id}
+              ds={ds}
+              projectId={projectId!}
+              onDelete={id => deleteMutation.mutate(id)}
+            />
           ))}
         </div>
       )}

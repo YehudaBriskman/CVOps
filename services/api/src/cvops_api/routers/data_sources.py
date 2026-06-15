@@ -10,7 +10,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +21,7 @@ from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
-from cvops_api.db.models.samples import DataSource
+from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
@@ -61,8 +61,28 @@ async def list_data_sources(
     session: AsyncSession = Depends(get_session),
 ) -> list[DataSourceOut]:
     await _check_project(project_id, current_user, session)
-    r = await session.execute(select(DataSource).where(DataSource.project_id == project_id))
-    return [DataSourceOut.model_validate(ds) for ds in r.scalars().all()]
+    r = await session.execute(
+        select(DataSource)
+        .where(DataSource.project_id == project_id)
+        .order_by(DataSource.created_at.desc())
+    )
+    sources = list(r.scalars().all())
+
+    # One grouped count instead of a per-source query, so the UI can show how
+    # many frames each source has produced (and detect "still processing").
+    counts_r = await session.execute(
+        select(Sample.source_id, func.count())
+        .where(Sample.project_id == project_id)
+        .group_by(Sample.source_id)
+    )
+    counts = {row[0]: row[1] for row in counts_r.all()}
+
+    out: list[DataSourceOut] = []
+    for ds in sources:
+        item = DataSourceOut.model_validate(ds)
+        item.sample_count = counts.get(ds.id, 0)
+        out.append(item)
+    return out
 
 
 @router.post(
@@ -181,6 +201,28 @@ async def get_data_source(
         raise HTTPException(status_code=404, detail="DataSource not found")
     await _check_project(ds.project_id, current_user, session)
     return DataSourceOut.model_validate(ds)
+
+
+@router.get("/data-sources/{id}/url")
+async def get_data_source_url(
+    id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    """Presigned GET URL for the source's raw blob so the browser can preview
+    the original video/image directly from object storage (no bytes via API)."""
+    r = await session.execute(select(DataSource).where(DataSource.id == id))
+    ds = r.scalar_one_or_none()
+    if ds is None:
+        raise HTTPException(status_code=404, detail="DataSource not found")
+    await _check_project(ds.project_id, current_user, session)
+    if ds.blob_hash is None:
+        raise HTTPException(status_code=404, detail="Data source has no uploaded blob")
+    url = await get_storage().get_presigned_get(
+        ds.blob_hash, endpoint=public_s3_endpoint(request.url.hostname)
+    )
+    return {"url": url}
 
 
 @router.delete("/data-sources/{id}", status_code=status.HTTP_204_NO_CONTENT)
