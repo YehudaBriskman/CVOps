@@ -1,8 +1,15 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['src/test/setup.ts'],
+    css: false,
+  },
   server: {
     // Accept the dev-VM Host header that the nginx edge forwards — Vite 5
     // otherwise rejects it with "Blocked request. This host is not allowed".
