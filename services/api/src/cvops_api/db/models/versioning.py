@@ -53,8 +53,11 @@ class Commit(Base):
     second_parent_commit_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         ForeignKey("commits.id"), nullable=True
     )
-    ontology_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("ontologies.id"), nullable=False)
-    ontology_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Nullable: a dataset of raw (unannotated) images has no ontology.
+    ontology_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("ontologies.id"), nullable=True
+    )
+    ontology_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     stats: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
 
@@ -67,8 +70,9 @@ class CommitSample(Base):
 
     commit_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("commits.id"), primary_key=True)
     sample_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("samples.id"), primary_key=True)
-    annotation_revision_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("annotation_revisions.id"), nullable=False
+    # Nullable: an unannotated sample (a raw image) can still belong to a commit.
+    annotation_revision_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("annotation_revisions.id"), nullable=True
     )
     split: Mapped[str] = mapped_column(Text, nullable=False)
 

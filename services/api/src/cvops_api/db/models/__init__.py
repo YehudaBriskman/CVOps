@@ -6,6 +6,8 @@ from .samples import DataSource, Sample
 from .ontologies import Ontology, LabelClass
 from .annotations import AnnotationRevision
 from .versioning import Dataset, Commit, CommitSample, Ref, ProjectDatasetLink
+from .collections import Collection, CollectionSample
+from .tags import Tag, SampleTag
 from .workflows import Workflow
 from .models import TrainingContainer, ModelVersion
 from .labeling import LabelingJob
@@ -29,6 +31,10 @@ __all__ = [
     "CommitSample",
     "Ref",
     "ProjectDatasetLink",
+    "Collection",
+    "CollectionSample",
+    "Tag",
+    "SampleTag",
     "Workflow",
     "TrainingContainer",
     "ModelVersion",
