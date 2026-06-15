@@ -193,5 +193,8 @@ class HumanReviewStep(Step):
                 "labeling_job_id": labeling_job_id,
                 "cvat_task_id": pushed["task_id"],
                 "cvat_url": pushed["cvat_url"],
+                # Ordered to match CVAT frame order (upload order), so the pull
+                # flow maps frame index → sample without a schema change.
+                "sample_ids": sample_ids,
             }
         )
