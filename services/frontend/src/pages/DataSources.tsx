@@ -134,12 +134,22 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
           ) : (
             <span className="text-xs text-slate-400">No frames yet</span>
           )}
-          <button
-            onClick={() => onDelete(ds.id)}
-            className="text-xs text-red-400 hover:text-red-600 transition-colors"
-          >
-            Delete
-          </button>
+          <div className="flex items-center gap-3">
+            {ds.latest_run_id && (
+              <Link
+                to={`/runs/${ds.latest_run_id}`}
+                className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+              >
+                View run →
+              </Link>
+            )}
+            <button
+              onClick={() => onDelete(ds.id)}
+              className="text-xs text-red-400 hover:text-red-600 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
         </div>
       </div>
     </div>

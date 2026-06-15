@@ -33,6 +33,9 @@ class DataSourceOut(BaseModel):
     # Populated only by the list endpoint (number of extracted frames for this
     # source); None elsewhere to avoid an extra query on single-item responses.
     sample_count: int | None = None
+    # Latest workflow run dispatched for this source (its ingest run), so the UI
+    # can link straight to it. List endpoint only; None elsewhere.
+    latest_run_id: uuid.UUID | None = None
 
 
 class UploadResponse(BaseModel):

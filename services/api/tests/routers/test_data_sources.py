@@ -326,6 +326,34 @@ async def test_confirm_is_idempotent(factory, fake_redis, echo_step) -> None:
     assert await fake_redis.xlen(STREAM) == 1
 
 
+async def test_list_includes_latest_run_id(factory, fake_redis, echo_step) -> None:
+    # After a default-workflow upload, the list endpoint exposes the dispatched
+    # run so the UI can link to it.
+    user, project, ds = await _seed(factory, with_workflow=True)
+
+    async with _client(factory, user) as c:
+        confirm = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload", json={"blob_hash": _HASH_A}
+        )
+        run_id = confirm.json()["run_id"]
+        assert run_id is not None
+
+        res = await c.get(f"/projects/{project.id}/data-sources")
+
+    assert res.status_code == 200
+    mine = [d for d in res.json() if d["id"] == str(ds.id)]
+    assert len(mine) == 1
+    assert mine[0]["latest_run_id"] == run_id
+
+
+async def test_list_latest_run_id_none_without_run(factory) -> None:
+    user, project, ds = await _seed(factory, with_workflow=False)
+    async with _client(factory, user) as c:
+        res = await c.get(f"/projects/{project.id}/data-sources")
+    mine = [d for d in res.json() if d["id"] == str(ds.id)]
+    assert mine[0]["latest_run_id"] is None
+
+
 async def test_confirm_cross_org_returns_404(factory) -> None:
     _owner, _project, ds = await _seed(factory, with_workflow=False)
     # A user from a different org must not be able to confirm this data source.

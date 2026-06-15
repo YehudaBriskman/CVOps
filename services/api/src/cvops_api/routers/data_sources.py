@@ -21,6 +21,7 @@ from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
+from cvops_api.db.models.runs import Run
 from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine.coordinator import advance_workflow
@@ -77,10 +78,23 @@ async def list_data_sources(
     )
     counts = {row[0]: row[1] for row in counts_r.all()}
 
+    # Latest workflow run per source (DISTINCT ON the source_id stashed in
+    # input_refs), so each card can link to its ingest run. One query for the
+    # whole page, same as the counts above.
+    source_id_expr = Run.input_refs["params"]["source_id"].astext
+    runs_r = await session.execute(
+        select(source_id_expr, Run.id)
+        .where(Run.project_id == project_id, Run.kind == "workflow")
+        .order_by(source_id_expr, Run.created_at.desc())
+        .distinct(source_id_expr)
+    )
+    latest_run = {row[0]: row[1] for row in runs_r.all()}
+
     out: list[DataSourceOut] = []
     for ds in sources:
         item = DataSourceOut.model_validate(ds)
         item.sample_count = counts.get(ds.id, 0)
+        item.latest_run_id = latest_run.get(str(ds.id))
         out.append(item)
     return out
 

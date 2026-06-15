@@ -10,6 +10,7 @@ export interface DataSource {
   external_uri: string | null
   metadata: Record<string, unknown> | null
   sample_count: number | null
+  latest_run_id: string | null
   created_at: string
 }
 
