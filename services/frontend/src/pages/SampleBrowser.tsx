@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useSamples } from '../api/samples'
 import type { Sample } from '../api/samples'
 import { SampleGrid } from '../components/dataset/SampleGrid'
@@ -27,6 +27,9 @@ export default function SampleBrowser() {
     clear()
   }, [filterKey, clear])
 
+  // Also clear on unmount so a selection can't leak into another view.
+  useEffect(() => () => clear(), [clear])
+
   const samples = data?.pages.flatMap((p) => p.items) ?? []
   const editSample: Sample | null = samples.find((s) => s.id === editId) ?? null
   const totalLoaded = samples.length
@@ -44,9 +47,6 @@ export default function SampleBrowser() {
             </p>
           )}
         </div>
-        <Link to={`/projects/${projectId}/collections`} className="text-sm text-iris-400 hover:opacity-80">
-          Collections →
-        </Link>
       </div>
 
       {projectId && <SampleFilterBar projectId={projectId} />}
@@ -61,6 +61,8 @@ export default function SampleBrowser() {
           isFetchingNextPage={isFetchingNextPage}
           fetchNextPage={fetchNextPage}
           selectable
+          projectId={projectId}
+          onEdit={(s) => setEditId(s.id)}
         />
       )}
 

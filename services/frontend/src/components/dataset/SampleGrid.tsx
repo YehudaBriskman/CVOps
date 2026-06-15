@@ -4,6 +4,7 @@ import type { CursorPage, Sample } from '../../api/samples'
 import { useImageUrl, useThumbnailUrl } from '../../api/samples'
 import { useSelectionStore } from '../../store/selection'
 import { cn } from '../../lib/cn'
+import { SampleImageMenu } from '../samples/SampleImageMenu'
 
 const REVIEW_DOT: Record<string, string> = {
   accepted: '#34D399',
@@ -17,12 +18,16 @@ function ThumbnailCard({
   selectable,
   selected,
   onToggle,
+  projectId,
+  onEdit,
 }: {
   sample: Sample
   onOpen: () => void
   selectable: boolean
   selected: boolean
   onToggle: () => void
+  projectId?: string
+  onEdit?: (s: Sample) => void
 }) {
   const { data } = useThumbnailUrl(sample.id)
 
@@ -69,8 +74,19 @@ function ThumbnailCard({
         </button>
       )}
 
+      {projectId && onEdit && (
+        <div className="absolute right-1.5 top-1.5">
+          <SampleImageMenu sample={sample} projectId={projectId} onEdit={onEdit} />
+        </div>
+      )}
+
       {/* Status + tag indicators */}
-      <div className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-1">
+      <div
+        className={cn(
+          'pointer-events-none absolute right-1.5 flex items-center gap-1',
+          projectId && onEdit ? 'top-8' : 'top-1.5',
+        )}
+      >
         {sample.tags.slice(0, 3).map((t) => (
           <span
             key={t.id}
@@ -185,6 +201,8 @@ interface Props {
   isFetchingNextPage: boolean
   fetchNextPage: () => void
   selectable?: boolean
+  projectId?: string
+  onEdit?: (s: Sample) => void
 }
 
 export function SampleGrid({
@@ -194,6 +212,8 @@ export function SampleGrid({
   isFetchingNextPage,
   fetchNextPage,
   selectable = false,
+  projectId,
+  onEdit,
 }: Props) {
   const samples = data?.pages.flatMap((p: CursorPage<Sample>) => p.items) ?? []
   const [openIndex, setOpenIndex] = useState<number | null>(null)
@@ -242,6 +262,8 @@ export function SampleGrid({
             selectable={selectable}
             selected={selected.has(s.id)}
             onToggle={() => toggle(s.id)}
+            projectId={projectId}
+            onEdit={onEdit}
           />
         ))}
       </div>
