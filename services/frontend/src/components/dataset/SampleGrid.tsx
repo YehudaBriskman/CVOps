@@ -5,7 +5,6 @@ import { useImageUrl, useThumbnailUrl } from '../../api/samples'
 import { useSelectionStore } from '../../store/selection'
 import { useAnnotations } from '../../api/annotations'
 import { cn } from '../../lib/cn'
-import { SampleImageMenu } from '../samples/SampleImageMenu'
 import { BoxOverlay } from './BoxOverlay'
 
 const REVIEW_DOT: Record<string, string> = {
@@ -14,81 +13,88 @@ const REVIEW_DOT: Record<string, string> = {
   unreviewed: 'var(--text-muted)',
 }
 
+function CheckGlyph() {
+  return (
+    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m5 13 4 4L19 7" />
+    </svg>
+  )
+}
+
 function ThumbnailCard({
   sample,
-  onOpen,
-  selectable,
+  selecting,
   selected,
-  onToggle,
-  projectId,
-  onEdit,
+  onOpen,
+  onSelect,
 }: {
   sample: Sample
-  onOpen: () => void
-  selectable: boolean
+  selecting: boolean
   selected: boolean
-  onToggle: () => void
-  projectId?: string
-  onEdit?: (s: Sample) => void
+  onOpen: () => void
+  onSelect: (shiftKey: boolean) => void
 }) {
   const { data } = useThumbnailUrl(sample.id)
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={
+        selecting
+          ? `${selected ? 'Deselect' : 'Select'} frame ${sample.frame_index ?? ''}`
+          : `Open frame ${sample.frame_index ?? ''}`
+      }
+      aria-pressed={selecting ? selected : undefined}
+      onClick={(e) => (selecting ? onSelect(e.shiftKey) : onOpen())}
+      // Right-click previews the image — even mid-selection, so a selected tile
+      // can still be inspected without leaving select mode.
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onOpen()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          if (selecting) onSelect(e.shiftKey)
+          else onOpen()
+        }
+      }}
       className={cn(
-        'group relative aspect-square overflow-hidden rounded-lg border bg-surface-3',
-        selected ? 'border-iris ring-2 ring-iris' : 'border-border',
+        'group relative aspect-square cursor-pointer select-none overflow-hidden rounded-lg border bg-surface-3 transition-shadow focus:outline-none focus:ring-2 focus:ring-focus',
+        selected ? 'border-iris ring-2 ring-iris' : 'border-border hover:border-border-strong',
       )}
     >
-      <button
-        onClick={onOpen}
-        className="h-full w-full focus:outline-none focus:ring-2 focus:ring-focus"
-        aria-label={`Open frame ${sample.frame_index ?? ''}`}
-      >
-        {data?.url ? (
-          <img
-            src={data.url}
-            alt={`frame ${sample.frame_index ?? ''}`}
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-border-strong border-t-text-secondary" />
-          </div>
-        )}
-      </button>
-
-      {selectable && (
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={selected ? 'Deselect' : 'Select'}
-          aria-pressed={selected}
-          className={cn(
-            'absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded border text-[10px] font-bold transition-opacity',
-            selected
-              ? 'border-iris bg-iris text-white opacity-100'
-              : 'border-white/70 bg-black/40 text-transparent opacity-0 group-hover:opacity-100',
-          )}
-        >
-          ✓
-        </button>
-      )}
-
-      {projectId && onEdit && (
-        <div className="absolute right-1.5 top-1.5">
-          <SampleImageMenu sample={sample} projectId={projectId} onEdit={onEdit} />
+      {data?.url ? (
+        <img
+          src={data.url}
+          alt={`frame ${sample.frame_index ?? ''}`}
+          className={cn('h-full w-full object-cover transition-opacity', selecting && !selected && 'opacity-90')}
+          loading="lazy"
+          draggable={false}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-border-strong border-t-text-secondary" />
         </div>
       )}
 
-      {/* Status + tag indicators */}
-      <div
-        className={cn(
-          'pointer-events-none absolute right-1.5 flex items-center gap-1',
-          projectId && onEdit ? 'top-8' : 'top-1.5',
-        )}
-      >
+      {/* Selection check — only in select mode. Purely visual; the whole tile toggles. */}
+      {selecting && (
+        <span
+          className={cn(
+            'pointer-events-none absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
+            selected
+              ? 'border-iris bg-iris text-white'
+              : 'border-white/70 bg-black/40 text-transparent group-hover:text-white/70',
+          )}
+        >
+          <CheckGlyph />
+        </span>
+      )}
+
+      {/* Tag + review-status dots */}
+      <div className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-1">
         {sample.tags.slice(0, 3).map((t) => (
           <span
             key={t.id}
@@ -242,8 +248,6 @@ interface Props {
   isFetchingNextPage: boolean
   fetchNextPage: () => void
   selectable?: boolean
-  projectId?: string
-  onEdit?: (s: Sample) => void
 }
 
 export function SampleGrid({
@@ -253,15 +257,18 @@ export function SampleGrid({
   isFetchingNextPage,
   fetchNextPage,
   selectable = false,
-  projectId,
-  onEdit,
 }: Props) {
   const samples = data?.pages.flatMap((p: CursorPage<Sample>) => p.items) ?? []
   const [openIndex, setOpenIndex] = useState<number | null>(null)
   const selected = useSelectionStore((s) => s.selected)
+  const selectMode = useSelectionStore((s) => s.selectMode)
   const toggle = useSelectionStore((s) => s.toggle)
   const add = useSelectionStore((s) => s.add)
   const clear = useSelectionStore((s) => s.clear)
+  const lastClicked = useSelectionStore((s) => s.lastClicked)
+  const setLastClicked = useSelectionStore((s) => s.setLastClicked)
+
+  const selecting = selectable && selectMode
 
   if (isLoading) {
     return <div className="py-12 text-center text-sm text-text-muted">Loading…</div>
@@ -277,12 +284,29 @@ export function SampleGrid({
   }
 
   const pageIds = samples.map((s) => s.id)
-  const allSelected = pageIds.every((id) => selected.has(id))
+  const allSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
+
+  // Plain click toggles a tile; shift-click selects the inclusive range from the
+  // last-acted tile to this one (using the loaded order as the anchor).
+  function handleSelect(index: number, shiftKey: boolean) {
+    const id = samples[index].id
+    if (shiftKey && lastClicked) {
+      const from = samples.findIndex((s) => s.id === lastClicked)
+      if (from !== -1) {
+        const [a, b] = from < index ? [from, index] : [index, from]
+        add(samples.slice(a, b + 1).map((s) => s.id))
+        setLastClicked(id)
+        return
+      }
+    }
+    toggle(id)
+    setLastClicked(id)
+  }
 
   return (
     <div>
-      {selectable && (
-        <div className="mb-2 flex items-center gap-3 text-xs text-text-muted">
+      {selecting && (
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-text-muted">
           <button
             type="button"
             onClick={() => (allSelected ? clear() : add(pageIds))}
@@ -291,6 +315,9 @@ export function SampleGrid({
             {allSelected ? 'Deselect all' : 'Select all on page'}
           </button>
           <span>{selected.size} selected</span>
+          <span className="text-text-muted/70">
+            click to select · shift-click for a range · right-click to preview
+          </span>
         </div>
       )}
 
@@ -299,12 +326,10 @@ export function SampleGrid({
           <ThumbnailCard
             key={s.id}
             sample={s}
-            onOpen={() => setOpenIndex(i)}
-            selectable={selectable}
+            selecting={selecting}
             selected={selected.has(s.id)}
-            onToggle={() => toggle(s.id)}
-            projectId={projectId}
-            onEdit={onEdit}
+            onOpen={() => setOpenIndex(i)}
+            onSelect={(shiftKey) => handleSelect(i, shiftKey)}
           />
         ))}
       </div>
