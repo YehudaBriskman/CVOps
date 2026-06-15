@@ -10,6 +10,7 @@ import CommitDetail from './pages/CommitDetail'
 import Workflows from './pages/Workflows'
 import WorkflowBuilder from './pages/WorkflowBuilder'
 import RunView from './pages/RunView'
+import Runs from './pages/Runs'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
 import ProjectSettings from './pages/ProjectSettings'
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="/datasets/:id/commits/:cid"             element={<CommitDetail />} />
         <Route path="/projects/:id/workflows"                element={<Workflows />} />
         <Route path="/workflows/:id"                         element={<WorkflowBuilder />} />
+        <Route path="/projects/:id/runs"                     element={<Runs />} />
         <Route path="/runs/:id"                              element={<RunView />} />
         <Route path="/projects/:id/models"                   element={<Models />} />
         <Route path="/models/:id"                            element={<ModelDetail />} />
