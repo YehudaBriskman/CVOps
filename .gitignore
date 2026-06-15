@@ -1,6 +1,20 @@
 # ── Claude Code ──────────────────────────────────────────────────────────
 /.claude
 
+# graphify knowledge-graph cache — commit the prebuilt graph + content-addressed
+# LLM extraction cache (portable: keyed by content-hash + relative path, so a clone
+# reuses it instead of paying the token cost to regen). Ignore machine-specific and
+# regenerable-offline parts (stat-index leaks $HOME; graph.html rebuilds from cache).
+/graphify-out/*
+!/graphify-out/graph.json
+!/graphify-out/GRAPH_REPORT.md
+!/graphify-out/manifest.json
+!/graphify-out/cache/
+/graphify-out/cache/*
+!/graphify-out/cache/ast/
+!/graphify-out/cache/semantic/
+/graphify-out/cache/stat-index.json
+
 # ── Python ───────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

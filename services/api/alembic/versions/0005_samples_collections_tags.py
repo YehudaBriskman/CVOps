@@ -6,8 +6,8 @@ Adds the operational review_status flag to samples, plus collections and tags
 named constraints so downgrade drops cleanly. TEXT + CHECK for the status enum
 (matches data_sources.status / runs.status — no native PG enum).
 
-Revision ID: 0003
-Revises: 0002
+Revision ID: 0005
+Revises: 0004
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0003"
-down_revision = "0002"
+revision = "0005"
+down_revision = "0004"
 branch_labels = None
 depends_on = None
 

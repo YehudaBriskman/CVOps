@@ -84,7 +84,7 @@ Client ──► nginx ──► FastAPI ──► Depends(get_current_user)  �
 
 **Persistence layers (must understand together):**
 
-- PostgreSQL holds all relational state — 21 ORM models in `db/models/`, Alembic migrations in `alembic/versions/` (`0001_initial_schema`, `0002_project_default_ingest_workflow`, `0003_data_source_unique_blob_per_project`, `0004_model_version_optional_container`).
+- PostgreSQL holds all relational state — 21 ORM models in `db/models/`, Alembic migrations in `alembic/versions/` (`0001_initial_schema`, `0002_project_default_ingest_workflow`, `0003_data_source_unique_blob_per_project`, `0004_model_version_optional_container`, `0005_samples_collections_tags`, `0006_nullable_commit_ontology_annotation`).
 - Garage (S3-compatible object store) holds every byte payload (images, annotations, model weights). Blobs are content-addressed by SHA-256; the API never proxies bytes — clients get presigned PUT/GET URLs. Presigned URLs are signed against a browser-reachable host (derived per-request from the `Host` header, or `S3_PUBLIC_ENDPOINT` if set), not the internal `S3_ENDPOINT`.
 - Redis holds the JWT `jti` revocation list and any transient cache.
 

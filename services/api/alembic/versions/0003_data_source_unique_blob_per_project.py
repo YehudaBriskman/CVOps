@@ -21,6 +21,28 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Pre-existing data may already violate the invariant this index enforces
+    # (the silent-duplicate bug it closes). Soft-delete the extras first —
+    # keeping the earliest (created_at, id) live row per (project, blob) — so the
+    # partial index, which already excludes deleted_at IS NOT NULL, can build.
+    # Same content (content-addressed blob), so collapsing duplicates is lossless.
+    op.execute(
+        """
+        UPDATE data_sources AS ds
+        SET deleted_at = now()
+        WHERE ds.deleted_at IS NULL
+          AND ds.blob_hash IS NOT NULL
+          AND EXISTS (
+              SELECT 1
+              FROM data_sources AS keep
+              WHERE keep.project_id = ds.project_id
+                AND keep.blob_hash = ds.blob_hash
+                AND keep.deleted_at IS NULL
+                AND keep.blob_hash IS NOT NULL
+                AND (keep.created_at, keep.id) < (ds.created_at, ds.id)
+          )
+        """
+    )
     op.create_index(
         "uq_data_sources_project_blob",
         "data_sources",
