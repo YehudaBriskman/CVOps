@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom'
 import { useRun, useRunSSE, useCancelRun, useRetryRun } from '../api/runs'
+import { usePinProject } from '../lib/useActiveProject'
 import { StepRunCard } from '../components/runs/StepRunCard'
 import { GateResolutionBanner } from '../components/runs/GateResolutionBanner'
 import type { RunStep } from '../components/runs/types'
@@ -17,6 +18,7 @@ export default function RunView() {
   const { id } = useParams<{ id: string }>()
   const { data: detail, isLoading } = useRun(id)
   useRunSSE(id)
+  usePinProject(detail?.run?.project_id)
 
   const cancelRun = useCancelRun()
   const retryRun = useRetryRun()

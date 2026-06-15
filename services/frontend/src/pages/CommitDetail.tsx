@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useCommit, useDataset, useTrainCommit } from '../api/datasets'
 import { useTrainingContainers } from '../api/training-containers'
+import { usePinProject } from '../lib/useActiveProject'
 import { icdInputsToRjsfSchema } from '../lib/icdSchema'
 import { CommitStats } from '../components/dataset/CommitStats'
 import { StepConfigForm } from '../components/workflow/StepConfigForm'
@@ -178,6 +179,7 @@ export default function CommitDetail() {
   const { data: commit, isLoading, isError, refetch } = useCommit(datasetId, commitId)
   const { data: dataset } = useDataset(datasetId)
   const [trainOpen, setTrainOpen] = useState(false)
+  usePinProject(dataset?.project_id)
 
   if (isLoading) {
     return (

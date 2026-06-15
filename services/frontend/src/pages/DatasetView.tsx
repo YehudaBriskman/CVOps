@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDataset, useCommits, useReviewDataset } from '../api/datasets'
+import { usePinProject } from '../lib/useActiveProject'
 import { CommitGraph } from '../components/dataset/CommitGraph'
 import { Breadcrumbs, Button, ErrorState, SkeletonList } from '../components/ui'
 
@@ -11,6 +12,7 @@ export default function DatasetView() {
   const commitsQuery = useCommits(id)
   const reviewDataset = useReviewDataset()
   const [reviewError, setReviewError] = useState<string | null>(null)
+  usePinProject(dataset?.project_id)
 
   const commits = commitsQuery.data?.pages.flatMap((p) => p.items) ?? []
 

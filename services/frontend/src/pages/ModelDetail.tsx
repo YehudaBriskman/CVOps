@@ -1,5 +1,6 @@
 import { useParams } from 'react-router-dom'
 import { useModel, useWeightsUrl } from '../api/models'
+import { usePinProject } from '../lib/useActiveProject'
 import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
 
 // Base URL of the MLflow tracking UI. When unset, the run id shows as plain
@@ -10,6 +11,7 @@ export default function ModelDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: model, isLoading, isError, refetch } = useModel(id)
   const { data: weightsUrl } = useWeightsUrl(id)
+  usePinProject(model?.project_id)
 
   if (isLoading) {
     return (

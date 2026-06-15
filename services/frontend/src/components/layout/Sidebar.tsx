@@ -1,5 +1,6 @@
-import { NavLink, Link, useMatch } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { useActiveProjectId } from '../../lib/useActiveProject'
 
 function navClass({ isActive }: { isActive: boolean }) {
   return clsx(
@@ -40,9 +41,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
 }
 
 export function Sidebar() {
-  const matchDeep  = useMatch('/projects/:id/*')
-  const matchExact = useMatch('/projects/:id')
-  const projectId  = (matchDeep ?? matchExact)?.params.id
+  const projectId = useActiveProjectId()
 
   return (
     <aside className="w-60 bg-surface-2 flex flex-col flex-shrink-0 overflow-hidden">

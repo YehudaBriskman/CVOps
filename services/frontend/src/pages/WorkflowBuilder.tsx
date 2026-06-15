@@ -22,6 +22,7 @@ import { StepConfigForm } from '../components/workflow/StepConfigForm'
 import { useWorkflow, useUpdateWorkflow } from '../api/workflows'
 import { useCreateRun } from '../api/runs'
 import { useRegistryTypes } from '../api/registry'
+import { usePinProject } from '../lib/useActiveProject'
 import { STEP_TYPES } from '../lib/stepCatalog'
 import { Button, Drawer, Field, Input } from '../components/ui'
 import { toast } from '../store/toast'
@@ -358,6 +359,7 @@ export default function WorkflowBuilder() {
   const { id } = useParams<{ id: string }>()
   const { data: workflow } = useWorkflow(id)
   const { data: registryTypes } = useRegistryTypes('step')
+  usePinProject(workflow?.project_id)
 
   const paletteSteps = useMemo(() => {
     if (registryTypes && registryTypes.length > 0) {
