@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useCommit, useTrainCommit } from '../api/datasets'
+import { useCommit, useDataset, useTrainCommit } from '../api/datasets'
+import { useTrainingContainers } from '../api/training-containers'
+import { icdInputsToRjsfSchema } from '../lib/icdSchema'
 import { CommitStats } from '../components/dataset/CommitStats'
-import { Breadcrumbs, Button, Card, ErrorState, SkeletonList } from '../components/ui'
+import { StepConfigForm } from '../components/workflow/StepConfigForm'
+import { Breadcrumbs, Button, Card, ErrorState, Select, SkeletonList } from '../components/ui'
 
 interface HyperparamRow {
   key: string
@@ -11,35 +14,48 @@ interface HyperparamRow {
 
 function TrainModal({
   datasetId,
+  projectId,
   commitId,
   onClose,
 }: {
   datasetId: string
+  projectId: string | undefined
   commitId: string
   onClose: () => void
 }) {
   const navigate = useNavigate()
   const train = useTrainCommit(datasetId)
+  const { data: containers } = useTrainingContainers(projectId)
   const [gitUrl, setGitUrl] = useState('')
   const [entryPoint, setEntryPoint] = useState('train.py')
   const [branch, setBranch] = useState('')
   const [rows, setRows] = useState<HyperparamRow[]>([{ key: '', value: '' }])
+  const [selectedContainerId, setSelectedContainerId] = useState('')
+  // rjsf form data for the typed-hyperparam path.
+  const [typedParams, setTypedParams] = useState<Record<string, unknown>>({})
+
+  const selectedContainer = containers?.find(c => c.id === selectedContainerId)
+  const typedSchema = useMemo(
+    () => (selectedContainer ? icdInputsToRjsfSchema(selectedContainer.icd_config) : null),
+    [selectedContainer],
+  )
 
   const setRow = (i: number, patch: Partial<HyperparamRow>) =>
     setRows(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    const hyperparams = Object.fromEntries(
-      rows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value]),
-    )
+    const hyperparams = typedSchema
+      ? typedParams
+      : Object.fromEntries(rows.filter(r => r.key.trim()).map(r => [r.key.trim(), r.value]))
     train.mutate(
       {
         commitId,
         git_url: gitUrl.trim(),
         entry_point: entryPoint.trim() || 'train.py',
         branch: branch.trim() || null,
-        hyperparams: Object.keys(hyperparams).length ? hyperparams : null,
+        hyperparams: Object.keys(hyperparams).length ? (hyperparams as Record<string, string | number | boolean>) : null,
+        training_container_id: selectedContainerId || undefined,
       },
       { onSuccess: run => navigate(`/runs/${run.id}`) },
     )
@@ -59,6 +75,20 @@ function TrainModal({
         className="bg-surface-2 rounded-xl border border-border shadow-xl p-6 w-full max-w-md"
       >
         <h3 className="text-lg font-bold text-text-primary mb-4">Train this commit</h3>
+
+        <label className="block text-xs text-text-secondary mb-1">Training environment</label>
+        <Select
+          value={selectedContainerId}
+          onChange={e => setSelectedContainerId(e.target.value)}
+          className="mb-3"
+        >
+          <option value="">Ad-hoc (git repo)</option>
+          {(containers ?? []).map(c => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </Select>
 
         <label className="block text-xs text-text-secondary mb-1">Git repository URL</label>
         <input
@@ -92,31 +122,37 @@ function TrainModal({
         </div>
 
         <label className="block text-xs text-text-secondary mb-1">Hyperparameters (optional)</label>
-        <div className="space-y-2 mb-3">
-          {rows.map((row, i) => (
-            <div key={i} className="flex gap-2">
-              <input
-                value={row.key}
-                onChange={e => setRow(i, { key: e.target.value })}
-                placeholder="epochs"
-                className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
-              />
-              <input
-                value={row.value}
-                onChange={e => setRow(i, { value: e.target.value })}
-                placeholder="10"
-                className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
-              />
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={() => setRows([...rows, { key: '', value: '' }])}
-            className="text-xs text-iris-400 hover:text-iris"
-          >
-            + Add hyperparameter
-          </button>
-        </div>
+        {typedSchema ? (
+          <div className="mb-3">
+            <StepConfigForm schema={typedSchema} formData={typedParams} onChange={setTypedParams} />
+          </div>
+        ) : (
+          <div className="space-y-2 mb-3">
+            {rows.map((row, i) => (
+              <div key={i} className="flex gap-2">
+                <input
+                  value={row.key}
+                  onChange={e => setRow(i, { key: e.target.value })}
+                  placeholder="epochs"
+                  className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
+                />
+                <input
+                  value={row.value}
+                  onChange={e => setRow(i, { value: e.target.value })}
+                  placeholder="10"
+                  className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setRows([...rows, { key: '', value: '' }])}
+              className="text-xs text-iris-400 hover:text-iris"
+            >
+              + Add hyperparameter
+            </button>
+          </div>
+        )}
 
         {train.isError && (
           <p className="text-xs text-error mb-3">
@@ -140,6 +176,7 @@ function TrainModal({
 export default function CommitDetail() {
   const { id: datasetId, cid: commitId } = useParams<{ id: string; cid: string }>()
   const { data: commit, isLoading, isError, refetch } = useCommit(datasetId, commitId)
+  const { data: dataset } = useDataset(datasetId)
   const [trainOpen, setTrainOpen] = useState(false)
 
   if (isLoading) {
@@ -195,6 +232,7 @@ export default function CommitDetail() {
       {trainOpen && datasetId && commitId && (
         <TrainModal
           datasetId={datasetId}
+          projectId={dataset?.project_id}
           commitId={commitId}
           onClose={() => setTrainOpen(false)}
         />
