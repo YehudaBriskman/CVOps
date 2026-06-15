@@ -100,7 +100,7 @@ open http://localhost:8000/docs
 ## 9. What's NOT Done Yet
 
 - `POST /internal/cvat/webhook` — stub only; Phase 2 CVAT integration pending
-- `cvops_steps` (`packages/steps`) — `extract_frames` is implemented; `auto_label`, `human_review`, `commit_dataset`, `export_yolo`, `train` still raise `NotImplementedError`. Installed into the API env via Tilt's `steps-install` (heavy deps like ultralytics are in the `[ml]`/`[train]` extras, not installed by default).
+- `cvops_steps` (`packages/steps`) — `extract_frames`, `commit_dataset`, `export_yolo`, `train` are implemented; `auto_label`, `human_review` still raise `NotImplementedError`. `train` is the canonical step the `worker-training` service also imports; it routes to the `training` queue and runs a cloned trainer repo in a per-run `--system-site-packages` venv. Installed into the API env via Tilt's `steps-install` (the heavy ML stack — ultralytics/torch/mlflow — lives on the worker-training image, not in the API env).
 - Cross-upload dedup: blob bytes and byte-identical frames are deduped, but source-video re-ingest detection and cross-run perceptual dedup are not wired yet.
 
 ## 10. Adding a New Step Type
