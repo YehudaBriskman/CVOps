@@ -142,7 +142,8 @@ async def advance_workflow(
     # Predecessor map from edges: step_id → [ids that must finish first].
     preds: dict[str, list[str]] = {sid: [] for sid in steps_by_id}
     for e in edges:
-        preds.setdefault(e["to"], []).append(e["from"])
+        src, dst = _edge_endpoints(e)
+        preds.setdefault(dst, []).append(src)
 
     # 3. Rebuild step_outputs + statuses from existing child runs.
     step_outputs: dict[str, dict[str, Any]] = {}
@@ -415,12 +416,33 @@ async def process_step(
 # ── Internals (moved from executor.py) ──────────────────────────────────────
 
 
-def _topo_sort(step_ids: list[str], edges: list[dict[str, str]]) -> list[str] | None:
+def _edge_endpoints(e: object) -> tuple[str, str]:
+    """Normalise an edge to a (from, to) pair.
+
+    Accepts every shape the codebase produces: dicts keyed ``from``/``to``
+    (engine-native), dicts keyed ``source``/``target`` (the React-Flow builder
+    in the frontend), and two-element ``[from, to]`` lists (the model's doc
+    comment + DB tests). Keeping the engine tolerant means a workflow saved by
+    the builder runs without a translation layer.
+    """
+    if isinstance(e, dict):
+        src = e.get("from", e.get("source"))
+        dst = e.get("to", e.get("target"))
+    elif isinstance(e, (list, tuple)) and len(e) >= 2:
+        src, dst = e[0], e[1]
+    else:
+        src = dst = None
+    if src is None or dst is None:
+        raise ValueError(f"Malformed workflow edge: {e!r}")
+    return str(src), str(dst)
+
+
+def _topo_sort(step_ids: list[str], edges: list[object]) -> list[str] | None:
     """Kahn's algorithm. Returns None if a cycle is detected."""
     in_degree: dict[str, int] = {s: 0 for s in step_ids}
     adj: dict[str, list[str]] = {s: [] for s in step_ids}
     for e in edges:
-        src, dst = e["from"], e["to"]
+        src, dst = _edge_endpoints(e)
         adj.setdefault(src, []).append(dst)
         in_degree[dst] = in_degree.get(dst, 0) + 1
 
