@@ -382,8 +382,8 @@ services:
   # ── model-deployer (replaces the profiles:cvat entry in docker-compose.yml) ─
   model-deployer:
     build:
-      context: ../services/model-deployer
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/model-deployer/Dockerfile
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
