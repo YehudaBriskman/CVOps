@@ -18,12 +18,15 @@ export interface UploadResponse {
   presigned_put_url: string | null
 }
 
-/** A source is still being ingested if it has no blob yet, or it has a blob but
- *  the extract-frames run hasn't produced any frames. Drives list polling. */
-function isProcessing(ds: DataSource): boolean {
-  if (ds.status === 'failed') return false
-  if (ds.status === 'pending') return true
-  return ds.type !== 'image' && (ds.sample_count ?? 0) === 0
+// Lifecycle: pending → uploaded → ingesting → ingested | failed.
+const TERMINAL_STATUSES = new Set(['ingested', 'failed'])
+
+/** Whether a source is still moving through ingest (drives list polling). */
+export function isProcessing(ds: DataSource): boolean {
+  if (TERMINAL_STATUSES.has(ds.status)) return false
+  // Images aren't frame-extracted; once uploaded they're done.
+  if (ds.type === 'image' && ds.status === 'uploaded') return false
+  return true
 }
 
 export function useDataSources(projectId: string | undefined) {

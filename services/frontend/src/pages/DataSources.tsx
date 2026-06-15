@@ -16,19 +16,37 @@ function StatusBadge({ ds }: { ds: DataSource }) {
   let cls: string
   let spinner = false
 
-  if (ds.status === 'failed') {
-    label = 'Failed'
-    cls = 'bg-red-100 text-red-700'
-  } else if (ds.status === 'pending') {
-    label = 'Uploading'
-    cls = 'bg-amber-100 text-amber-700'
-  } else if (ds.type !== 'image' && (ds.sample_count ?? 0) === 0) {
-    label = 'Extracting frames'
-    cls = 'bg-indigo-100 text-indigo-700'
-    spinner = true
-  } else {
-    label = 'Ready'
-    cls = 'bg-green-100 text-green-700'
+  switch (ds.status) {
+    case 'failed':
+      label = 'Failed'
+      cls = 'bg-red-100 text-red-700'
+      break
+    case 'pending':
+      label = 'Uploading'
+      cls = 'bg-amber-100 text-amber-700'
+      break
+    case 'uploaded':
+      if (ds.type === 'image') {
+        label = 'Ready'
+        cls = 'bg-green-100 text-green-700'
+      } else {
+        label = 'Queued'
+        cls = 'bg-slate-100 text-slate-500'
+        spinner = true
+      }
+      break
+    case 'ingesting':
+      label = 'Extracting frames'
+      cls = 'bg-indigo-100 text-indigo-700'
+      spinner = true
+      break
+    case 'ingested':
+      label = 'Ready'
+      cls = 'bg-green-100 text-green-700'
+      break
+    default:
+      label = ds.status
+      cls = 'bg-slate-100 text-slate-500'
   }
 
   return (

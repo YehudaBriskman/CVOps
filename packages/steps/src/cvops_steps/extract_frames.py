@@ -93,6 +93,46 @@ class ExtractFramesStep(Step):
     config_schema = _SCHEMA
 
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
+        from sqlalchemy import text  # noqa: PLC0415
+
+        source_id = inputs["source_id"]
+        interval = float(config["interval_seconds"])
+        max_frames = config.get("max_frames")
+        max_distance = round(float(config.get("dedup_threshold", 0.0)) * _HASH_BITS)
+
+        async def _set_source_status(status: str) -> None:
+            await ctx.session.execute(
+                text(
+                    "UPDATE data_sources SET status=:st, updated_at=now() "
+                    "WHERE id = CAST(:sid AS uuid)"
+                ),
+                {"st": status, "sid": source_id},
+            )
+
+        try:
+            return await self._ingest(
+                ctx, config, source_id, interval, max_frames, max_distance, _set_source_status
+            )
+        except Exception:
+            # The coordinator rolls the shared session back on a raised step, which
+            # would discard the in-flight 'ingesting' marker and leave the source
+            # non-terminal forever. Commit a terminal 'failed' on a clean session
+            # ourselves, then re-raise so the run is failed too.
+            await ctx.session.rollback()
+            await _set_source_status("failed")
+            await ctx.session.commit()
+            raise
+
+    async def _ingest(
+        self,
+        ctx: StepContext,
+        config: dict,
+        source_id: str,
+        interval: float,
+        max_frames: int | None,
+        max_distance: int,
+        set_status,
+    ) -> dict:
         import asyncio  # noqa: PLC0415
         import uuid  # noqa: PLC0415
 
@@ -100,11 +140,6 @@ class ExtractFramesStep(Step):
 
         from cvops_api.config import settings  # noqa: PLC0415
         from cvops_api.core.storage import StorageBackend  # noqa: PLC0415
-
-        source_id = inputs["source_id"]
-        interval = float(config["interval_seconds"])
-        max_frames = config.get("max_frames")
-        max_distance = round(float(config.get("dedup_threshold", 0.0)) * _HASH_BITS)
 
         row = (
             await ctx.session.execute(
@@ -116,13 +151,11 @@ class ExtractFramesStep(Step):
             raise ValueError(f"data source {source_id!r} has no uploaded blob")
         blob_hash = row[0]
 
-        await ctx.session.execute(
-            text(
-                "UPDATE data_sources SET status='ingesting', updated_at=now() "
-                "WHERE id = CAST(:sid AS uuid)"
-            ),
-            {"sid": source_id},
-        )
+        # Commit 'ingesting' immediately so the dashboard reflects the in-progress
+        # state (the rest of this step commits atomically with the samples at the
+        # end via the coordinator).
+        await set_status("ingesting")
+        await ctx.session.commit()
 
         video_bytes = await ctx.storage.get_bytes(blob_hash)
         # Lazy hash verification deferred from confirm-upload: we read the bytes
@@ -199,12 +232,9 @@ class ExtractFramesStep(Step):
                 if existing is not None:
                     sample_ids.append(str(existing[0]))
 
-        await ctx.session.execute(
-            text(
-                "UPDATE data_sources SET status='ingested', updated_at=now() "
-                "WHERE id = CAST(:sid AS uuid)"
-            ),
-            {"sid": source_id},
-        )
+        # Terminal success — committed atomically with the samples above by the
+        # coordinator after run() returns. Reached even when zero frames were
+        # kept, so a video that yields nothing still lands in a terminal state.
+        await set_status("ingested")
 
         return {"sample_ids": sample_ids, "frame_count": len(sample_ids)}
