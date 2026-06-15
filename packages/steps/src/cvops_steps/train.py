@@ -151,11 +151,14 @@ def _build_env(
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
         env.pop("PYTHONHOME", None)
 
-    # Map hyperparams to env vars via icd_config["inputs"]
+    # Map hyperparams to env vars via icd_config["inputs"]; any hyperparam
+    # without an explicit mapping defaults to an env var named by its uppercased
+    # key (e.g. epochs → EPOCHS), so an ad-hoc train needs no container.
     inputs_spec = icd_config.get("inputs", {})
-    for param_name, mapping in inputs_spec.items():
-        if "env" in mapping and param_name in hyperparams:
-            env[mapping["env"]] = str(hyperparams[param_name])
+    for param_name, value in hyperparams.items():
+        mapping = inputs_spec.get(param_name, {})
+        env_name = mapping.get("env", param_name.upper())
+        env[env_name] = str(value)
 
     if dataset_dir is not None:
         env["DATASET_PATH"] = str(dataset_dir)
@@ -231,7 +234,7 @@ async def _upload_weights(
 
 async def _write_model_version(
     ctx: StepContext,
-    tc: TrainingContainer,
+    tc: TrainingContainer | None,
     commit_id: str,
     weights_blob_hash: str,
     metrics: dict[str, Any],
@@ -244,7 +247,7 @@ async def _write_model_version(
         project_id=UUID(ctx.project_id),
         blob_hash=weights_blob_hash,
         trained_on_commit_id=UUID(commit_id),
-        training_container_id=tc.id,
+        training_container_id=tc.id if tc is not None else None,
         hyperparams=hyperparams or None,
         metrics=clean_metrics or None,
         mlflow_run_id=mlflow_run_id,
@@ -266,7 +269,7 @@ class TrainStep(Step):
     async def run(
         self, ctx: StepContext, config: dict[str, Any], inputs: dict[str, Any]
     ) -> dict[str, Any]:
-        tc_id = config["training_container_id"]
+        tc_id: str | None = config.get("training_container_id")
         git_url = config["git_url"]
         branch: str | None = config.get("branch")
         entry_point: str = config.get("entry_point", "train.py")
@@ -284,9 +287,13 @@ class TrainStep(Step):
 
         timeout = int(os.environ.get("TRAINING_TIMEOUT", _DEFAULT_TIMEOUT))
 
-        # 1. Load TrainingContainer
-        tc = await _load_training_container(ctx.session, tc_id)
-        icd_config: dict[str, Any] = tc.icd_config
+        # 1. Load TrainingContainer (optional — ad-hoc trains have none, and
+        #    fall back to default env mapping + output paths).
+        tc: TrainingContainer | None = None
+        icd_config: dict[str, Any] = {}
+        if tc_id:
+            tc = await _load_training_container(ctx.session, tc_id)
+            icd_config = tc.icd_config
 
         workdir = Path(tempfile.mkdtemp())
         try:

@@ -5,7 +5,7 @@
   "properties": {
     "training_container_id": {
       "type": "string", "format": "uuid",
-      "description": "UUID of the training_container whose icd_config maps hyperparams → env vars and declares the metrics/weights output paths."
+      "description": "Optional UUID of a training_container whose icd_config maps hyperparams → env vars and declares the metrics/weights output paths. When omitted, hyperparams map to uppercased-key env vars and the default /output/metrics.json + /output/weights/ paths are used."
     },
     "git_url": {
       "type": "string",
@@ -26,6 +26,6 @@
       "additionalProperties": { "type": ["string", "number", "boolean"] }
     }
   },
-  "required": ["training_container_id", "git_url"],
+  "required": ["git_url"],
   "additionalProperties": false
 }

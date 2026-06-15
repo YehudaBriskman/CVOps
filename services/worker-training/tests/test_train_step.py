@@ -40,10 +40,14 @@ def test_train_step_routes_to_training_queue():
 
 def test_train_config_schema_requires_repo_fields():
     required = set(TrainStep.config_schema["required"])
-    assert {"training_container_id", "git_url"} <= required
-    # Schema and implementation agree on the repo-based contract.
+    # Only git_url is required now — the training container is optional so an
+    # ad-hoc "train this commit" can ride in with just a repo + entry point.
+    assert required == {"git_url"}
     assert "git_url" in TrainStep.config_schema["properties"]
     assert "entry_point" in TrainStep.config_schema["properties"]
+    # training_container_id stays an optional property, not required.
+    assert "training_container_id" in TrainStep.config_schema["properties"]
+    assert "training_container_id" not in required
     # commit_id is a runtime value wired from the export edge, not config.
     assert "commit_id" not in TrainStep.config_schema["properties"]
     assert "commit_id" not in required
@@ -82,6 +86,20 @@ def test_build_env_maps_hyperparams(tmp_path):
         },
         "outputs": {},
     }
+    hyperparams = {"epochs": 10, "batch_size": 16}
+    output_dir = tmp_path / "output"
+
+    env = _build_env(icd_config, hyperparams, dataset_dir=None, output_dir=output_dir)
+
+    assert env["EPOCHS"] == "10"
+    assert env["BATCH_SIZE"] == "16"
+    assert env["OUTPUT_DIR"] == str(output_dir)
+
+
+def test_build_env_defaults_hyperparams_to_uppercased_keys(tmp_path):
+    # No icd_config inputs mapping (ad-hoc train, no container): each hyperparam
+    # defaults to an env var named by its uppercased key.
+    icd_config: dict = {}
     hyperparams = {"epochs": 10, "batch_size": 16}
     output_dir = tmp_path / "output"
 
@@ -243,6 +261,25 @@ async def test_write_model_version_inserts_row(ctx, mock_tc, commit_id):
 
 
 @pytest.mark.asyncio
+async def test_write_model_version_allows_no_container(ctx, commit_id):
+    from cvops_api.db.models.models import ModelVersion
+
+    await _write_model_version(
+        ctx,
+        tc=None,
+        commit_id=commit_id,
+        weights_blob_hash="sha256:abc123deadbeef",
+        metrics={"accuracy": 0.9},
+        hyperparams={"epochs": 5},
+    )
+
+    added_obj = ctx.session.add.call_args[0][0]
+    assert isinstance(added_obj, ModelVersion)
+    assert added_obj.training_container_id is None
+    assert added_obj.trained_on_commit_id == uuid.UUID(commit_id)
+
+
+@pytest.mark.asyncio
 async def test_write_model_version_extracts_mlflow_run_id(ctx, mock_tc, commit_id):
     from cvops_api.db.models.models import ModelVersion
 
@@ -329,6 +366,41 @@ async def test_run_cleans_up_tmpdir_on_success(ctx, base_config, base_inputs, tm
         result = await step.run(ctx, base_config, base_inputs)
 
         mock_rmtree.assert_called_once_with(tmp_path, ignore_errors=True)
+        assert result == {"model_version_id": model_version_id}
+
+
+@pytest.mark.asyncio
+async def test_run_without_training_container(ctx, base_inputs, tmp_path):
+    """No training_container_id: skip the container load, use default env
+    mapping + output paths, and still write a ModelVersion."""
+    model_version_id = str(uuid.uuid4())
+    venv = (tmp_path / "venv" / "bin" / "python", tmp_path / "venv" / "bin" / "pip")
+    config = {
+        "git_url": "https://github.com/example/trainer.git",
+        "entry_point": "train.py",
+        "hyperparams": {"epochs": 3},
+    }
+    with (
+        patch(
+            "cvops_steps.train._load_training_container", new=AsyncMock()
+        ) as mock_load,
+        patch("cvops_steps.train._download_dataset", new=AsyncMock(return_value=None)),
+        patch("cvops_steps.train._clone_repo", return_value=tmp_path / "repo"),
+        patch("cvops_steps.train._create_venv", return_value=venv),
+        patch("cvops_steps.train._install_requirements"),
+        patch("cvops_steps.train._run_training", return_value=(0, "")),
+        patch("cvops_steps.train._read_metrics", return_value={"accuracy": 0.9}),
+        patch("cvops_steps.train._upload_weights", new=AsyncMock(return_value="sha256:abc")),
+        patch("cvops_steps.train._write_model_version", new=AsyncMock(return_value=model_version_id)) as mock_write,
+        patch("tempfile.mkdtemp", return_value=str(tmp_path)),
+        patch("cvops_steps.train.shutil.rmtree"),
+    ):
+        step = TrainStep()
+        result = await step.run(ctx, config, base_inputs)
+
+        mock_load.assert_not_awaited()
+        # Container passed through as None.
+        assert mock_write.await_args.args[1] is None
         assert result == {"model_version_id": model_version_id}
 
 
