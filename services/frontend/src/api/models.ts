@@ -10,6 +10,7 @@ export interface ModelVersion {
   hyperparams: Record<string, unknown> | null
   metrics: Record<string, unknown> | null
   code_version: string | null
+  mlflow_run_id: string | null
   created_at: string
 }
 

@@ -13,6 +13,7 @@ from fastapi import (
 )
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.config import settings
@@ -23,14 +24,18 @@ from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
+from cvops_api.db.models.runs import Run
 from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
 from cvops_api.schemas.data_sources import (
     ConfirmResponse,
+    DataSourceCheck,
+    DataSourceCheckResponse,
     DataSourceCreate,
     DataSourceConfirm,
+    DataSourceMatch,
     DataSourceOut,
     ImageConfirmRequest,
     ImageConfirmResponse,
@@ -89,10 +94,23 @@ async def list_data_sources(
     )
     counts = {row[0]: row[1] for row in counts_r.all()}
 
+    # Latest workflow run per source (DISTINCT ON the source_id stashed in
+    # input_refs), so each card can link to its ingest run. One query for the
+    # whole page, same as the counts above.
+    source_id_expr = Run.input_refs["params"]["source_id"].astext
+    runs_r = await session.execute(
+        select(source_id_expr, Run.id)
+        .where(Run.project_id == project_id, Run.kind == "workflow")
+        .order_by(source_id_expr, Run.created_at.desc())
+        .distinct(source_id_expr)
+    )
+    latest_run = {row[0]: row[1] for row in runs_r.all()}
+
     out: list[DataSourceOut] = []
     for ds in sources:
         item = DataSourceOut.model_validate(ds)
         item.sample_count = counts.get(ds.id, 0)
+        item.latest_run_id = latest_run.get(str(ds.id))
         out.append(item)
     return out
 
@@ -136,6 +154,50 @@ async def create_data_source(
     )
 
 
+@router.post(
+    "/projects/{project_id}/data-sources/check",
+    response_model=DataSourceCheckResponse,
+)
+async def check_data_source(
+    project_id: uuid.UUID,
+    body: DataSourceCheck,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> DataSourceCheckResponse:
+    """Pre-upload dedup probe: has this exact content already been ingested
+    anywhere in the user's org? Lets the client skip pushing a duplicate video
+    over the wire and offer "add without re-uploading" instead.
+
+    Scoped to the org via the Project join, so a copy in another org is
+    invisible — no cross-tenant leak.
+    """
+    await _check_project(project_id, current_user, session)
+    r = await session.execute(
+        select(DataSource, Project.name)
+        .join(Project, Project.id == DataSource.project_id)
+        .where(
+            Project.org_id == current_user.org_id,
+            Project.deleted_at == None,  # noqa: E711
+            DataSource.blob_hash == body.blob_hash,
+            DataSource.deleted_at == None,  # noqa: E711
+        )
+    )
+    matches = [
+        DataSourceMatch(
+            data_source_id=ds.id,
+            project_id=ds.project_id,
+            project_name=project_name,
+            type=ds.type,
+        )
+        for ds, project_name in r.all()
+    ]
+    return DataSourceCheckResponse(
+        exists=bool(matches),
+        in_current_project=any(m.project_id == project_id for m in matches),
+        matches=matches,
+    )
+
+
 @router.post("/data-sources/{id}/confirm-upload", response_model=ConfirmResponse)
 async def confirm_upload(
     id: uuid.UUID,
@@ -154,41 +216,64 @@ async def confirm_upload(
     if ds.status != "pending":
         return ConfirmResponse(data_source=DataSourceOut.model_validate(ds))
 
-    # Promote the finished upload to its content-addressed location (server-side
-    # copy — no bytes through the API) and register the blob row. ON CONFLICT
-    # DO NOTHING because identical content may already be registered.
-    size_bytes, media_type, storage_key = await get_storage().promote_upload(
-        str(ds.id), body.blob_hash
-    )
-    await session.execute(
-        pg_insert(Blob)
-        .values(
-            hash=body.blob_hash,
-            storage_backend=settings.S3_BACKEND,
-            storage_key=storage_key,
-            size_bytes=size_bytes,
-            media_type=media_type,
+    # If the content is already registered (e.g. an "add without re-uploading"
+    # flow, where the client uploaded no bytes because a copy exists elsewhere
+    # in the org), reuse the existing blob — nothing was staged to promote.
+    # Otherwise promote the finished upload to its content-addressed location
+    # (server-side copy — no bytes through the API) and register the blob row.
+    existing_blob = await session.get(Blob, body.blob_hash)
+    if existing_blob is None:
+        size_bytes, media_type, storage_key = await get_storage().promote_upload(
+            str(ds.id), body.blob_hash
         )
-        .on_conflict_do_nothing(index_elements=["hash"])
-    )
+        await session.execute(
+            pg_insert(Blob)
+            .values(
+                hash=body.blob_hash,
+                storage_backend=settings.S3_BACKEND,
+                storage_key=storage_key,
+                size_bytes=size_bytes,
+                media_type=media_type,
+            )
+            .on_conflict_do_nothing(index_elements=["hash"])
+        )
 
     ds.blob_hash = body.blob_hash
     ds.status = "uploaded"
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        # uq_data_sources_project_blob: this exact content is already a live
+        # data source in this project. Backstop behind the UI's pre-upload
+        # check (covers races / direct API use).
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This video is already a data source in this project",
+        )
 
-    # Backend-owned trigger: if the project designates a default ingest workflow,
-    # start it now with the data source as the run parameter.
+    # Backend-owned trigger: pick the workflow to run on this upload. A
+    # client-supplied workflow_id takes precedence (chosen at upload time);
+    # otherwise fall back to the project's configured default. None of either
+    # means "just store, no processing".
+    target_wf_id = body.workflow_id or proj.default_ingest_workflow_id
     run_id: uuid.UUID | None = None
     # Only videos go through the workflow (frame extraction). Manual images are
     # ingested directly via the image-upload endpoints, never here.
-    if proj.default_ingest_workflow_id is not None and ds.type == "video":
+    if target_wf_id is not None and ds.type == "video":
         wf_r = await session.execute(
             select(Workflow).where(
-                Workflow.id == proj.default_ingest_workflow_id,
+                Workflow.id == target_wf_id,
+                Workflow.project_id == ds.project_id,
                 Workflow.deleted_at == None,  # noqa: E711
             )
         )
         wf = wf_r.scalar_one_or_none()
+        # An explicit, client-chosen workflow that doesn't resolve is a bad
+        # request; a stale project default is silently skipped (don't fail the
+        # upload over a misconfigured setting).
+        if wf is None and body.workflow_id is not None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
         if wf is not None:
             run = await create_workflow_run(
                 session, wf, {"source_id": str(ds.id)}, current_user.id

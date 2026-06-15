@@ -4,6 +4,10 @@ WORKDIR /app
 COPY package.json .
 RUN npm install
 COPY . .
+# Vite bakes VITE_* vars into the bundle at build time. The model page links the
+# browser at this MLflow origin; passed as a build arg from docker-compose.
+ARG VITE_MLFLOW_URL
+ENV VITE_MLFLOW_URL=${VITE_MLFLOW_URL}
 RUN npm run build
 
 # ── development target ───────────────────────────────────────────────────

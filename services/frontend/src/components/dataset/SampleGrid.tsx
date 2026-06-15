@@ -3,8 +3,10 @@ import type { InfiniteData } from '@tanstack/react-query'
 import type { CursorPage, Sample } from '../../api/samples'
 import { useImageUrl, useThumbnailUrl } from '../../api/samples'
 import { useSelectionStore } from '../../store/selection'
+import { useAnnotations } from '../../api/annotations'
 import { cn } from '../../lib/cn'
 import { SampleImageMenu } from '../samples/SampleImageMenu'
+import { BoxOverlay } from './BoxOverlay'
 
 const REVIEW_DOT: Record<string, string> = {
   accepted: '#34D399',
@@ -125,6 +127,19 @@ function Lightbox({
 }) {
   const sample = samples[index]
   const { data, isLoading } = useImageUrl(sample?.id)
+  const { data: revisions } = useAnnotations(sample?.id)
+  const [selectedRevId, setSelectedRevId] = useState<string | null>(null)
+  const [showBoxes, setShowBoxes] = useState(true)
+
+  // Default to the highest revision_no (backend orders ascending, so last);
+  // reset whenever the sample or its revision set changes.
+  useEffect(() => {
+    if (revisions && revisions.length > 0) {
+      setSelectedRevId(revisions[revisions.length - 1].id)
+    } else {
+      setSelectedRevId(null)
+    }
+  }, [sample?.id, revisions])
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -137,6 +152,8 @@ function Lightbox({
   }, [index, samples.length, onClose, onNavigate])
 
   if (!sample) return null
+
+  const selectedRev = revisions?.find(r => r.id === selectedRevId) ?? null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={onClose}>
@@ -165,13 +182,37 @@ function Lightbox({
         {isLoading || !data?.url ? (
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
         ) : (
-          <img
-            src={data.url}
-            alt={`frame ${sample.frame_index ?? ''}`}
-            className="max-h-[80vh] max-w-full rounded-lg object-contain"
-          />
+          <div className="relative inline-block">
+            <img src={data.url} alt={`frame ${sample.frame_index ?? ''}`} className="max-h-[80vh] max-w-full object-contain rounded-lg" />
+            {showBoxes && selectedRev && <BoxOverlay boxes={selectedRev.payload} />}
+          </div>
         )}
-        <p className="mt-3 text-xs text-white/70">
+
+        {revisions && revisions.length > 0 && (
+          <div className="flex items-center gap-3 mt-3">
+            <select
+              value={selectedRevId ?? ''}
+              onChange={e => setSelectedRevId(e.target.value)}
+              className="bg-white/10 text-white text-xs rounded-md px-2 py-1 border border-white/20 focus:outline-none"
+            >
+              {revisions.map(r => (
+                <option key={r.id} value={r.id} className="text-slate-800">
+                  rev {r.revision_no} · {String(r.provenance?.source ?? 'unknown')}
+                </option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-white/70 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showBoxes}
+                onChange={e => setShowBoxes(e.target.checked)}
+              />
+              Boxes
+            </label>
+          </div>
+        )}
+
+        <p className="text-white/70 text-xs mt-3">
           {sample.width}×{sample.height}
           {sample.frame_index != null && ` · frame ${sample.frame_index}`}
           {` · ${index + 1} / ${samples.length}`}

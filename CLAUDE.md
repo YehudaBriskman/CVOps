@@ -10,7 +10,7 @@ CVOps is an ML-lifecycle dashboard that collapses dataset versioning, workflow o
 |---|---|---|
 | `services/api` | Python 3.12 / FastAPI — REST API, workflow engine, DB layer | implemented |
 | `services/frontend` | TypeScript / React 18 + Vite — dashboard UI (auth, all pages, api layer, data-source/frame viewer) | implemented |
-| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo` implemented; `auto_label`, `human_review`, `train` are stubs) | partial |
+| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo`, `train` implemented; `auto_label`, `human_review` are stubs) | partial |
 | `services/worker-preprocessing` | Python — Redis-Streams worker; consumes the `preprocessing` stream and runs steps out of the API process | implemented |
 
 Standalone CLI prototypes for the same lifecycle steps live in `tools/frame-extractor/` (`extract_frames.py`, `auto_label.py`, `upload_to_cvat.py`).
@@ -84,7 +84,7 @@ Client ──► nginx ──► FastAPI ──► Depends(get_current_user)  �
 
 **Persistence layers (must understand together):**
 
-- PostgreSQL holds all relational state — 21 ORM models in `db/models/`, Alembic migrations in `alembic/versions/` (`0001_initial_schema`, `0002_project_default_ingest_workflow`).
+- PostgreSQL holds all relational state — 21 ORM models in `db/models/`, Alembic migrations in `alembic/versions/` (`0001_initial_schema`, `0002_project_default_ingest_workflow`, `0003_data_source_unique_blob_per_project`, `0004_model_version_optional_container`).
 - Garage (S3-compatible object store) holds every byte payload (images, annotations, model weights). Blobs are content-addressed by SHA-256; the API never proxies bytes — clients get presigned PUT/GET URLs. Presigned URLs are signed against a browser-reachable host (derived per-request from the `Host` header, or `S3_PUBLIC_ENDPOINT` if set), not the internal `S3_ENDPOINT`.
 - Redis holds the JWT `jti` revocation list and any transient cache.
 
@@ -113,7 +113,8 @@ These are the conventions that are easy to violate without realising it. Most ar
 - **Auth dependency:** `get_current_user` validates JWT, checks the Redis blacklist, and loads the `User`. Every endpoint except `/auth/*` requires it.
 - **Internal endpoints** (`/api/v1/internal/*`) authenticate with the `WORKER_TOKEN` shared secret, not user JWTs.
 - **Router path composition.** Some routers (`data_sources`, `samples`, `ontologies`, `datasets`, `workflows`, `runs`, `models`, `training_containers`) define their full paths inline (e.g. `/projects/{id}/samples`) and are mounted with just the `/api/v1` prefix; `auth`, `orgs`, `projects`, `registry`, `internal` add their own segment (e.g. `/api/v1/projects`). The router objects themselves must NOT declare `APIRouter(prefix=…)`, or paths double up (e.g. `/api/v1/projects/projects`).
-- **Backend-triggered ingest.** `POST /data-sources/{id}/confirm-upload` registers the blob and, if the project has `default_ingest_workflow_id` set, auto-dispatches that workflow with `params.source_id` and returns its `run_id`. Hash is verified lazily in `extract_frames`, not at confirm.
+- **Backend-triggered ingest.** `POST /data-sources/{id}/confirm-upload` registers the blob and, if the project has `default_ingest_workflow_id` set, auto-dispatches that workflow with `params.source_id` and returns its `run_id`. Hash is verified lazily in `extract_frames`, not at confirm. `confirm-upload` reuses an already-registered `Blob` without re-promoting (the add-without-reupload path) and returns `409` if the same content is already a live source in this project (`uq_data_sources_project_blob`).
+- **Duplicate-upload check.** The client hashes the file *first*, then `POST /projects/{id}/data-sources/check` (`{blob_hash}` → `{exists, in_current_project, matches}`) probes for an existing org-wide copy so a duplicate is never pushed over the wire. The org-scoped join means cross-org copies are invisible. Exact-hash only; perceptual near-dup is out of scope.
 
 ## Adding a new step type
 

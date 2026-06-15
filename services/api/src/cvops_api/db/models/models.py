@@ -58,8 +58,8 @@ class ModelVersion(Base, EntityBase):
     trained_on_commit_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("commits.id"), nullable=False
     )
-    training_container_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("training_containers.id"), nullable=False
+    training_container_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("training_containers.id"), nullable=True
     )
     base_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     hyperparams: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)

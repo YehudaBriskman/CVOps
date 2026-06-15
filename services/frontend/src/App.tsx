@@ -11,6 +11,7 @@ import DatasetView from './pages/DatasetView'
 import CommitDetail from './pages/CommitDetail'
 import Workflows from './pages/Workflows'
 import RunView from './pages/RunView'
+import Runs from './pages/Runs'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
 import ProjectSettings from './pages/ProjectSettings'
@@ -59,6 +60,7 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route path="/projects/:id/runs"                     element={<Runs />} />
         <Route path="/runs/:id"                              element={<RunView />} />
         <Route path="/projects/:id/models"                   element={<Models />} />
         <Route path="/models/:id"                            element={<ModelDetail />} />

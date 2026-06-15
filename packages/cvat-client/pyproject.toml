@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cvops-cvat-client"
+version = "0.1.0"
+requires-python = ">=3.12"
+# CVAT REST operations shared by the monorepo workers/steps (worker-cvat). The
+# geometry module is dependency-free and import-safe; cvat_sdk is imported
+# lazily inside client.py so importing this package (e.g. for the step registry)
+# never requires the SDK to be installed.
+dependencies = [
+  "cvat-sdk>=2.3.0",   # CVAT REST/SDK client
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cvops_cvat_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

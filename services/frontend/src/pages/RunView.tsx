@@ -51,7 +51,12 @@ export default function RunView() {
       outputs,
       metrics: asRecord(s.metrics),
       error: s.error,
-      cvat_url: (outputs?.cvat_url as string) ?? undefined,
+      // The coordinator nests gate data under output_refs.gate_data; fall back
+      // to a top-level cvat_url for any older shape.
+      cvat_url:
+        ((outputs?.gate_data as Record<string, unknown> | undefined)?.cvat_url as string) ??
+        (outputs?.cvat_url as string) ??
+        undefined,
     }
   })
 
@@ -90,7 +95,10 @@ export default function RunView() {
         <GateResolutionBanner
           runId={id}
           stepId={waitingStep.step_id ?? waitingStep.id}
-          cvatUrl={(asRecord(waitingStep.output_refs)?.cvat_url as string) ?? null}
+          cvatUrl={
+            ((asRecord(waitingStep.output_refs)?.gate_data as Record<string, unknown> | undefined)?.cvat_url
+              ?? asRecord(waitingStep.output_refs)?.cvat_url) as string ?? null
+          }
         />
       )}
 

@@ -17,6 +17,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
     { to: `/projects/${projectId}/samples`,      label: 'Samples',      end: false },
     { to: `/projects/${projectId}/datasets`,     label: 'Datasets',     end: false },
     { to: `/projects/${projectId}/workflows`,    label: 'Workflows',    end: false },
+    { to: `/projects/${projectId}/runs`,         label: 'Runs',         end: false },
     { to: `/projects/${projectId}/models`,       label: 'Models',       end: false },
     { to: `/projects/${projectId}/settings`,     label: 'Settings',     end: false },
   ]

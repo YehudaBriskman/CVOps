@@ -123,6 +123,19 @@ dc_resource('redis',
     links=[link('redis://localhost:6379', 'redis')],
 )
 
+# MLflow tracking server (+ one-shot DB create). Both are no-profile compose
+# services, so they come up with the infra. dc_resource only labels/links them.
+dc_resource('mlflow-init',
+    labels=['1-infra'],
+    resource_deps=['postgres'],
+)
+
+dc_resource('mlflow',
+    labels=['1-infra'],
+    resource_deps=['mlflow-init', 'garage-bootstrap'],
+    links=[link('http://localhost:5000', 'mlflow ui')],
+)
+
 # ── Garage S3 bootstrap (cluster layout + bucket + key) ─────────────────────
 # A fresh Garage node serves S3 only after a layout is applied. We also create
 # the bucket and import the access/secret key from .env so the API can auth.
@@ -233,6 +246,9 @@ local_resource('api',
 local_resource('frontend',
     # Vite already proxies /api/v1 → http://localhost:8000 (see vite.config.ts).
     serve_cmd='cd services/frontend && npm run dev -- --host 0.0.0.0 --port 5173',
+    # MLflow comes up as a no-profile compose service on host :5000, so the
+    # model-page "MLflow run" link points there. VM devs can override in .env.
+    serve_env={'VITE_MLFLOW_URL': env.get('VITE_MLFLOW_URL', 'http://localhost:5000')},
     deps=['services/frontend/src', 'services/frontend/vite.config.ts', 'services/frontend/index.html'],
     resource_deps=['api', 'frontend-install'],
     readiness_probe=probe(

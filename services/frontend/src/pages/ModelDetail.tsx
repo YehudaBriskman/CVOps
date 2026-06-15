@@ -2,6 +2,10 @@ import { useParams } from 'react-router-dom'
 import { useModel, useWeightsUrl } from '../api/models'
 import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
 
+// Base URL of the MLflow tracking UI. When unset, the run id shows as plain
+// text (there's no server to link to yet — see the MLflow standup plan).
+const MLFLOW_URL = import.meta.env.VITE_MLFLOW_URL as string | undefined
+
 export default function ModelDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: model, isLoading, isError, refetch } = useModel(id)
@@ -64,6 +68,25 @@ export default function ModelDetail() {
               {model.trained_on_commit_id?.slice(0, 8) ?? '—'}
             </dd>
           </div>
+          {model.mlflow_run_id && (
+            <div>
+              <dt className="text-xs text-slate-400">MLflow run</dt>
+              <dd className="font-medium mt-0.5 font-mono text-xs">
+                {MLFLOW_URL ? (
+                  <a
+                    href={`${MLFLOW_URL}/#/experiments/0/runs/${model.mlflow_run_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-indigo-600 hover:text-indigo-700"
+                  >
+                    {model.mlflow_run_id.slice(0, 12)} ↗
+                  </a>
+                ) : (
+                  <span className="text-slate-800">{model.mlflow_run_id.slice(0, 12)}</span>
+                )}
+              </dd>
+            </div>
+          )}
         </dl>
       </Card>
 
