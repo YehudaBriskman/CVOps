@@ -8,6 +8,7 @@
     "split_strategy":  { "type": "string", "enum": ["by_source_group", "random_seeded"], "default": "by_source_group" },
     "train_ratio":     { "type": "number", "minimum": 0.1, "maximum": 0.9, "default": 0.8 },
     "val_ratio":       { "type": "number", "minimum": 0.05, "maximum": 0.5, "default": 0.2 },
+    "seed":            { "type": "integer", "minimum": 0, "default": 42, "description": "Determinism seed for split assignment" },
     "ontology_id":     { "type": "string", "format": "uuid" },
     "message":         { "type": "string", "default": "" }
   },
