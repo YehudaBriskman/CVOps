@@ -400,6 +400,7 @@ All endpoints except `/auth/*` require `Authorization: Bearer <token>`.
 |---|---|---|
 | `GET` | `/projects/{id}/data-sources` | List data sources |
 | `POST` | `/projects/{id}/data-sources` | Create + get presigned PUT URL |
+| `POST` | `/projects/{id}/data-sources/check` | Pre-upload duplicate check by blob hash |
 | `POST` | `/data-sources/{id}/confirm-upload` | Confirm upload with blob hash |
 | `GET` | `/data-sources/{id}` | Get data source |
 | `DELETE` | `/data-sources/{id}` | Delete data source |
