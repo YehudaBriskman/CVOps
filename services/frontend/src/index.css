@@ -106,3 +106,34 @@
     }
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * react-jsonschema-form (rjsf) — token-aware styling for the step config form.
+ * rjsf ships unstyled markup; map its structural classes onto our tokens.
+ * ───────────────────────────────────────────────────────────────────────── */
+.cvops-rjsf .form-group { margin-bottom: 0.875rem; }
+.cvops-rjsf label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.cvops-rjsf input[type='text'],
+.cvops-rjsf input[type='number'],
+.cvops-rjsf input[type='url'],
+.cvops-rjsf select,
+.cvops-rjsf textarea {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-strong);
+  background-color: var(--surface-2);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+}
+.cvops-rjsf input[type='checkbox'] { accent-color: var(--cv-cobalt-blue); }
+.cvops-rjsf .field-description { margin: 0.15rem 0 0; font-size: 0.7rem; color: var(--text-muted); }
+.cvops-rjsf .text-danger,
+.cvops-rjsf .error-detail { color: #EF4444; font-size: 0.7rem; list-style: none; padding: 0; margin: 0.2rem 0 0; }
+.cvops-rjsf .panel.panel-danger { border-color: rgba(239, 68, 68, 0.3); }

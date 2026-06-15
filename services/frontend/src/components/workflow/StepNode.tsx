@@ -5,6 +5,7 @@ export type StepNodeData = {
   label: string
   type_key: string
   status?: string | null
+  config?: Record<string, unknown>
 }
 
 export type StepNodeType = Node<StepNodeData, 'step'>

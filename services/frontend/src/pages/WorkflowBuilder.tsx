@@ -18,10 +18,13 @@ import '@xyflow/react/dist/style.css'
 import { StepNode } from '../components/workflow/StepNode'
 import type { StepNodeType } from '../components/workflow/StepNode'
 import { StepPalette } from '../components/workflow/StepPalette'
+import { StepConfigForm } from '../components/workflow/StepConfigForm'
 import { useWorkflow, useUpdateWorkflow } from '../api/workflows'
 import { useCreateRun } from '../api/runs'
 import { useRegistryTypes } from '../api/registry'
 import { STEP_TYPES } from '../lib/stepCatalog'
+import { Button, Drawer, Field, Input } from '../components/ui'
+import { toast } from '../store/toast'
 
 const MINIMAP_COLORS: Record<string, string> = {
   'step.extract_frames': '#3b82f6',
@@ -42,6 +45,7 @@ function defToNodes(definition: Record<string, unknown>): StepNodeType[] {
       label: String(s.label ?? s.type ?? 'Step'),
       type_key: String(s.type ?? ''),
       status: null,
+      config: (s.config as Record<string, unknown>) ?? {},
     },
   }))
 }
@@ -65,7 +69,7 @@ function nodesToDef(
       type: n.data.type_key,
       label: n.data.label,
       position: n.position,
-      config: {},
+      config: n.data.config ?? {},
     })),
     edges: edges.map(e => ({ id: e.id, source: e.source, target: e.target })),
   }
@@ -82,7 +86,31 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<StepNodeType>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [loaded, setLoaded] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  const selectedNode = nodes.find(n => n.id === selectedId) ?? null
+  const selectedType = registryTypes?.find(rt => rt.type_key === selectedNode?.data.type_key)
+
+  const onNodeClick = useCallback(
+    (_e: React.MouseEvent, node: StepNodeType) => setSelectedId(node.id),
+    [],
+  )
+
+  const patchNodeData = useCallback(
+    (id: string, patch: Partial<StepNodeType['data']>) => {
+      setNodes(nds => nds.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)))
+    },
+    [setNodes],
+  )
+
+  const deleteNode = useCallback(
+    (id: string) => {
+      setNodes(nds => nds.filter(n => n.id !== id))
+      setEdges(eds => eds.filter(e => e.source !== id && e.target !== id))
+      setSelectedId(null)
+    },
+    [setNodes, setEdges],
+  )
 
   useEffect(() => {
     if (workflow && !loaded) {
@@ -141,38 +169,32 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
   )
 
   async function handleSave() {
-    setSaveStatus('saving')
     try {
-      await updateWorkflow.mutateAsync({ definition: nodesToDef(nodes, edges) })
-      setSaveStatus('saved')
-      setTimeout(() => setSaveStatus('idle'), 2000)
+      const wf = await updateWorkflow.mutateAsync({ definition: nodesToDef(nodes, edges) })
+      toast.success('Workflow saved', `Now at v${wf.version}`)
     } catch {
-      setSaveStatus('idle')
+      // Surfaced by the global mutation error handler (toast).
     }
   }
 
   async function handleRun() {
-    const run = await createRun.mutateAsync({ workflowId })
-    navigate(`/runs/${run.id}`)
+    try {
+      const run = await createRun.mutateAsync({ workflowId })
+      navigate(`/runs/${run.id}`)
+    } catch {
+      // Surfaced by the global mutation error handler (toast).
+    }
   }
 
   return (
-    <div className="flex-1 relative">
-      <div className="absolute top-4 right-4 z-10 flex gap-2">
-        <button
-          onClick={handleSave}
-          disabled={updateWorkflow.isPending}
-          className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 shadow-sm transition-colors disabled:opacity-60"
-        >
-          {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? '✓ Saved' : 'Save'}
-        </button>
-        <button
-          onClick={handleRun}
-          disabled={createRun.isPending}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 shadow-sm transition-colors disabled:opacity-60"
-        >
-          {createRun.isPending ? 'Starting…' : '▶ Run Workflow'}
-        </button>
+    <div className="relative flex-1">
+      <div className="absolute right-4 top-4 z-10 flex gap-2">
+        <Button variant="secondary" onClick={handleSave} loading={updateWorkflow.isPending} className="shadow-sm">
+          Save
+        </Button>
+        <Button onClick={handleRun} loading={createRun.isPending} className="shadow-sm">
+          ▶ Run Workflow
+        </Button>
       </div>
 
       <ReactFlow
@@ -181,6 +203,7 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeClick={onNodeClick}
         nodeTypes={nodeTypes}
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -193,6 +216,55 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
           nodeColor={node => MINIMAP_COLORS[(node.data as StepNodeType['data']).type_key] ?? '#94a3b8'}
         />
       </ReactFlow>
+
+      <Drawer
+        open={selectedNode !== null}
+        onClose={() => setSelectedId(null)}
+        title={selectedNode ? `Configure · ${selectedNode.data.type_key.replace('step.', '')}` : ''}
+      >
+        {selectedNode && (
+          <div className="space-y-5">
+            <Field label="Step label" htmlFor="step-label">
+              <Input
+                id="step-label"
+                value={selectedNode.data.label}
+                onChange={e => patchNodeData(selectedNode.id, { label: e.target.value })}
+              />
+            </Field>
+
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
+                Configuration
+              </p>
+              {selectedType ? (
+                <StepConfigForm
+                  schema={selectedType.json_schema}
+                  formData={selectedNode.data.config ?? {}}
+                  onChange={config => patchNodeData(selectedNode.id, { config })}
+                />
+              ) : (
+                <p className="text-sm text-text-muted">
+                  Schema unavailable — the step registry could not be loaded.
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-between border-t border-border pt-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-error hover:text-error"
+                onClick={() => deleteNode(selectedNode.id)}
+              >
+                Delete step
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setSelectedId(null)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
+      </Drawer>
     </div>
   )
 }
