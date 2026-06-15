@@ -21,6 +21,9 @@ from cvops_api.db.models.versioning import (
     ProjectDatasetLink,
 )
 from cvops_api.db.models.ontologies import Ontology
+from cvops_api.db.models.workflows import Workflow
+from cvops_api.engine.coordinator import advance_workflow
+from cvops_api.engine.dispatch import create_workflow_run
 from cvops_api.schemas.datasets import (
     DatasetCreate,
     DatasetOut,
@@ -35,6 +38,26 @@ from cvops_api.schemas.datasets import (
 from cvops_api.schemas.samples import CursorPage
 
 router = APIRouter()
+
+# Fixed single-step workflow that pushes a review set into CVAT and parks the run
+# at a gate. Provisioned lazily per project (see get_or_create_review_workflow) so
+# the entry point needs no migration. The step's inputs pull from the run params
+# the /review endpoint sets, via the engine's `$run.params.*` resolver.
+REVIEW_WORKFLOW_NAME = "human_review"
+REVIEW_WORKFLOW_DEF: dict[str, Any] = {
+    "steps": [
+        {
+            "id": "review",
+            "type": "step.human_review",
+            "config": {},
+            "inputs": {
+                "sample_ids": "$run.params.sample_ids",
+                "annotation_revision_ids": "$run.params.annotation_revision_ids",
+            },
+        }
+    ],
+    "edges": [],
+}
 
 
 async def _check_project(
@@ -99,6 +122,110 @@ async def get_dataset(
         raise HTTPException(status_code=404, detail="Dataset not found")
     await _check_project(dataset.project_id, current_user, session)
     return DatasetOut.model_validate(dataset)
+
+
+# ── Review in CVAT ────────────────────────────────────────────────────────────
+
+
+async def _latest_commit_id(
+    session: AsyncSession, dataset_id: uuid.UUID
+) -> uuid.UUID | None:
+    """The commit whose samples make up the review set.
+
+    Prefer the `main` branch ref; fall back to the most recent commit by
+    `created_at` (a dataset committed without a `main` branch still reviews).
+    """
+    r = await session.execute(
+        select(Ref.target_commit_id).where(
+            Ref.dataset_id == dataset_id,
+            Ref.ref_type == "branch",
+            Ref.name == "main",
+        )
+    )
+    commit_id = r.scalar_one_or_none()
+    if commit_id is not None:
+        return commit_id
+
+    r2 = await session.execute(
+        select(Commit.id)
+        .where(Commit.dataset_id == dataset_id)
+        .order_by(Commit.created_at.desc())
+        .limit(1)
+    )
+    return r2.scalar_one_or_none()
+
+
+async def get_or_create_review_workflow(
+    session: AsyncSession, project_id: uuid.UUID
+) -> Workflow:
+    """Find (or lazily create) the project's `human_review` workflow."""
+    r = await session.execute(
+        select(Workflow).where(
+            Workflow.project_id == project_id,
+            Workflow.name == REVIEW_WORKFLOW_NAME,
+            Workflow.deleted_at == None,  # noqa: E711
+        )
+    )
+    wf = r.scalar_one_or_none()
+    if wf is not None:
+        return wf
+
+    wf = Workflow(
+        project_id=project_id,
+        name=REVIEW_WORKFLOW_NAME,
+        definition=REVIEW_WORKFLOW_DEF,
+    )
+    session.add(wf)
+    await session.commit()
+    await session.refresh(wf)
+    return wf
+
+
+@router.post("/datasets/{id}/review")
+async def review_dataset(
+    id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    """Dispatch a `human_review` run over the dataset's current committed samples.
+
+    The review set is the latest commit's `commit_samples`; their annotation
+    revisions ride along as CVAT pre-labels. Returns the parent run id so the UI
+    can navigate to the run view, where the gate surfaces the "Open in CVAT" link.
+    """
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    commit_id = await _latest_commit_id(session, dataset.id)
+    if commit_id is None:
+        raise HTTPException(
+            status_code=400, detail="Dataset has no commits to review"
+        )
+
+    rows = (
+        await session.execute(
+            select(CommitSample.sample_id, CommitSample.annotation_revision_id).where(
+                CommitSample.commit_id == commit_id
+            )
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(
+            status_code=400, detail="Dataset commit has no samples to review"
+        )
+
+    params: dict[str, Any] = {
+        "sample_ids": [str(sid) for sid, _ in rows],
+        "annotation_revision_ids": [str(arid) for _, arid in rows],
+    }
+
+    wf = await get_or_create_review_workflow(session, dataset.project_id)
+    run = await create_workflow_run(session, wf, params, current_user.id)
+    await advance_workflow(session, run.id, current_user.id)
+    return {"run_id": str(run.id)}
 
 
 # ── Commits ───────────────────────────────────────────────────────────────────
