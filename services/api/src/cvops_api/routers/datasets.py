@@ -10,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, cast
 
 from cvops_api.core.auth import get_current_user
+from cvops_api.core.audit import emit_event
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
+from cvops_api.db.models.samples import Sample
+from cvops_api.db.models.annotations import AnnotationRevision
 from cvops_api.db.models.versioning import (
     Dataset,
     Commit,
@@ -26,6 +29,8 @@ from cvops_api.schemas.datasets import (
     DatasetOut,
     CommitCreate,
     CommitOut,
+    CommitFromSamples,
+    CommitFromSamplesOut,
     RefCreate,
     RefOut,
     DatasetLinkCreate,
@@ -262,6 +267,171 @@ async def create_commit(
 
     await session.commit()
     return CommitOut.model_validate(commit)
+
+
+@router.post(
+    "/datasets/{id}/commits/from-samples",
+    response_model=CommitFromSamplesOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_commit_from_samples(
+    id: uuid.UUID,
+    body: CommitFromSamples,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CommitFromSamplesOut:
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    project = await _check_project(dataset.project_id, current_user, session)
+
+    # Validate samples belong to project & not deleted. Cross-tenant ids → reject whole request.
+    valid = list(
+        (
+            await session.execute(
+                select(Sample.id).where(
+                    Sample.id.in_(body.sample_ids),
+                    Sample.project_id == dataset.project_id,
+                    Sample.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    valid_set = set(valid)
+    missing = [str(sid) for sid in body.sample_ids if sid not in valid_set]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"samples not in project: {', '.join(missing)}",
+        )
+
+    # Resolve winning (latest) revision per sample via DISTINCT ON.
+    rows = await session.execute(
+        select(
+            AnnotationRevision.sample_id,
+            AnnotationRevision.id,
+            AnnotationRevision.ontology_id,
+        )
+        .where(AnnotationRevision.sample_id.in_(valid))
+        .distinct(AnnotationRevision.sample_id)
+        .order_by(AnnotationRevision.sample_id, AnnotationRevision.revision_no.desc())
+    )
+    winning: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]] = {}
+    for sample_id, revision_id, ont_id in rows.all():
+        winning[sample_id] = (revision_id, ont_id)
+
+    committed = [sid for sid in valid if sid in winning]
+    skipped_count = len(valid) - len(committed)
+    if not committed:
+        raise HTTPException(status_code=422, detail="no annotated samples to commit")
+
+    # Derive ontology_id: (1) body; (2) shared across winning revisions; (3) project default.
+    ontology_id = body.ontology_id
+    if ontology_id is None:
+        ont_ids = {winning[sid][1] for sid in committed}
+        if len(ont_ids) == 1:
+            ontology_id = next(iter(ont_ids))
+        elif project.default_ontology_id is not None:
+            ontology_id = project.default_ontology_id
+        else:
+            raise HTTPException(status_code=422, detail="ontology_id required")
+
+    r_ont = await session.execute(select(Ontology.version).where(Ontology.id == ontology_id))
+    ont_version = r_ont.scalar_one_or_none()
+    if ont_version is None:
+        raise HTTPException(status_code=404, detail="Ontology not found")
+
+    # Find parent commit via branch ref
+    r_ref = await session.execute(
+        select(Ref).where(
+            Ref.dataset_id == dataset.id,
+            Ref.name == body.branch_name,
+        )
+    )
+    ref = r_ref.scalar_one_or_none()
+    parent_commit_id = ref.target_commit_id if ref is not None else None
+
+    # Create commit
+    commit = Commit(
+        dataset_id=dataset.id,
+        project_id=dataset.project_id,
+        ontology_id=ontology_id,
+        ontology_version=ont_version,
+        message=body.message,
+        stats={"sample_count": len(committed), "skipped_unannotated": skipped_count},
+        parent_commit_id=parent_commit_id,
+    )
+    session.add(commit)
+    await session.flush()
+
+    # Assign splits over committed
+    total = len(committed)
+    train_ratio = body.split_strategy.get("train_ratio", 0.7)
+    val_ratio = body.split_strategy.get("val_ratio", 0.15)
+    train_count = int(total * train_ratio)
+    val_count = int(total * val_ratio)
+
+    for idx, sid in enumerate(committed):
+        if idx < train_count:
+            split = "train"
+        elif idx < train_count + val_count:
+            split = "val"
+        else:
+            split = "test"
+        session.add(
+            CommitSample(
+                commit_id=commit.id,
+                sample_id=sid,
+                annotation_revision_id=winning[sid][0],
+                split=split,
+            )
+        )
+
+    # Advance or create branch ref via CAS
+    if ref:
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                update(Ref)
+                .where(Ref.id == ref.id, Ref.target_commit_id == parent_commit_id)
+                .values(target_commit_id=commit.id)
+            ),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=409, detail="Concurrent branch update — retry")
+    else:
+        session.add(
+            Ref(
+                dataset_id=dataset.id,
+                ref_type="branch",
+                name=body.branch_name,
+                target_commit_id=commit.id,
+                is_mutable=True,
+            )
+        )
+
+    await emit_event(
+        session,
+        actor_id=str(current_user.id),
+        actor_type="user",
+        entity_type="commit",
+        entity_id=commit.id,
+        action="branch.advanced",
+        payload={
+            "dataset_id": str(dataset.id),
+            "branch": body.branch_name,
+            "from_samples": True,
+        },
+    )
+    await session.commit()
+    return CommitFromSamplesOut(
+        commit_id=commit.id,
+        committed_count=len(committed),
+        skipped_count=skipped_count,
+    )
 
 
 # ── Refs ──────────────────────────────────────────────────────────────────────
