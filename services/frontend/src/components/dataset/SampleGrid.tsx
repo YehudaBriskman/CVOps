@@ -120,7 +120,7 @@ function ThumbnailCard({
   )
 }
 
-function Lightbox({
+export function Lightbox({
   samples,
   index,
   onClose,
