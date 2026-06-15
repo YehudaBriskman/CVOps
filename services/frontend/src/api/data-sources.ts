@@ -19,6 +19,35 @@ export interface UploadResponse {
   presigned_put_url: string | null
 }
 
+export interface DataSourceMatch {
+  data_source_id: string
+  project_id: string
+  project_name: string
+  type: string
+}
+
+export interface DataSourceCheckResponse {
+  exists: boolean
+  in_current_project: boolean
+  matches: DataSourceMatch[]
+}
+
+/**
+ * Pre-upload dedup probe: ask whether this exact content already exists
+ * anywhere in the user's org, so we can skip pushing a duplicate over the wire.
+ * Imperative (called inline in the upload flow), not a hook.
+ */
+export async function checkDuplicate(
+  projectId: string,
+  blobHash: string,
+): Promise<DataSourceCheckResponse> {
+  const { data } = await client.post<DataSourceCheckResponse>(
+    `/projects/${projectId}/data-sources/check`,
+    { blob_hash: blobHash },
+  )
+  return data
+}
+
 // Lifecycle: pending → uploaded → ingesting → ingested | failed.
 const TERMINAL_STATUSES = new Set(['ingested', 'failed'])
 

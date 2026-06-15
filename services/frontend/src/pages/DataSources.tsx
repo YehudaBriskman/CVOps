@@ -9,7 +9,9 @@ import { useProject } from '../api/projects'
 import { useWorkflows, useCreateWorkflow } from '../api/workflows'
 import {
   type DataSource,
+  type DataSourceMatch,
   type UploadResponse,
+  checkDuplicate,
   useDataSourceUrl,
   useDataSources,
   useDeleteDataSource,
@@ -166,6 +168,14 @@ export default function DataSources() {
   // surrounding indeterminate phases (create / hash / confirm).
   const [pct, setPct] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Set when a pre-upload check finds the same content already in the org. The
+  // auto-flow pauses on a small modal asking to add-without-reuploading or skip.
+  const [dupPrompt, setDupPrompt] = useState<{
+    file: File
+    blobHash: string
+    matches: DataSourceMatch[]
+    inCurrentProject: boolean
+  } | null>(null)
 
   const { data: sources, isLoading } = useDataSources(projectId)
   const { data: project } = useProject(projectId)
@@ -193,50 +203,175 @@ export default function DataSources() {
     setSelectedWf(wf.id)
   }
 
+  // Full path for genuinely new content: create source, PUT the bytes, confirm.
+  async function doFreshUpload(file: File, blobHash: string) {
+    const type = file.type.startsWith('image/') ? 'image' : 'video'
+    setProgress('Creating data source…')
+    const { data: upload } = await client.post<UploadResponse>(
+      `/projects/${projectId}/data-sources`,
+      { type },
+    )
+
+    if (upload.presigned_put_url) {
+      setProgress('Uploading to storage…')
+      setPct(0)
+      await putWithProgress(upload.presigned_put_url, file, setPct)
+    }
+
+    setPct(null)
+    setProgress('Confirming upload…')
+    await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
+      blob_hash: blobHash,
+      // Empty string → omit, so the backend treats it as "no workflow".
+      workflow_id: wfValue || undefined,
+    })
+  }
+
+  // "Add without re-uploading": the bytes already exist in the org, so create
+  // the source and confirm against the known hash — no PUT, instant.
+  async function doRegisterExisting(file: File, blobHash: string) {
+    const type = file.type.startsWith('image/') ? 'image' : 'video'
+    setProgress('Creating data source…')
+    const { data: upload } = await client.post<UploadResponse>(
+      `/projects/${projectId}/data-sources`,
+      { type },
+    )
+    setProgress('Registering existing video…')
+    await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
+      blob_hash: blobHash,
+      workflow_id: wfValue || undefined,
+    })
+  }
+
+  function finishUpload() {
+    qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
+    setProgress(null)
+    setUploading(false)
+    setPct(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
   async function handleUpload(file: File) {
     setError(null)
     setUploading(true)
     setPct(null)
     try {
-      const type = file.type.startsWith('image/') ? 'image' : 'video'
-      setProgress('Creating data source…')
-      const { data: upload } = await client.post<UploadResponse>(
-        `/projects/${projectId}/data-sources`,
-        { type },
-      )
-
-      if (upload.presigned_put_url) {
-        setProgress('Uploading to storage…')
-        setPct(0)
-        await putWithProgress(upload.presigned_put_url, file, setPct)
-      }
-
-      setPct(null)
+      // Hash first so a duplicate is caught before any bytes go over the wire.
       setProgress('Computing hash…')
       const blobHash = `sha256:${await sha256Hex(file)}`
 
-      setProgress('Confirming upload…')
-      await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
-        blob_hash: blobHash,
-        // Empty string → omit, so the backend treats it as "no workflow".
-        workflow_id: wfValue || undefined,
-      })
+      setProgress('Checking for duplicates…')
+      const check = await checkDuplicate(projectId!, blobHash)
+      if (check.exists) {
+        // Pause the auto-flow and let the user decide (add / skip / close).
+        setDupPrompt({
+          file,
+          blobHash,
+          matches: check.matches,
+          inCurrentProject: check.in_current_project,
+        })
+        return
+      }
 
-      qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
-      setProgress(null)
+      await doFreshUpload(file, blobHash)
+      finishUpload()
     } catch (err: unknown) {
       setError((err as Error).message ?? 'Upload failed')
-    } finally {
       setUploading(false)
       setPct(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
 
+  async function handleAddExisting() {
+    if (!dupPrompt) return
+    const { file, blobHash } = dupPrompt
+    setDupPrompt(null)
+    try {
+      await doRegisterExisting(file, blobHash)
+      finishUpload()
+    } catch (err: unknown) {
+      setError((err as Error).message ?? 'Upload failed')
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  function dismissDupPrompt() {
+    setDupPrompt(null)
+    setUploading(false)
+    setPct(null)
+    setProgress(null)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
   const hasWorkflows = workflows && workflows.length > 0
+
+  const dupProjectNames =
+    dupPrompt &&
+    [...new Set(dupPrompt.matches.map(m => m.project_name))].join(', ')
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {dupPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-slate-800">
+                {dupPrompt.inCurrentProject
+                  ? 'Already in this project'
+                  : 'Duplicate video found'}
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                {dupPrompt.inCurrentProject ? (
+                  <>This video is already a data source in this project.</>
+                ) : (
+                  <>
+                    This exact video is already uploaded in{' '}
+                    <span className="font-medium text-slate-700">{dupProjectNames}</span>.
+                    Add it to this project without re-uploading?
+                  </>
+                )}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              {dupPrompt.inCurrentProject ? (
+                <>
+                  <Link
+                    to={`/projects/${dupPrompt.matches[0].project_id}/samples?source=${dupPrompt.matches[0].data_source_id}`}
+                    className="text-sm font-medium text-indigo-600 hover:text-indigo-700 px-4 py-2"
+                  >
+                    View it →
+                  </Link>
+                  <button
+                    onClick={dismissDupPrompt}
+                    className="text-sm font-medium text-slate-600 hover:text-slate-800 px-4 py-2 rounded-lg border border-slate-300"
+                  >
+                    Close
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={dismissDupPrompt}
+                    className="text-sm font-medium text-slate-600 hover:text-slate-800 px-4 py-2 rounded-lg border border-slate-300"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    onClick={handleAddExisting}
+                    className="text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg"
+                  >
+                    Add to this project
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
         <Link to={`/projects/${projectId}`} className="hover:text-indigo-600">Project</Link>
         <span>/</span>
