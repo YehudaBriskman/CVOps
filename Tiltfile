@@ -5,9 +5,9 @@
 #   • Stateful infra (postgres, redis, garage) → containers via docker_compose.
 #   • App code (api, frontend)                → host processes via local_resource
 #                                                (uvicorn --reload, npm run dev).
-#   • Edge nginx (container)                   → serves the placeholder index.html
-#                                                and proxies /api/v1 → host API, so
-#                                                the stack is browser-usable at
+#   • Edge nginx (container)                   → proxies / → host Vite dev (with
+#                                                HMR) and /api/v1 → host API, so
+#                                                the real app is browser-usable at
 #                                                http://localhost (and dev VMs).
 #   Vite also proxies /api/v1 → http://localhost:8000 for the React app.
 #
@@ -245,13 +245,13 @@ local_resource('frontend',
 )
 
 # ── Edge proxy (container) ──────────────────────────────────────────────────
-# nginx serves the placeholder index.html and proxies /api/v1 → host API. This
-# is what makes `tilt up` a one-stop, browser-usable stack at http://localhost
-# (and http://<dev-vm>:80 for VM-based devs). Swap the html mount for the
+# nginx proxies / → host Vite dev (with HMR) and /api/v1 → host API. This is
+# what makes `tilt up` a one-stop, browser-usable stack at http://localhost
+# (and http://<dev-vm>:80 for VM-based devs). Swap the Vite proxy for a static
 # frontend dist/ build later. Defined (profile-less) in docker-compose.yml.
 dc_resource('nginx',
     labels=['2-app'],
-    resource_deps=['api'],
+    resource_deps=['api', 'frontend'],
     links=[link('http://localhost', 'app (nginx)')],
 )
 

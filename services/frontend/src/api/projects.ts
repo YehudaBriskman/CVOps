@@ -7,6 +7,7 @@ export interface Project {
   name: string
   task_type: string
   default_ontology_id: string | null
+  default_ingest_workflow_id: string | null
   created_at: string
 }
 
@@ -45,7 +46,7 @@ export function useCreateProject() {
 export function useUpdateProject(id: string | undefined) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (body: { name?: string; task_type?: string }) => {
+    mutationFn: async (body: { name?: string; task_type?: string; default_ingest_workflow_id?: string | null }) => {
       const { data } = await client.patch<Project>(`/projects/${id}`, body)
       return data
     },

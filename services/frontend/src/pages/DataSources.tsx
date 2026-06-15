@@ -21,12 +21,18 @@ function useDataSources(projectId: string | undefined) {
       return data
     },
     enabled: !!projectId,
+    // While a source is mid-ingest, poll so the badge advances to `ingested`
+    // (set out-of-process by the extract_frames worker) without a manual refresh.
+    refetchInterval: (query) =>
+      query.state.data?.some(ds => ds.status === 'ingesting') ? 2000 : false,
   })
 }
 
 const STATUS_BADGE: Record<string, string> = {
-  pending:   'bg-amber-100 text-amber-700',
-  confirmed: 'bg-green-100 text-green-700',
+  pending:   'bg-slate-100 text-slate-500',
+  uploaded:  'bg-amber-100 text-amber-700',
+  ingesting: 'bg-blue-100 text-blue-700',
+  ingested:  'bg-green-100 text-green-700',
   failed:    'bg-red-100 text-red-700',
 }
 
@@ -37,6 +43,7 @@ export default function DataSources() {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [noIngestHint, setNoIngestHint] = useState(false)
 
   const { data: sources, isLoading } = useDataSources(projectId)
 
@@ -47,6 +54,7 @@ export default function DataSources() {
 
   async function handleUpload(file: File) {
     setError(null)
+    setNoIngestHint(false)
     setUploading(true)
     try {
       setProgress('Creating data source…')
@@ -65,9 +73,20 @@ export default function DataSources() {
       const blobHash = `sha256:${await sha256Hex(file)}`
 
       setProgress('Confirming upload…')
-      await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, { blob_hash: blobHash })
+      const { data: confirm } = await client.post<{ run_id: string | null }>(
+        `/data-sources/${upload.data_source.id}/confirm-upload`,
+        { blob_hash: blobHash },
+      )
 
       qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
+      if (confirm.run_id) {
+        // Ingest dispatched — frames will land in samples as the worker runs.
+        setProgress('Extracting frames…')
+        qc.invalidateQueries({ queryKey: ['samples', projectId] })
+      } else {
+        // No default ingest workflow set — make the empty-grid case explicit.
+        setNoIngestHint(true)
+      }
       setProgress(null)
     } catch (err: unknown) {
       setError((err as Error).message ?? 'Upload failed')
@@ -106,6 +125,13 @@ export default function DataSources() {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
           {error}
+        </div>
+      )}
+
+      {noIngestHint && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-4 py-3 mb-4">
+          No ingest workflow set — no frames will be extracted. Configure one in{' '}
+          <Link to={`/projects/${projectId}/settings`} className="underline font-medium">Settings</Link>.
         </div>
       )}
 
