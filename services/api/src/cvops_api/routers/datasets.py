@@ -33,6 +33,9 @@ from cvops_api.schemas.datasets import (
     DiffOut,
 )
 from cvops_api.schemas.samples import CursorPage
+from cvops_api.schemas.runs import RunOut, TrainCommitRequest
+from cvops_api.engine.coordinator import advance_workflow
+from cvops_api.engine.dispatch import create_adhoc_run
 
 router = APIRouter()
 
@@ -262,6 +265,73 @@ async def create_commit(
 
     await session.commit()
     return CommitOut.model_validate(commit)
+
+
+@router.post(
+    "/datasets/{id}/commits/{commit_id}/train",
+    response_model=RunOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def train_commit(
+    id: uuid.UUID,
+    commit_id: uuid.UUID,
+    body: TrainCommitRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> RunOut:
+    """Ad-hoc "Train this commit": bake a git_url/entry_point/hyperparams trainer
+    into an ephemeral export_yolo → train run scoped to this commit. No saved
+    Workflow and no pre-registered TrainingContainer required; the DAG rides
+    inline on the run's config and is advanced in-request.
+    """
+    r = await session.execute(select(Dataset).where(Dataset.id == id))
+    dataset = r.scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    await _check_project(dataset.project_id, current_user, session)
+
+    rc = await session.execute(
+        select(Commit).where(Commit.id == commit_id, Commit.dataset_id == dataset.id)
+    )
+    commit = rc.scalar_one_or_none()
+    if commit is None:
+        raise HTTPException(status_code=404, detail="Commit not found")
+
+    train_config: dict[str, Any] = {
+        "git_url": body.git_url,
+        "entry_point": body.entry_point,
+        "hyperparams": body.hyperparams or {},
+    }
+    if body.branch:
+        train_config["branch"] = body.branch
+
+    definition = {
+        "steps": [
+            {
+                "id": "export",
+                "type": "step.export_yolo",
+                "config": {},
+                "inputs": {"commit_id": str(commit_id)},
+            },
+            {
+                "id": "train",
+                "type": "step.train",
+                "config": train_config,
+                "inputs": {
+                    "export_blob_hash": "$steps.export.outputs.export_blob_hash",
+                    "commit_id": "$steps.export.outputs.commit_id",
+                },
+            },
+        ],
+        "edges": [{"from": "export", "to": "train"}],
+    }
+
+    run = await create_adhoc_run(
+        session, dataset.project_id, definition, {}, current_user.id
+    )
+    await advance_workflow(session, run.id, current_user.id)
+    await session.refresh(run)
+    return RunOut.model_validate(run)
 
 
 # ── Refs ──────────────────────────────────────────────────────────────────────

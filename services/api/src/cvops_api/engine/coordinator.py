@@ -118,16 +118,25 @@ async def advance_workflow(
         await session.commit()
         return
 
-    wf_result = await session.execute(
-        select(Workflow).where(Workflow.id == parent.workflow_id)
-    )
-    workflow = wf_result.scalar_one_or_none()
-    if workflow is None:
-        await _fail(session, parent, actor_id, "Workflow definition not found")
-        await session.commit()
-        return
+    # Ad-hoc runs (no saved Workflow) carry their DAG inline on the parent's
+    # config; saved workflow runs load it from the Workflow row.
+    if parent.workflow_id is None:
+        definition = (parent.config or {}).get("definition") or {}
+        if not definition:
+            await _fail(session, parent, actor_id, "Ad-hoc run has no definition")
+            await session.commit()
+            return
+    else:
+        wf_result = await session.execute(
+            select(Workflow).where(Workflow.id == parent.workflow_id)
+        )
+        workflow = wf_result.scalar_one_or_none()
+        if workflow is None:
+            await _fail(session, parent, actor_id, "Workflow definition not found")
+            await session.commit()
+            return
+        definition = workflow.definition or {}
 
-    definition = workflow.definition or {}
     steps_list = definition.get("steps", [])
     edges = definition.get("edges", [])
     steps_by_id = {s["id"]: s for s in steps_list}
