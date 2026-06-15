@@ -1,12 +1,16 @@
-import { useParams } from 'react-router-dom'
-import { useDataset, useCommits } from '../api/datasets'
+import { useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useDataset, useCommits, useReviewDataset } from '../api/datasets'
 import { CommitGraph } from '../components/dataset/CommitGraph'
 import { Breadcrumbs, Button, ErrorState, SkeletonList } from '../components/ui'
 
 export default function DatasetView() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const { data: dataset, isLoading, isError, refetch } = useDataset(id)
   const commitsQuery = useCommits(id)
+  const reviewDataset = useReviewDataset()
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   const commits = commitsQuery.data?.pages.flatMap((p) => p.items) ?? []
 
@@ -26,6 +30,19 @@ export default function DatasetView() {
     )
   }
 
+  const startReview = () => {
+    if (!id) return
+    setReviewError(null)
+    reviewDataset.mutate(id, {
+      onSuccess: ({ run_id }) => navigate(`/runs/${run_id}`),
+      onError: (err: unknown) => {
+        const msg = (err as { response?: { data?: { detail?: string } } })
+          ?.response?.data?.detail
+        setReviewError(msg ?? 'Could not start review')
+      },
+    })
+  }
+
   return (
     <div className="mx-auto max-w-5xl p-6">
       <Breadcrumbs
@@ -35,7 +52,15 @@ export default function DatasetView() {
         ]}
       />
 
-      <h2 className="mb-4 text-xl font-bold text-text-primary">{dataset.name}</h2>
+      <div className="flex items-start justify-between mb-4">
+        <h2 className="text-xl font-bold text-text-primary">{dataset.name}</h2>
+        <div className="flex flex-col items-end gap-1">
+          <Button onClick={startReview} loading={reviewDataset.isPending}>
+            Review in CVAT
+          </Button>
+          {reviewError && <p className="text-xs text-error">{reviewError}</p>}
+        </div>
+      </div>
 
       <CommitGraph datasetId={id} commits={commits} />
 

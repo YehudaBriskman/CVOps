@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, UTC
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
@@ -20,6 +21,7 @@ from cvops_api.db.models.runs import Run, Event
 from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
 from cvops_api.schemas.runs import RunCreate, RunOut, RunDetail, EventOut, GateResolve
+from cvops_api.schemas.samples import CursorPage
 
 router = APIRouter()
 
@@ -40,6 +42,53 @@ async def _check_project(
     if proj is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return proj
+
+
+@router.get("/projects/{project_id}/runs", response_model=CursorPage[RunOut])
+async def list_runs(
+    project_id: uuid.UUID,
+    status: str | None = Query(None),
+    cursor: str | None = Query(None),
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CursorPage[RunOut]:
+    """List the project's parent workflow runs, newest-first.
+
+    `Run.id` is a random UUID, so the repo's standard id-ascending cursor is not
+    chronological. We use a keyset cursor on `(created_at, id)` ordered DESC;
+    the cursor encodes `base64("<created_at_iso>|<id>")`.
+    """
+    await _check_project(project_id, current_user, session)
+
+    q = select(Run).where(
+        Run.project_id == project_id,
+        Run.parent_run_id == None,  # noqa: E711
+    )
+    if status is not None:
+        q = q.where(Run.status == status)
+    if cursor is not None:
+        ts_str, id_str = base64.b64decode(cursor).decode().split("|", 1)
+        cursor_ts = datetime.fromisoformat(ts_str)
+        cursor_id = uuid.UUID(id_str)
+        q = q.where(tuple_(Run.created_at, Run.id) < (cursor_ts, cursor_id))
+    q = q.order_by(Run.created_at.desc(), Run.id.desc()).limit(limit + 1)
+
+    result = await session.execute(q)
+    items = list(result.scalars().all())
+
+    next_cursor: str | None = None
+    if len(items) == limit + 1:
+        last = items[limit - 1]
+        next_cursor = base64.b64encode(
+            f"{last.created_at.isoformat()}|{last.id}".encode()
+        ).decode()
+        items = items[:limit]
+
+    return CursorPage(
+        items=[RunOut.model_validate(r) for r in items],
+        next_cursor=next_cursor,
+    )
 
 
 @router.post("/workflows/{workflow_id}/runs", response_model=RunOut, status_code=201)

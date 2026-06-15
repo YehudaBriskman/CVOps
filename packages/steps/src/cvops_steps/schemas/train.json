@@ -5,14 +5,27 @@
   "properties": {
     "training_container_id": {
       "type": "string", "format": "uuid",
-      "description": "UUID of the training_container whose ICD config drives the Docker run"
+      "description": "Optional UUID of a training_container whose icd_config maps hyperparams → env vars and declares the metrics/weights output paths. When omitted, hyperparams map to uppercased-key env vars and the default /output/metrics.json + /output/weights/ paths are used."
+    },
+    "git_url": {
+      "type": "string",
+      "description": "Git repository cloned per run; its entry_point is executed as the training command. Any trainer that reads DATASET_PATH/OUTPUT_DIR and writes metrics.json + weights works."
+    },
+    "branch": {
+      "type": "string",
+      "description": "Optional branch/tag/ref to check out. Defaults to the repository's default branch."
+    },
+    "entry_point": {
+      "type": "string",
+      "description": "Python script (relative to repo root) run as the training command. Defaults to train.py.",
+      "default": "train.py"
     },
     "hyperparams": {
       "type": "object",
-      "description": "Key/value pairs forwarded to the container via ICD inputs mapping",
+      "description": "Key/value pairs forwarded to the training command as env vars via icd_config.inputs (e.g. epochs, batch_size, seed).",
       "additionalProperties": { "type": ["string", "number", "boolean"] }
     }
   },
-  "required": ["training_container_id"],
+  "required": ["git_url"],
   "additionalProperties": false
 }

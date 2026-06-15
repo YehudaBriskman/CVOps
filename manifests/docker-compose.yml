@@ -108,6 +108,8 @@ services:
       REDIS_URL:       redis://redis:6379/0
       JWT_SECRET:      ${JWT_SECRET}
       WORKER_TOKEN:    ${WORKER_TOKEN}
+      # Verifies HMAC signatures on CVAT review-completion webhooks.
+      CVAT_WEBHOOK_SECRET: ${CVAT_WEBHOOK_SECRET}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
     profiles: ["app", "all"]
@@ -149,10 +151,14 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
       garage:   { condition: service_healthy }
+      mlflow:   { condition: service_healthy }
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       REDIS_URL:       redis://redis:6379/0
       REDIS_STREAM:    training
+      # train.py forwards this into the trainer subprocess; that's the whole
+      # executor-side wiring — the trainer logs to this server.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
       S3_ENDPOINT:     http://garage:3900
       S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
       S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
@@ -168,6 +174,11 @@ services:
       context: ../services/frontend
       dockerfile: Dockerfile
       target: production
+      # Vite env vars are baked at build time, so the MLflow origin must be a
+      # build arg (not a runtime env). The model page links the browser straight
+      # at this origin; default to the host-published :5000.
+      args:
+        VITE_MLFLOW_URL: ${VITE_MLFLOW_URL:-http://localhost:5000}
     restart: unless-stopped
     # nginx-unprivileged listens on 8080 (UID 101, no root anywhere)
     ports: ["3000:8080"]
@@ -192,6 +203,61 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
       # Placeholder static site. Swap for the frontend `dist/` build later.
       - ./nginx/html:/usr/share/nginx/html:ro,z
+
+  # ── MLflow tracking server ──────────────────────────────────────────────
+  # No profile: like nginx/garage-init, MLflow is part of the base stack so
+  # `tilt up` (which loads this compose file with no profiles) brings it up
+  # alongside the infra, and `--profile app/all` includes it too.
+
+  # One-shot, idempotent: create the `mlflow` database in the existing Postgres
+  # so MLflow's auto-managed tables never mix with the Alembic-managed `cvops`
+  # schema. Mirrors garage-init's run-once-then-exit shape.
+  mlflow-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        psql -h postgres -U ${POSTGRES_USER:-cvops} -d ${POSTGRES_DB:-cvops}
+        -tc "SELECT 1 FROM pg_database WHERE datname='mlflow'" | grep -q 1
+        || createdb -h postgres -U ${POSTGRES_USER:-cvops} mlflow
+
+  mlflow:
+    build:
+      context: ../services/mlflow
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:    { condition: service_healthy }
+      garage:      { condition: service_healthy }
+      mlflow-init: { condition: service_completed_successfully }
+    ports: ["5000:5000"]
+    environment:
+      # The server holds the S3 creds and proxies artifacts (--serve-artifacts),
+      # so the trainer and browser reach blobs *through* MLflow — they never need
+      # Garage creds themselves.
+      MLFLOW_S3_ENDPOINT_URL: http://garage:3900
+      AWS_ACCESS_KEY_ID:      ${GARAGE_DEFAULT_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY:  ${GARAGE_DEFAULT_SECRET_KEY}
+      AWS_DEFAULT_REGION:     garage
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      # Sync psycopg2 driver against the dedicated `mlflow` database.
+      - --backend-store-uri=postgresql://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      - --serve-artifacts
+      - --artifacts-destination=s3://${GARAGE_DEFAULT_BUCKET:-cvops-blobs}/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # ── External tools (Phase 2) ────────────────────────────────────────────
   # cvat:

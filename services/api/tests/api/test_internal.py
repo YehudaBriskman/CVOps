@@ -12,12 +12,20 @@ async fixtures are collected and driven by pytest-asyncio automatically.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import patch
 
 from cvops_api.routers import internal
+
+
+def _sign(secret: str, body: bytes) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -91,3 +99,53 @@ async def test_health_response_has_status_ok(client: AsyncClient) -> None:
     response = await client.get("/internal/health")
 
     assert response.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# CVAT webhook bridge — validates the HMAC signature and, on a job-completion
+# event, XADDs a {kind: cvat_sync} doorbell onto the cvat stream. fake_redis
+# (from the top-level conftest) replaces the process-global Redis.
+# ---------------------------------------------------------------------------
+
+
+async def test_webhook_missing_secret_503(client: AsyncClient, monkeypatch) -> None:
+    monkeypatch.delenv("CVAT_WEBHOOK_SECRET", raising=False)
+    resp = await client.post(
+        "/internal/cvat/webhook", content=b"{}", headers={"X-Signature-256": "sha256=x"}
+    )
+    assert resp.status_code == 503
+
+
+async def test_webhook_bad_signature_401(client: AsyncClient, monkeypatch) -> None:
+    monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")
+    resp = await client.post(
+        "/internal/cvat/webhook", content=b"{}", headers={"X-Signature-256": "sha256=deadbeef"}
+    )
+    assert resp.status_code == 401
+
+
+async def test_webhook_completion_enqueues(client: AsyncClient, fake_redis, monkeypatch) -> None:
+    monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")
+    body = json.dumps({"event": "update:job", "job": {"task_id": 4242, "state": "completed"}}).encode()
+    resp = await client.post(
+        "/internal/cvat/webhook", content=body, headers={"X-Signature-256": _sign("s3cret", body)}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"received": "queued"}
+
+    assert await fake_redis.xlen("cvat") == 1
+    _msg_id, fields = (await fake_redis.xrange("cvat"))[0]
+    assert fields == {"kind": "cvat_sync", "cvat_task_id": "4242"}
+
+
+async def test_webhook_non_completion_ignored(client: AsyncClient, fake_redis, monkeypatch) -> None:
+    monkeypatch.setenv("CVAT_WEBHOOK_SECRET", "s3cret")
+    body = json.dumps(
+        {"event": "update:job", "job": {"task_id": 4242, "state": "in progress"}}
+    ).encode()
+    resp = await client.post(
+        "/internal/cvat/webhook", content=body, headers={"X-Signature-256": _sign("s3cret", body)}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"received": "ignored"}
+    assert await fake_redis.xlen("cvat") == 0
