@@ -27,23 +27,23 @@ const STATUS_BORDER: Record<string, string> = {
 
 export function StepNode({ data }: NodeProps<StepNodeType>) {
   const accent = ACCENT[data.type_key] ?? 'bg-slate-500'
-  const border = STATUS_BORDER[data.status ?? ''] ?? 'border-slate-200'
+  const border = STATUS_BORDER[data.status ?? ''] ?? 'border-border'
 
   return (
-    <div className={`rounded-xl border-2 ${border} bg-white shadow-md w-44 overflow-hidden select-none`}>
-      <Handle type="target" position={Position.Left}  className="!w-3 !h-3 !bg-slate-300 !border-white" />
+    <div className={`rounded-xl border-2 ${border} bg-surface-2 shadow-md w-44 overflow-hidden select-none`}>
+      <Handle type="target" position={Position.Left}  className="!w-3 !h-3 !bg-text-muted !border-white" />
       <div className={`${accent} px-3 py-1.5`}>
         <span className="text-white text-[10px] font-bold tracking-widest uppercase">
           {data.type_key.replace('step.', '')}
         </span>
       </div>
       <div className="px-3 py-2.5">
-        <p className="text-sm font-semibold text-slate-800 leading-tight">{data.label}</p>
+        <p className="text-sm font-semibold text-text-primary leading-tight">{data.label}</p>
         {data.status && (
-          <span className="text-xs text-slate-500 capitalize mt-0.5 block">{data.status}</span>
+          <span className="text-xs text-text-secondary capitalize mt-0.5 block">{data.status}</span>
         )}
       </div>
-      <Handle type="source" position={Position.Right} className="!w-3 !h-3 !bg-slate-300 !border-white" />
+      <Handle type="source" position={Position.Right} className="!w-3 !h-3 !bg-text-muted !border-white" />
     </div>
   )
 }

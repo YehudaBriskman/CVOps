@@ -9,7 +9,7 @@ function ThumbnailCard({ sample, onOpen }: { sample: Sample; onOpen: () => void 
   return (
     <button
       onClick={onOpen}
-      className="aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-100 relative group focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      className="aspect-square rounded-lg overflow-hidden border border-border bg-surface-3 relative group focus:outline-none focus:ring-2 focus:ring-focus"
     >
       {data?.url ? (
         <img
@@ -20,7 +20,7 @@ function ThumbnailCard({ sample, onOpen }: { sample: Sample; onOpen: () => void 
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
-          <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
+          <div className="w-5 h-5 border-2 border-border-strong border-t-text-secondary rounded-full animate-spin" />
         </div>
       )}
       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
@@ -121,14 +121,14 @@ export function SampleGrid({ data, isLoading, hasNextPage, isFetchingNextPage, f
   const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   if (isLoading) {
-    return <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>
+    return <div className="text-center py-12 text-text-muted text-sm">Loading…</div>
   }
 
   if (samples.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-10 text-center">
-        <p className="text-sm font-medium text-slate-700">No samples yet</p>
-        <p className="text-xs text-slate-400 mt-1">Samples are extracted from uploaded videos</p>
+      <div className="bg-surface-2 rounded-xl border border-border shadow-sm p-10 text-center">
+        <p className="text-sm font-medium text-text-primary">No samples yet</p>
+        <p className="text-xs text-text-muted mt-1">Samples are extracted from uploaded videos</p>
       </div>
     )
   }
@@ -145,7 +145,7 @@ export function SampleGrid({ data, isLoading, hasNextPage, isFetchingNextPage, f
         <button
           onClick={() => fetchNextPage()}
           disabled={isFetchingNextPage}
-          className="mt-4 w-full border border-slate-300 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-60 transition-colors"
+          className="mt-4 w-full border border-border-strong text-text-secondary py-2 rounded-lg text-sm hover:bg-surface-3 disabled:opacity-60 transition-colors"
         >
           {isFetchingNextPage ? 'Loading…' : 'Load more'}
         </button>

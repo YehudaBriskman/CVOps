@@ -295,7 +295,7 @@ function FlowCanvas({ workflowId }: { workflowId: string }) {
         fitView
         fitViewOptions={{ padding: 0.3 }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#23262E" />
         <Controls />
         <MiniMap
           nodeColor={node => MINIMAP_COLORS[(node.data as StepNodeType['data']).type_key] ?? '#94a3b8'}
@@ -382,7 +382,7 @@ export default function WorkflowBuilder() {
         </ReactFlowProvider>
       )}
       {!workflow && (
-        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
+        <div className="flex-1 flex items-center justify-center text-text-muted text-sm">
           Loading workflow…
         </div>
       )}

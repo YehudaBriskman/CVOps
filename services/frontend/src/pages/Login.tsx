@@ -27,41 +27,41 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-surface-1 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <span className="text-4xl">◈</span>
-          <h1 className="text-2xl font-bold text-slate-800 mt-2">CVOps</h1>
-          <p className="text-slate-500 text-sm mt-1">Sign in to your workspace</p>
+          <h1 className="text-2xl font-bold text-text-primary mt-2">CVOps</h1>
+          <p className="text-text-secondary text-sm mt-1">Sign in to your workspace</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-surface-2 rounded-xl border border-border shadow-sm p-6 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+            <div className="bg-error/10 border border-error/30 text-error text-sm rounded-lg px-4 py-2">
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-text-primary mb-1">Email</label>
             <input
               type="email"
               required
               value={email}
               onChange={e => setEmail(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full border border-border-strong rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
               placeholder="you@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
+            <label className="block text-sm font-medium text-text-primary mb-1">Password</label>
             <input
               type="password"
               required
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full border border-border-strong rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
               placeholder="••••••••"
             />
           </div>
@@ -69,15 +69,15 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-60"
+            className="w-full bg-iris text-white py-2 rounded-lg text-sm font-medium hover:bg-iris-hover transition-colors disabled:opacity-60"
           >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
-        <p className="text-center text-sm text-slate-500 mt-4">
+        <p className="text-center text-sm text-text-secondary mt-4">
           No account?{' '}
-          <Link to="/register" className="text-indigo-600 hover:underline">Create one</Link>
+          <Link to="/register" className="text-iris-400 hover:underline">Create one</Link>
         </p>
       </div>
     </div>
