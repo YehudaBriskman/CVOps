@@ -226,6 +226,72 @@ async def test_confirm_with_default_workflow_dispatches_run(
     }
 
 
+async def test_confirm_with_explicit_workflow_id_dispatches(
+    factory, fake_redis, echo_step
+) -> None:
+    # Project has no default ingest workflow; the client chooses one at upload
+    # time by passing workflow_id.
+    user, project, ds = await _seed(factory, with_workflow=False)
+    async with factory() as s:
+        wf = Workflow(
+            project_id=project.id,
+            name=f"chosen-{uuid.uuid4().hex[:8]}",
+            definition=_INGEST_DEF,
+        )
+        s.add(wf)
+        await s.commit()
+        wf_id = wf.id
+
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload",
+            json={"blob_hash": _HASH_A, "workflow_id": str(wf_id)},
+        )
+
+    assert res.status_code == 200
+    run_id = res.json()["run_id"]
+    assert run_id is not None
+
+    async with factory() as s:
+        run = await s.get(Run, uuid.UUID(run_id))
+        assert run is not None
+        assert run.input_refs == {"params": {"source_id": str(ds.id)}}
+    assert await fake_redis.xlen(STREAM) == 1
+
+
+async def test_confirm_with_unknown_workflow_id_returns_404(factory) -> None:
+    user, _project, ds = await _seed(factory, with_workflow=False)
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload",
+            json={"blob_hash": _HASH_A, "workflow_id": str(uuid.uuid4())},
+        )
+    assert res.status_code == 404
+
+
+async def test_confirm_workflow_id_from_other_project_returns_404(factory) -> None:
+    # A workflow that exists but belongs to a different project must not be
+    # dispatchable here.
+    user, _project, ds = await _seed(factory, with_workflow=False)
+    _other_user, other_project, _ds2 = await _seed(factory, with_workflow=False)
+    async with factory() as s:
+        foreign = Workflow(
+            project_id=other_project.id,
+            name=f"foreign-{uuid.uuid4().hex[:8]}",
+            definition=_INGEST_DEF,
+        )
+        s.add(foreign)
+        await s.commit()
+        foreign_id = foreign.id
+
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload",
+            json={"blob_hash": _HASH_A, "workflow_id": str(foreign_id)},
+        )
+    assert res.status_code == 404
+
+
 async def test_confirm_is_idempotent(factory, fake_redis, echo_step) -> None:
     user, project, ds = await _seed(factory, with_workflow=True)
 

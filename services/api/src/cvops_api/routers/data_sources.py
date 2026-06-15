@@ -164,17 +164,26 @@ async def confirm_upload(
     ds.status = "uploaded"
     await session.commit()
 
-    # Backend-owned trigger: if the project designates a default ingest workflow,
-    # start it now with the data source as the run parameter.
+    # Backend-owned trigger: pick the workflow to run on this upload. A
+    # client-supplied workflow_id takes precedence (chosen at upload time);
+    # otherwise fall back to the project's configured default. None of either
+    # means "just store, no processing".
+    target_wf_id = body.workflow_id or proj.default_ingest_workflow_id
     run_id: uuid.UUID | None = None
-    if proj.default_ingest_workflow_id is not None:
+    if target_wf_id is not None:
         wf_r = await session.execute(
             select(Workflow).where(
-                Workflow.id == proj.default_ingest_workflow_id,
+                Workflow.id == target_wf_id,
+                Workflow.project_id == ds.project_id,
                 Workflow.deleted_at == None,  # noqa: E711
             )
         )
         wf = wf_r.scalar_one_or_none()
+        # An explicit, client-chosen workflow that doesn't resolve is a bad
+        # request; a stale project default is silently skipped (don't fail the
+        # upload over a misconfigured setting).
+        if wf is None and body.workflow_id is not None:
+            raise HTTPException(status_code=404, detail="Workflow not found")
         if wf is not None:
             run = await create_workflow_run(
                 session, wf, {"source_id": str(ds.id)}, current_user.id

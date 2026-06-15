@@ -3,6 +3,10 @@ import { Link, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import { sha256Hex } from '../lib/hash'
+import { putWithProgress } from '../lib/upload'
+import { INGEST_WORKFLOW_DEFINITION, INGEST_WORKFLOW_NAME } from '../lib/ingest'
+import { useProject } from '../api/projects'
+import { useWorkflows, useCreateWorkflow } from '../api/workflows'
 import {
   type DataSource,
   type UploadResponse,
@@ -148,14 +152,41 @@ export default function DataSources() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<string | null>(null)
+  // Upload fraction [0,1] during the direct-to-storage PUT, or null for the
+  // surrounding indeterminate phases (create / hash / confirm).
+  const [pct, setPct] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const { data: sources, isLoading } = useDataSources(projectId)
+  const { data: project } = useProject(projectId)
+  const { data: workflows } = useWorkflows(projectId)
   const deleteMutation = useDeleteDataSource(projectId)
+  const createWorkflow = useCreateWorkflow()
+
+  // Which workflow to run on the next upload. null = uninitialised; once the
+  // project loads we preselect its default ingest workflow (empty string means
+  // "just store, no processing"). The dropdown surfaces this choice instead of
+  // hiding it behind a project setting.
+  const [selectedWf, setSelectedWf] = useState<string | null>(null)
+  if (selectedWf === null && project) {
+    setSelectedWf(project.default_ingest_workflow_id ?? '')
+  }
+  const wfValue = selectedWf ?? ''
+
+  async function handleCreateIngestWorkflow() {
+    if (!projectId) return
+    const wf = await createWorkflow.mutateAsync({
+      projectId,
+      name: INGEST_WORKFLOW_NAME,
+      definition: INGEST_WORKFLOW_DEFINITION,
+    })
+    setSelectedWf(wf.id)
+  }
 
   async function handleUpload(file: File) {
     setError(null)
     setUploading(true)
+    setPct(null)
     try {
       const type = file.type.startsWith('image/') ? 'image' : 'video'
       setProgress('Creating data source…')
@@ -166,15 +197,20 @@ export default function DataSources() {
 
       if (upload.presigned_put_url) {
         setProgress('Uploading to storage…')
-        const put = await fetch(upload.presigned_put_url, { method: 'PUT', body: file })
-        if (!put.ok) throw new Error(`Upload failed: ${put.status}`)
+        setPct(0)
+        await putWithProgress(upload.presigned_put_url, file, setPct)
       }
 
+      setPct(null)
       setProgress('Computing hash…')
       const blobHash = `sha256:${await sha256Hex(file)}`
 
       setProgress('Confirming upload…')
-      await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, { blob_hash: blobHash })
+      await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
+        blob_hash: blobHash,
+        // Empty string → omit, so the backend treats it as "no workflow".
+        workflow_id: wfValue || undefined,
+      })
 
       qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
       setProgress(null)
@@ -182,9 +218,12 @@ export default function DataSources() {
       setError((err as Error).message ?? 'Upload failed')
     } finally {
       setUploading(false)
+      setPct(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
+
+  const hasWorkflows = workflows && workflows.length > 0
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -194,23 +233,72 @@ export default function DataSources() {
         <span className="text-slate-700 font-medium">Data Sources</span>
       </div>
 
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-start justify-between mb-4 gap-4">
         <h2 className="text-xl font-bold text-slate-800">Data Sources</h2>
-        <label className={`cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}>
-          {uploading ? (progress ?? 'Uploading…') : '+ Upload video or image'}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="video/*,image/*"
-            className="hidden"
-            disabled={uploading}
-            onChange={e => {
-              const file = e.target.files?.[0]
-              if (file) handleUpload(file)
-            }}
-          />
-        </label>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {hasWorkflows ? (
+              <select
+                value={wfValue}
+                onChange={e => setSelectedWf(e.target.value)}
+                disabled={uploading}
+                title="Workflow to run automatically when the upload finishes"
+                className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-60"
+              >
+                <option value="">Just store (no processing)</option>
+                {workflows.map(wf => (
+                  <option key={wf.id} value={wf.id}>Run: {wf.name}</option>
+                ))}
+              </select>
+            ) : (
+              <button
+                onClick={handleCreateIngestWorkflow}
+                disabled={createWorkflow.isPending}
+                title="Create a one-step workflow that extracts frames from uploads"
+                className="border border-indigo-300 text-indigo-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-indigo-50 disabled:opacity-60 transition-colors"
+              >
+                {createWorkflow.isPending ? 'Creating…' : '+ Add extract-frames workflow'}
+              </button>
+            )}
+            <label className={`cursor-pointer bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors whitespace-nowrap ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}>
+              {uploading ? (progress ?? 'Uploading…') : '+ Upload video or image'}
+              <input
+                ref={fileRef}
+                type="file"
+                accept="video/*,image/*"
+                className="hidden"
+                disabled={uploading}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) handleUpload(file)
+                }}
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-400">
+            {hasWorkflows
+              ? wfValue
+                ? 'The selected workflow runs automatically once the upload completes.'
+                : 'Uploads are stored only — no frames extracted.'
+              : 'No workflow yet — uploads are stored only until you add one.'}
+          </p>
+        </div>
       </div>
+
+      {uploading && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+            <span>{progress ?? 'Uploading…'}</span>
+            {pct !== null && <span>{Math.round(pct * 100)}%</span>}
+          </div>
+          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full bg-indigo-600 transition-all duration-150 ${pct === null ? 'animate-pulse w-full' : ''}`}
+              style={pct === null ? undefined : { width: `${Math.round(pct * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">

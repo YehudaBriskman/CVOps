@@ -2,21 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useProject, useUpdateProject, useDeleteProject } from '../api/projects'
 import { useWorkflows, useCreateWorkflow } from '../api/workflows'
-
-// One-click ingest workflow: a single extract_frames step whose source_id is
-// resolved from the run param the confirm-upload trigger passes. Matches
-// schemas/extract_frames.json (interval_seconds required).
-const INGEST_WORKFLOW_DEFINITION = {
-  steps: [
-    {
-      id: 'extract',
-      type: 'step.extract_frames',
-      config: { interval_seconds: 2 },
-      inputs: { source_id: '$run.params.source_id' },
-    },
-  ],
-  edges: [],
-}
+import { INGEST_WORKFLOW_DEFINITION, INGEST_WORKFLOW_NAME } from '../lib/ingest'
 
 export default function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
@@ -56,7 +42,7 @@ export default function ProjectSettings() {
     if (!id) return
     const wf = await createWorkflow.mutateAsync({
       projectId: id,
-      name: 'Extract frames',
+      name: INGEST_WORKFLOW_NAME,
       definition: INGEST_WORKFLOW_DEFINITION,
     })
     await handleSelectIngest(wf.id)

@@ -13,6 +13,11 @@ class DataSourceCreate(BaseModel):
 
 class DataSourceConfirm(BaseModel):
     blob_hash: str
+    # Optional per-upload override: dispatch this workflow on the freshly
+    # uploaded source instead of the project's default_ingest_workflow_id.
+    # Lets the client choose at upload time when no default is configured (or
+    # to pick a different one). Must belong to the same project.
+    workflow_id: uuid.UUID | None = None
 
 
 class DataSourceOut(BaseModel):
@@ -37,7 +42,8 @@ class UploadResponse(BaseModel):
 
 class ConfirmResponse(BaseModel):
     data_source: DataSourceOut
-    # Set when the project has a default_ingest_workflow_id and the backend
-    # auto-dispatched a run; None otherwise. Lets the client jump straight to
+    # Set when the backend auto-dispatched a run for this upload — either the
+    # client-supplied workflow_id or the project's default_ingest_workflow_id;
+    # None otherwise. Lets the client jump straight to
     # GET /runs/{id}/events/stream.
     run_id: uuid.UUID | None = None
