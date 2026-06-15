@@ -28,7 +28,7 @@ export default function Models() {
         <div className="space-y-2">
           {models.map((m) => (
             <Link key={m.id} to={`/models/${m.id}`}>
-              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-cobalt hover:shadow-md">
+              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-iris hover:shadow-md">
                 <div>
                   <p className="font-mono text-sm font-semibold text-text-primary">{m.id.slice(0, 8)}…</p>
                   <p className="mt-0.5 text-xs text-text-muted">

@@ -63,7 +63,7 @@ export default function Project() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {SECTIONS.map((s) => (
           <Link key={s.path} to={`/projects/${id}/${s.path}`}>
-            <Card className="p-5 transition-all hover:border-cobalt hover:shadow-md">
+            <Card className="p-5 transition-all hover:border-iris hover:shadow-md">
               <p className="text-sm font-semibold text-text-primary">{s.label}</p>
               <p className="mt-1 text-xs text-text-muted">{s.desc}</p>
             </Card>

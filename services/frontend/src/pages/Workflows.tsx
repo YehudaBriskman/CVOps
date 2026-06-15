@@ -54,7 +54,7 @@ export default function Workflows() {
         <div className="space-y-2">
           {workflows.map((wf) => (
             <Card key={wf.id} className="flex items-center justify-between px-5 py-4">
-              <Link to={`/workflows/${wf.id}`} className="flex-1 transition-colors hover:text-cobalt">
+              <Link to={`/workflows/${wf.id}`} className="flex-1 transition-colors hover:text-iris">
                 <p className="font-semibold text-text-primary">{wf.name}</p>
                 <p className="mt-0.5 text-xs text-text-muted">
                   v{wf.version} · {new Date(wf.created_at).toLocaleDateString()}

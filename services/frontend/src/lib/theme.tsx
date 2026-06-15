@@ -22,9 +22,10 @@ const STORAGE_KEY = 'cvops:theme'
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 function readStoredMode(): ThemeMode {
-  if (typeof window === 'undefined') return 'system'
+  // Dark-first: default to dark when the user hasn't chosen, rather than system.
+  if (typeof window === 'undefined') return 'dark'
   const v = window.localStorage.getItem(STORAGE_KEY)
-  return v === 'light' || v === 'dark' || v === 'system' ? v : 'system'
+  return v === 'light' || v === 'dark' || v === 'system' ? v : 'dark'
 }
 
 function systemPrefersDark(): boolean {
@@ -95,7 +96,7 @@ export function useTheme(): ThemeContextValue {
 export const themeBootScript = `(function () {
   try {
     var stored = localStorage.getItem('${STORAGE_KEY}');
-    var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+    var mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'dark';
     var resolved = mode === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
       : mode;

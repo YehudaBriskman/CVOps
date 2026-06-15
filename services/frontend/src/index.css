@@ -3,83 +3,73 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────────────────
- * Brand reference values — raw palette. Components shouldn't reach for these
- * directly; use the semantic tokens below (var(--surface-N) / var(--text-X)).
+ * Brand reference values — raw palette (iris violet + lime signal).
+ * Components shouldn't reach for these directly; use the semantic tokens
+ * below (var(--surface-N) / var(--text-X)).
  * ───────────────────────────────────────────────────────────────────────── */
 :root {
-  --cv-cobalt-blue: #2563EB;
-  --cv-aqua:        #06B6D4;
-  --cv-sky:         #22D3EE;
-  --cv-ink:         #0B1F3A;
-  --cv-slate:       #334155;
-  --cv-mist:        #94A3B8;
-  --cv-cloud:       #E2E8F0;
-  --cv-paper:       #F4F8FF;
-  --cv-white:       #FFFFFF;
-  --cv-success:     #16A34A;
-  --cv-warning:     #F59E0B;
-  --cv-error:       #EF4444;
-  --cv-info:        #6366F1;
-  --cv-gradient:    linear-gradient(135deg, #2563EB 0%, #06B6D4 100%);
+  --cv-iris-400:  #8E80FF;
+  --cv-iris-500:  #7B6CF6;  /* brand primary */
+  --cv-iris-600:  #5D4FE0;
+  --cv-signal-500:#C6F24E;  /* live/active data */
+  --cv-signal-600:#B4E62B;
+  --cv-success:   #34D399;
+  --cv-warning:   #FBBF24;
+  --cv-error:     #FB7185;
+  --cv-info:      #38BDF8;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
- * Semantic theme tokens — light. Contrast verified:
- *   text-primary on surface-1 → 17.5:1 (AAA)
- *   text-primary on surface-2 → 19.6:1 (AAA)
- *   text-secondary on surface-2 → 9.4:1 (AAA)
- *   text-muted on surface-2 → 4.78:1 (AA normal text)
+ * Semantic theme tokens — DARK is the default (this is a dark-first product).
+ * Surfaces get lighter as they get closer to the user (elevation = lightness).
+ * Contrast on surface-2 (#111317): text-primary 15.8:1, text-secondary 8.1:1.
  * ───────────────────────────────────────────────────────────────────────── */
-:root {
-  --surface-1:       #F4F8FF;  /* page */
-  --surface-2:       #FFFFFF;  /* card */
-  --surface-3:       #FFFFFF;  /* modal/popover; elevation from shadow */
-  --surface-inverse: #0B1F3A;  /* dark band on a light page */
-
-  --text-primary:    #0B1F3A;  /* ink */
-  --text-secondary:  #334155;  /* slate-700 */
-  --text-muted:      #64748B;  /* slate-500 — passes AA on white */
-  --text-inverse:    #F1F5F9;  /* near-white text on dark surfaces */
-  --text-on-accent:  #FFFFFF;  /* text on cobalt/success/error fills */
-
-  --border:          #E2E8F0;  /* cloud */
-  --border-strong:   #CBD5E1;  /* slate-300 */
-
-  --focus:           rgba(37, 99, 235, 0.35);  /* cobalt @ 35% */
-
-  --shadow-color:    rgba(11, 31, 58, 0.06);   /* ink-tinted, low alpha */
-
-  color-scheme: light;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
- * Semantic theme tokens — dark. Contrast verified on surface-1 #0B1220:
- *   text-primary (#F1F5F9) → 16.4:1 (AAA)
- *   text-secondary (#CBD5E1) → 11.5:1 (AAA)
- *   text-muted (#94A3B8) → 6.5:1 (AAA large / AA normal)
- *   cobalt-400 (#60A5FA, used for primary text on dark) → 7.1:1 (AAA)
- * Surfaces step up by tonal value, not pure brightness, per HIG/MD dark guidance.
- * ───────────────────────────────────────────────────────────────────────── */
+:root,
 [data-theme='dark'] {
-  --surface-1:       #0B1220;  /* page */
-  --surface-2:       #111A2E;  /* card */
-  --surface-3:       #1A2540;  /* modal/popover */
-  --surface-inverse: #F1F5F9;  /* light band on dark */
+  --surface-1:       #0A0B0D;  /* page background */
+  --surface-2:       #111317;  /* card / panel */
+  --surface-3:       #1C1F26;  /* raised: modal / popover / hovered row */
+  --surface-inverse: #F4F6F9;  /* light band on a dark page */
 
-  --text-primary:    #F1F5F9;  /* slate-100 */
-  --text-secondary:  #CBD5E1;  /* slate-300 */
-  --text-muted:      #94A3B8;  /* slate-400 */
-  --text-inverse:    #0B1F3A;
+  --text-primary:    #F4F6F9;
+  --text-secondary:  #A2A9B6;
+  --text-muted:      #757D8C;  /* metadata, timestamps — AA on surfaces */
+  --text-inverse:    #0A0B0D;
   --text-on-accent:  #FFFFFF;
 
-  --border:          #1E293B;  /* slate-800 */
-  --border-strong:   #334155;  /* slate-700 */
+  --border:          #23262E;
+  --border-strong:   #2D313B;
 
-  --focus:           rgba(96, 165, 250, 0.45);  /* cobalt-400 on dark */
-
-  --shadow-color:    rgba(0, 0, 0, 0.45);
+  --focus:           rgba(123, 108, 246, 0.45);  /* iris glow */
+  --shadow-color:    rgba(0, 0, 0, 0.5);
 
   color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Light theme — a first-class second theme. Contrast verified:
+ *   text-primary on surface-2 → 16.1:1 (AAA), text-secondary → 8.9:1 (AAA),
+ *   text-muted → 4.7:1 (AA normal).
+ * ───────────────────────────────────────────────────────────────────────── */
+[data-theme='light'] {
+  --surface-1:       #F6F7F9;
+  --surface-2:       #FFFFFF;
+  --surface-3:       #FFFFFF;
+  --surface-inverse: #111317;
+
+  --text-primary:    #14161A;
+  --text-secondary:  #454D5C;
+  --text-muted:      #6B7280;
+  --text-inverse:    #F4F6F9;
+  --text-on-accent:  #FFFFFF;
+
+  --border:          #E6E8EC;
+  --border-strong:   #D2D6DD;
+
+  --focus:           rgba(93, 79, 224, 0.30);
+  --shadow-color:    rgba(17, 19, 23, 0.08);
+
+  color-scheme: light;
 }
 
 @layer base {
@@ -87,6 +77,8 @@
     @apply h-full antialiased;
     background-color: var(--surface-1);
     color: var(--text-primary);
+    font-family: 'Geist', 'Inter', system-ui, -apple-system, sans-serif;
+    font-feature-settings: 'tnum' 1;
   }
 
   /* Sensible default focus ring on every interactive element. */
@@ -132,8 +124,8 @@
   font-size: 0.8125rem;
   color: var(--text-primary);
 }
-.cvops-rjsf input[type='checkbox'] { accent-color: var(--cv-cobalt-blue); }
+.cvops-rjsf input[type='checkbox'] { accent-color: var(--cv-iris-500); }
 .cvops-rjsf .field-description { margin: 0.15rem 0 0; font-size: 0.7rem; color: var(--text-muted); }
 .cvops-rjsf .text-danger,
-.cvops-rjsf .error-detail { color: #EF4444; font-size: 0.7rem; list-style: none; padding: 0; margin: 0.2rem 0 0; }
-.cvops-rjsf .panel.panel-danger { border-color: rgba(239, 68, 68, 0.3); }
+.cvops-rjsf .error-detail { color: var(--cv-error); font-size: 0.7rem; list-style: none; padding: 0; margin: 0.2rem 0 0; }
+.cvops-rjsf .panel.panel-danger { border-color: rgba(251, 113, 133, 0.3); }

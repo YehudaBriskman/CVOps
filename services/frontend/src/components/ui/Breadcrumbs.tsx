@@ -16,7 +16,7 @@ export function Breadcrumbs({ items, className }: { items: Crumb[]; className?: 
         <Fragment key={i}>
           {i > 0 && <span aria-hidden>/</span>}
           {c.to ? (
-            <Link to={c.to} className="hover:text-cobalt">
+            <Link to={c.to} className="hover:text-iris">
               {c.label}
             </Link>
           ) : (

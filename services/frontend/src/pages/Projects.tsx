@@ -73,7 +73,7 @@ export default function Projects() {
         <div className="grid gap-3">
           {projects.map((p) => (
             <Link key={p.id} to={`/projects/${p.id}`}>
-              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-cobalt hover:shadow-md">
+              <Card className="flex items-center justify-between px-5 py-4 transition-all hover:border-iris hover:shadow-md">
                 <div>
                   <p className="font-semibold text-text-primary">{p.name}</p>
                   <p className="mt-0.5 text-xs capitalize text-text-muted">{p.task_type}</p>

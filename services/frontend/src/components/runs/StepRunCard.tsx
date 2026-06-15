@@ -96,7 +96,7 @@ export function StepRunCard({ step, defaultOpen = false }: { step: RunStep; defa
                 href={step.cvat_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs text-cobalt-400 underline hover:opacity-80"
+                className="text-xs text-iris-400 underline hover:opacity-80"
               >
                 Open CVAT Task →
               </a>

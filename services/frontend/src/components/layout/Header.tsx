@@ -67,7 +67,7 @@ export function Header() {
         type="button"
         onClick={handleLogout}
         title={me?.email ?? 'Sign out'}
-        className="w-8 h-8 rounded-full bg-cobalt flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0 hover:opacity-80 transition-opacity"
+        className="w-8 h-8 rounded-full bg-iris flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0 hover:opacity-80 transition-opacity"
       >
         {initial}
       </button>

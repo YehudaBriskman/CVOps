@@ -38,7 +38,7 @@ export default function ModelDetail() {
           {weightsUrl && (
             <a
               href={weightsUrl.url}
-              className="rounded-lg bg-cobalt px-3 py-1.5 text-xs text-white transition-colors hover:bg-cobalt-hover"
+              className="rounded-lg bg-iris px-3 py-1.5 text-xs text-white transition-colors hover:bg-iris-hover"
             >
               Download weights
             </a>

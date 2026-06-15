@@ -172,7 +172,7 @@ export function CommandPalette() {
                 }}
                 className={cn(
                   'flex w-full items-center justify-between px-4 py-2 text-left text-sm',
-                  i === selected ? 'bg-cobalt/15 text-text-primary' : 'text-text-secondary',
+                  i === selected ? 'bg-iris/15 text-text-primary' : 'text-text-secondary',
                 )}
               >
                 <span className="truncate">{cmd.label}</span>
