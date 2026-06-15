@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cvops-worker"
+name = "cvops-worker-preprocessing"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-  "cvops-api",
-  "cvops-steps",
-  "celery[redis]>=5.4",
+  "cvops-api",    # settings, db session, registry, coordinator (process_step)
+  "cvops-steps",  # step implementations (extract_frames, …)
+  "redis>=5.0",   # stream consumer
 ]
 
 [tool.hatch.build.targets.wheel]

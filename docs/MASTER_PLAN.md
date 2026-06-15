@@ -1,8 +1,15 @@
 
 # CVOps — Master Plan
 
-**Status:** Living reference. Supersedes docs 01–10. Last updated: 2026-06-08.
+**Status:** Living reference. Supersedes docs 01–10. Last updated: 2026-06-11.
 **Audience:** Full team — Yehuda (substrate/versioning/orchestration), Nati/Yahav (steps: extract/label/export/train), Itai (executor).
+
+> **Rev 2026-06-11 — Architecture decisions locked in this revision:**
+> 1. `samples` table renamed to `data_items` with `item_type` + `metadata JSONB` — platform is now domain-agnostic (supports CV, RF, audio, etc.)
+> 2. Celery removed — replaced with Redis Streams (job wake-up) + PostgreSQL `runs` table (job state + queue). PG is source of truth; Redis is the fast signal.
+> 3. Single `worker` service split into three separate Docker services: `worker-preprocessing`, `worker-labeling`, `worker-training`. Docker socket moved to `worker-training` only.
+> 4. Redis Stream message format locked: thin message `{job_id, step_type, queue}` — workers fetch full job details from PG.
+> 5. New registry categories added: `annotation_type`, `thumbnail_generator`, `source_type`.
 
 ---
 
@@ -101,10 +108,11 @@ These are acceptance criteria for every implementation decision.
 | Frontend | Vite + React 18 + TypeScript (strict), TailwindCSS + shadcn/ui (Radix primitives), TanStack Query v5, Zustand, React Flow (@xyflow/react), react-jsonschema-form (@rjsf/core + @rjsf/tailwind + @rjsf/validator-ajv8), React Router v6, axios | |
 | Database | PostgreSQL 16 | |
 | Blob storage | MinIO on-prem (Phase 1); S3-compatible — swap to AWS S3 or GCS by changing one config line | Bucket: `cvops-blobs` |
-| Queue/cache/locks | Redis 7 | |
-| Workers | Celery (Phase 2+); Phase 1 uses synchronous in-process executor | |
+| Job queue | Redis 7 Streams — thin wake-up signal only (`{job_id, step_type, queue}`). Job state lives in PostgreSQL `runs` table, not Redis. | `XADD` / `XREADGROUP` / `XACK` |
+| Cache / locks | Redis 7 | Presigned URL cache, distributed locks (branch CAS), SSE pub/sub |
+| Workers | Three separate Docker services (Phase 2+); Phase 1 uses synchronous in-process executor via FastAPI `BackgroundTasks`. No Celery. | `worker-preprocessing`, `worker-labeling`, `worker-training` |
 | Annotation UI | CVAT self-hosted (Docker Compose service) | Phase 2 |
-| Training dispatch | Docker Python SDK (`docker.from_env()`) | Docker socket mounted into API container |
+| Training dispatch | Docker Python SDK (`docker.from_env()`) | Docker socket mounted into `worker-training` only — not the API |
 | Deployment | Docker Compose — single `docker compose up` | |
 | Blob key scheme | SHA-256, stored as `sha256:<hex>`, MinIO object path: `blobs/{hash[7:9]}/{hash[9:]}` | Two-char prefix sharding |
 
@@ -230,30 +238,52 @@ UNIQUE (org_id, name) WHERE deleted_at IS NULL
 #### `data_sources`
 ```sql
 -- G1 spine + project_id
-type            TEXT NOT NULL           -- "video" | "image_folder" | "external_uri"
-blob_hash       TEXT REFERENCES blobs(hash)         -- for uploaded files
-external_uri    TEXT                                -- for remote sources
+type            TEXT NOT NULL
+-- type is a registered source_type key, e.g.:
+--   "source.video"          video file (frames extracted by step.extract_frames)
+--   "source.image_folder"   flat folder of images
+--   "source.rf_capture"     RF IQ capture file (.bin, .sigmf, etc.)
+--   "source.audio"          audio file (.wav, .mp3, etc.)
+--   "source.external_uri"   remote URI, no blob upload
+-- type is validated against type_schemas at write time (category = 'source_type')
+blob_hash       TEXT REFERENCES blobs(hash)         -- for uploaded files; NULL for external_uri
+external_uri    TEXT                                -- for remote sources; NULL for uploaded files
 status          TEXT NOT NULL DEFAULT 'pending'
 -- status ∈ {pending, uploaded, ingesting, ingested, failed}
-metadata        JSONB NOT NULL DEFAULT '{}'  -- fps, duration, codec, frame_count, width, height
+metadata        JSONB NOT NULL DEFAULT '{}'         -- domain-specific: fps/codec for video, center_freq for RF, etc.
 ```
 `INDEX (project_id) WHERE deleted_at IS NULL`.
 
-#### `samples`
+#### `data_items`
+Replaces the former `samples` table. Domain-agnostic — stores one atomic data unit regardless of type.
+
 ```sql
 -- G1 spine + project_id
-blob_hash           TEXT NOT NULL REFERENCES blobs(hash)
-source_id           UUID NOT NULL REFERENCES data_sources(id)
-width               INTEGER NOT NULL
-height              INTEGER NOT NULL
-frame_index         INTEGER                -- NULL for non-video-derived samples
-perceptual_hash     TEXT                   -- phash algorithm; used for near-duplicate detection
-thumbnail_hash      TEXT REFERENCES blobs(hash)  -- 256×256 max JPEG, generated on ingest
-metadata            JSONB NOT NULL DEFAULT '{}'
-UNIQUE (project_id, blob_hash)             -- one sample per unique image within a project
+blob_hash       TEXT NOT NULL REFERENCES blobs(hash)
+source_id       UUID NOT NULL REFERENCES data_sources(id)
+item_type       TEXT NOT NULL
+-- item_type matches the source_type that produced it, e.g.:
+--   "image"       produced by source.video or source.image_folder
+--   "rf_frame"    produced by source.rf_capture
+--   "audio_seg"   produced by source.audio
+-- validated against type_schemas (category = 'source_type') at write time
+metadata        JSONB NOT NULL DEFAULT '{}'
+-- domain-specific fields stored here, NOT as columns:
+--   image:    {width, height, frame_index, perceptual_hash, thumbnail_hash}
+--   rf_frame: {sample_rate, center_freq_hz, bandwidth_hz, duration_ms, capture_offset_ms}
+--   audio_seg:{sample_rate, duration_ms, channels, segment_index}
+UNIQUE (project_id, blob_hash)    -- one item per unique byte sequence within a project
 ```
 `INDEX (project_id, source_id)`.
-`INDEX (project_id, perceptual_hash) WHERE deleted_at IS NULL`.
+`INDEX (project_id, item_type) WHERE deleted_at IS NULL`.
+
+**Thumbnail generation** is domain-driven. Each `item_type` has a registered `thumbnail_generator` in the registry:
+- `image` → resize to 256×256 JPEG (as before)
+- `rf_frame` → render spectrogram PNG
+- `audio_seg` → render waveform PNG
+- Default fallback → generic file-type icon blob
+
+Thumbnail blob hash is stored in `metadata.thumbnail_hash` (not a dedicated column).
 
 #### `ontologies`
 ```sql
@@ -285,16 +315,26 @@ id                  UUID PRIMARY KEY DEFAULT gen_random_uuid()
 created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 created_by          UUID NOT NULL REFERENCES users(id)
 project_id          UUID NOT NULL REFERENCES projects(id)
-sample_id           UUID NOT NULL REFERENCES samples(id)
+data_item_id        UUID NOT NULL REFERENCES data_items(id)   -- renamed from sample_id
 ontology_id         UUID NOT NULL REFERENCES ontologies(id)
 ontology_version    INTEGER NOT NULL
-revision_no         INTEGER NOT NULL       -- 1-based per sample; monotonically increasing
+annotation_type     TEXT NOT NULL
+-- annotation_type is a registered key, e.g.:
+--   "annotation.cv.detection"     bbox/polygon on an image
+--   "annotation.cv.segmentation"  pixel mask on an image
+--   "annotation.rf.burst_label"   time+freq region in an RF capture
+--   "annotation.audio.segment"    time region in an audio file
+-- validated against type_schemas (category = 'annotation_type') at write time
+-- payload schema is enforced per annotation_type
+revision_no         INTEGER NOT NULL       -- 1-based per data_item; monotonically increasing
 parent_revision_id  UUID REFERENCES annotation_revisions(id)  -- NULL for first revision
-payload             JSONB NOT NULL
+payload             JSONB NOT NULL         -- shape determined by annotation_type
 provenance          JSONB NOT NULL
 ```
 
-`payload` shape (array of annotation objects):
+`payload` shape varies by `annotation_type`. Examples:
+
+`annotation.cv.detection`:
 ```json
 [
   {
@@ -306,6 +346,21 @@ provenance          JSONB NOT NULL
     "attributes": {},
     "confidence": 0.92,
     "track_id": null
+  }
+]
+```
+
+`annotation.rf.burst_label`:
+```json
+[
+  {
+    "class_key": "signal.lte_uplink",
+    "freq_start_hz": 1920000000,
+    "freq_end_hz":   1980000000,
+    "time_start_ms": 12.4,
+    "time_end_ms":   18.7,
+    "confidence": 0.85,
+    "attributes": {}
   }
 ]
 ```
@@ -626,7 +681,7 @@ The API never proxies image bytes. Authorization is enforced at the API; bytes f
 **Upload flow:**
 1. `POST /projects/{id}/data-sources` — API creates a `data_sources` row, calls `storage.get_presigned_put()`, returns the presigned PUT URL.
 2. Client PUTs directly to MinIO.
-3. Client calls `POST /data-sources/{id}/confirm-upload` with the `blob_hash` it computed. API verifies, inserts/confirms `blobs` row.
+3. Client calls `POST /data-sources/{id}/confirm-upload` with the `blob_hash` it computed. The API promotes the upload to its content-addressed key (server-side copy), inserts the `blobs` row, sets the data source to `uploaded`, and (if the project has `default_ingest_workflow_id`) auto-dispatches that ingest workflow. The SHA-256 is verified lazily when `extract_frames` reads the bytes, not at confirm time.
 
 ### 7.3 MinIO Configuration
 
@@ -658,17 +713,45 @@ Every sample gets a thumbnail on ingest. Algorithm: `image.thumbnail((256, 256),
 
 All types are registered at API startup by calling `registry.register()` and are synced to the `type_schemas` table. The `GET /registry/types` endpoint exposes them to the UI.
 
+### ui_hints and ui_group
+
+Every registered type carries a `ui_hints` JSONB column in `type_schemas`. The `ui_group` field inside `ui_hints` controls how the workflow builder palette groups steps into sections. The frontend reads `ui_hints.group` and renders grouped, labelled sections — no hardcoded lists anywhere.
+
+```json
+// Example ui_hints on step.extract_frames:
+{
+  "group":       "Data Preprocessing",
+  "icon":        "video",
+  "description": "Extract frames from a video source at a configured interval",
+  "order":       1
+}
+```
+
+`GET /registry/types?category=step` returns all registered steps including `ui_hints`. The workflow builder palette is built entirely from this response.
+
+**Palette groups (current):**
+
+| group | Steps shown |
+|---|---|
+| `Data Preprocessing` | extract_frames, auto_label, denoise_rf (future), commit_dataset, export_yolo |
+| `Labeling` | human_review |
+| `Training` | train, evaluate |
+
+Adding a new step with a new `group` value creates a new palette section automatically.
+
 ### 8.1 Step Registry (`category = 'step'`)
 
-| type_key | config fields | inputs | outputs | Gate? |
-|---|---|---|---|---|
-| `step.extract_frames` | `interval_seconds: float`, `max_frames: int?`, `dedup_threshold: float?` | `source_id: str` | `sample_ids: str[]` | No |
-| `step.auto_label` | `model_version_id: str`, `confidence_threshold: float` | `sample_ids: str[]` | `annotation_revision_ids: str[]` | No |
-| `step.human_review` | `labeling_backend: str` (default "cvat"), `assignees: str[]?` | `annotation_revision_ids: str[]` | `annotation_revision_ids: str[]` | **Yes** |
-| `step.commit_dataset` | `dataset_name: str`, `branch_name: str`, `split_strategy: str` (default "by_source_group"), `train_ratio: float` (default 0.8), `val_ratio: float` (default 0.2), `ontology_id: str` | `sample_ids: str[]`, `annotation_revision_ids: str[]` | `commit_id: str`, `ref_id: str` | No |
-| `step.export_yolo` | `ontology_id: str?` | `commit_id: str` | `export_blob_hash: str` | No |
-| `step.train` | `training_container_id: str`, `hyperparams: object` | `export_blob_hash: str` | `model_version_id: str` | No |
-| `step.evaluate` | `eval_commit_id: str` | `model_version_id: str` | `metrics: object` | No (Phase 3) |
+Steps are routed to workers by a `queue` field on each step class. Workers only pick up jobs for their queue.
+
+| type_key | queue | ui_group | config fields | inputs | outputs | Gate? |
+|---|---|---|---|---|---|---|
+| `step.extract_frames` | `preprocessing` | Data Preprocessing | `interval_seconds: float`, `max_frames: int?`, `dedup_threshold: float?` | `source_id: str` | `data_item_ids: str[]` | No |
+| `step.auto_label` | `preprocessing` | Data Preprocessing | `model_version_id: str`, `confidence_threshold: float` | `data_item_ids: str[]` | `annotation_revision_ids: str[]` | No |
+| `step.commit_dataset` | `preprocessing` | Data Preprocessing | `dataset_name: str`, `branch_name: str`, `split_strategy: str`, `train_ratio: float`, `val_ratio: float`, `ontology_id: str` | `data_item_ids: str[]`, `annotation_revision_ids: str[]` | `commit_id: str`, `ref_id: str` | No |
+| `step.export_yolo` | `preprocessing` | Data Preprocessing | `ontology_id: str?` | `commit_id: str` | `export_blob_hash: str` | No |
+| `step.human_review` | `labeling` | Labeling | `labeling_backend: str` (default "cvat"), `assignees: str[]?` | `annotation_revision_ids: str[]` | `annotation_revision_ids: str[]` | **Yes** |
+| `step.train` | `training` | Training | `training_container_id: str`, `hyperparams: object` | `export_blob_hash: str` | `model_version_id: str` | No |
+| `step.evaluate` | `training` | Training | `eval_commit_id: str` | `model_version_id: str` | `metrics: object` | No (Phase 3) |
 
 ### 8.2 Exporter Registry (`category = 'exporter'`)
 
@@ -690,8 +773,8 @@ All types are registered at API startup by calling `registry.register()` and are
 
 | type_key | Behavior |
 |---|---|
-| `split_strategy.by_source_group` | Groups samples by `source_id`; assigns the entire group to one split using `sha256(source_id + dataset_id) % 100`. Enforced default for video-derived data. Prevents split leakage. |
-| `split_strategy.random_seeded` | Per-sample random assignment. Requires explicit opt-in with a UI warning about split leakage risk. |
+| `split_strategy.by_source_group` | Groups data_items by `source_id`; assigns the entire group to one split using `sha256(source_id + dataset_id) % 100`. Enforced default for video/capture-derived data. Prevents split leakage. |
+| `split_strategy.random_seeded` | Per-item random assignment. Requires explicit opt-in with a UI warning about split leakage risk. |
 
 ### 8.5 Merge Policy Registry (`category = 'merge_policy'`)
 
@@ -707,7 +790,42 @@ All types are registered at API startup by calling `registry.register()` and are
 |---|---|
 | `icd.training_container` | JSON Schema for `training_containers.icd_config`. Validated at every write to `training_containers`. |
 
-### 8.7 JSON Schema Files (location in repo)
+### 8.7 Annotation Type Registry (`category = 'annotation_type'`)
+
+Each `annotation_type` registers a JSON Schema. `annotation_revisions.payload` is validated against it at write time.
+
+| type_key | Domain | Payload shape |
+|---|---|---|
+| `annotation.cv.detection` | Computer Vision | `[{class_key, geometry: {type, coords}, confidence, attributes, track_id}]` |
+| `annotation.cv.segmentation` | Computer Vision | `[{class_key, mask_blob_hash, confidence, attributes}]` |
+| `annotation.rf.burst_label` | RF / SDR | `[{class_key, freq_start_hz, freq_end_hz, time_start_ms, time_end_ms, confidence}]` |
+| `annotation.audio.segment` | Audio | `[{class_key, time_start_ms, time_end_ms, confidence, attributes}]` |
+
+New domains add a new row here. Core code never changes.
+
+### 8.8 Source Type Registry (`category = 'source_type'`)
+
+Defines valid `data_sources.type` values and what `item_type` each source produces.
+
+| type_key | Produces item_type | Notes |
+|---|---|---|
+| `source.video` | `image` | frames extracted by `step.extract_frames` |
+| `source.image_folder` | `image` | images ingested directly |
+| `source.rf_capture` | `rf_frame` | IQ capture file (.bin, .sigmf) |
+| `source.audio` | `audio_seg` | audio file (.wav, .mp3) |
+| `source.external_uri` | any | remote URI, no blob upload |
+
+### 8.9 Thumbnail Generator Registry (`category = 'thumbnail_generator'`)
+
+One generator registered per `item_type`. Called at ingest time. Output blob hash stored in `data_items.metadata.thumbnail_hash`.
+
+| type_key | item_type | Output |
+|---|---|---|
+| `thumbnail.image` | `image` | 256×256 JPEG (LANCZOS resize) |
+| `thumbnail.rf_frame` | `rf_frame` | spectrogram PNG |
+| `thumbnail.audio_seg` | `audio_seg` | waveform PNG |
+
+### 8.10 JSON Schema Files (location in repo)
 
 ```
 packages/steps/src/cvops_steps/schemas/
@@ -716,6 +834,12 @@ packages/steps/src/cvops_steps/schemas/
   commit_dataset.json
   export_yolo.json
   train.json
+
+packages/api/src/cvops_api/schemas/annotation_types/
+  cv_detection.json
+  cv_segmentation.json
+  rf_burst_label.json
+  audio_segment.json
 ```
 
 These are loaded and registered at startup. They are also the source of truth for the UI config forms rendered via `react-jsonschema-form`.
@@ -749,9 +873,18 @@ class GateException(Exception):
         self.gate_data = gate_data
 
 class Step:
-    type_key: str = ""
-    config_schema: dict = {}
-    is_gate: bool = False
+    type_key:     str  = ""     # e.g. "step.extract_frames"
+    queue:        str  = ""     # "preprocessing" | "labeling" | "training"
+    config_schema: dict = {}    # JSON Schema — validated before run; also drives UI form
+    is_gate:      bool = False
+    ui_hints:     dict = {}
+    # ui_hints shape:
+    # {
+    #   "group":       "Data Preprocessing",  <- palette section in workflow builder
+    #   "icon":        "video",               <- icon name (from icon library)
+    #   "description": "Human-readable text shown in palette",
+    #   "order":       1                      <- sort order within the group
+    # }
 
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
         raise NotImplementedError
@@ -1610,7 +1743,7 @@ cvops/
 │   │           │       ├── blobs.py
 │   │           │       ├── auth.py      # Org, User, Membership, RefreshToken
 │   │           │       ├── projects.py  # Project, DataSource
-│   │           │       ├── samples.py   # Sample
+│   │           │       ├── data_items.py # DataItem (replaces Sample — domain-agnostic)
 │   │           │       ├── ontologies.py# Ontology, LabelClass
 │   │           │       ├── annotations.py # AnnotationRevision
 │   │           │       ├── versioning.py  # Dataset, Commit, CommitSample, Ref, ProjectDatasetLink
@@ -1643,23 +1776,43 @@ cvops/
 │   │               ├── executor.py      # execute_workflow(), resume_workflow()
 │   │               └── ref_resolver.py  # evaluates $steps.<id>.outputs.<name> references
 │   │
-│   ├── worker/                          # Celery (Phase 2)
-│   │   ├── Dockerfile
-│   │   ├── pyproject.toml               # celery, redis; depends on cvops_api + cvops_steps
-│   │   └── src/cvops_worker/
-│   │       ├── celery_app.py            # broker=redis, backend=redis, queues: default, gpu
-│   │       └── tasks.py                 # @app.task wrappers around execute_workflow
+│   ├── workers/                         # Phase 2 — three separate worker services
+│   │   │                                # all import from packages/steps (shared lib)
+│   │   │                                # all use same polling loop pattern
+│   │   │
+│   │   ├── preprocessing/               # handles: extract_frames, auto_label, commit_dataset, export_*
+│   │   │   ├── Dockerfile
+│   │   │   ├── pyproject.toml           # deps: asyncpg, redis, boto3; depends on cvops_steps
+│   │   │   └── src/cvops_worker_preprocessing/
+│   │   │       ├── main.py              # polling loop: SELECT FOR UPDATE SKIP LOCKED on runs table
+│   │   │       │                        # filters step_type IN ('step.extract_frames', 'step.auto_label', ...)
+│   │   │       └── consumer.py          # Redis Stream XREADGROUP consumer; on message → claim run in PG
+│   │   │
+│   │   ├── labeling/                    # handles: human_review (CVAT push/pull/webhook)
+│   │   │   ├── Dockerfile
+│   │   │   ├── pyproject.toml           # deps: asyncpg, redis, httpx; depends on cvops_steps
+│   │   │   └── src/cvops_worker_labeling/
+│   │   │       ├── main.py              # polling loop for labeling queue
+│   │   │       └── consumer.py          # Redis Stream consumer for labeling stream
+│   │   │
+│   │   └── training/                    # handles: train, evaluate
+│   │       ├── Dockerfile
+│   │       ├── pyproject.toml           # deps: asyncpg, redis, boto3, docker; depends on cvops_steps
+│   │       └── src/cvops_worker_training/
+│   │           ├── main.py              # polling loop for training queue
+│   │           └── consumer.py          # Redis Stream consumer for training stream
+│   │           # NOTE: this is the ONLY worker with Docker socket access
 │   │
-│   ├── steps/                           # Nati/Yahav domain (+ commit_dataset for Yehuda)
+│   ├── steps/                           # shared library — imported by all workers, NOT a running service
 │   │   ├── pyproject.toml               # depends on cvops_api (Step contract, StorageBackend, DB models)
 │   │   └── src/cvops_steps/
 │   │       ├── __init__.py              # register_all() — calls registry.register() for all steps
-│   │       ├── extract_frames.py
-│   │       ├── auto_label.py
-│   │       ├── human_review.py
-│   │       ├── commit_dataset.py
-│   │       ├── export_yolo.py
-│   │       ├── train.py
+│   │       ├── extract_frames.py        # queue = "preprocessing"
+│   │       ├── auto_label.py            # queue = "preprocessing"
+│   │       ├── human_review.py          # queue = "labeling"  (gate step)
+│   │       ├── commit_dataset.py        # queue = "preprocessing"
+│   │       ├── export_yolo.py           # queue = "preprocessing"
+│   │       ├── train.py                 # queue = "training"
 │   │       └── schemas/
 │   │           ├── extract_frames.json
 │   │           ├── auto_label.json
@@ -1784,21 +1937,59 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET}
       WORKER_TOKEN: ${WORKER_TOKEN}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
+    # NO docker socket here — training dispatch is worker-training's responsibility
 
-  worker:  # Phase 2
-    build: services/worker
-    depends_on: [api, redis]
+  # ── Workers (Phase 2) ───────────────────────────────────────────────────────
+  # Phase 1: steps run inside API via BackgroundTasks (no workers needed yet)
+  # Phase 2: uncomment workers below
+
+  worker-preprocessing:  # Phase 2
+    build: services/workers/preprocessing
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
     environment:
       DATABASE_URL: postgresql+asyncpg://cvops:${POSTGRES_PASSWORD}@postgres:5432/cvops
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      REDIS_STREAM: preprocessing
+      WORKER_TOKEN: ${WORKER_TOKEN}
+    deploy:
+      replicas: 2   # scale horizontally — PG SKIP LOCKED handles concurrency
+
+  worker-labeling:  # Phase 2
+    build: services/workers/labeling
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cvops:${POSTGRES_PASSWORD}@postgres:5432/cvops
+      REDIS_URL: redis://redis:6379/0
+      REDIS_STREAM: labeling
+      CVAT_URL: http://cvat:8080
+      CVAT_USERNAME: ${CVAT_USERNAME}
+      CVAT_PASSWORD: ${CVAT_PASSWORD}
+      WORKER_TOKEN: ${WORKER_TOKEN}
+
+  worker-training:  # Phase 2
+    build: services/workers/training
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cvops:${POSTGRES_PASSWORD}@postgres:5432/cvops
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      REDIS_STREAM: training
       WORKER_TOKEN: ${WORKER_TOKEN}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock  # ONLY this worker needs Docker socket
 
   frontend:
     build: services/frontend
@@ -1819,6 +2010,32 @@ volumes:
   minio_data:
   redis_data:
 ```
+
+**Redis Stream names (one per worker type):**
+```
+preprocessing   ← jobs for worker-preprocessing
+labeling        ← jobs for worker-labeling
+training        ← jobs for worker-training
+```
+
+**Redis Stream message format (thin — all state lives in PG):**
+```json
+{
+  "job_id":    "uuid of the runs row",
+  "step_type": "step.extract_frames",
+  "queue":     "preprocessing"
+}
+```
+Workers read `job_id`, look up full config and inputs from the `runs` row in PostgreSQL.
+
+**Orphan recovery** — on each worker startup and every 60 seconds:
+```sql
+SELECT id FROM runs
+WHERE status = 'pending'
+  AND step_type IN (<this worker's step types>)
+  AND created_at < now() - interval '30 seconds'
+```
+Re-enqueue any found jobs into the Redis Stream. Handles Redis restart/message loss.
 
 **API entrypoint script** (`services/api/entrypoint.sh`):
 ```sh

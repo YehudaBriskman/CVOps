@@ -25,8 +25,19 @@ class DataSourceOut(BaseModel):
     status: str
     metadata: dict[str, Any] | None = Field(None, alias="metadata_")
     created_at: datetime
+    # Populated only by the list endpoint (number of extracted frames for this
+    # source); None elsewhere to avoid an extra query on single-item responses.
+    sample_count: int | None = None
 
 
 class UploadResponse(BaseModel):
     data_source: DataSourceOut
     presigned_put_url: str | None = None
+
+
+class ConfirmResponse(BaseModel):
+    data_source: DataSourceOut
+    # Set when the project has a default_ingest_workflow_id and the backend
+    # auto-dispatched a run; None otherwise. Lets the client jump straight to
+    # GET /runs/{id}/events/stream.
+    run_id: uuid.UUID | None = None

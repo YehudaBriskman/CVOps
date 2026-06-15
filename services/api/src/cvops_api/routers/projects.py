@@ -13,7 +13,9 @@ from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
 from cvops_api.schemas.projects import ProjectCreate, ProjectUpdate, ProjectOut
 
-router = APIRouter(prefix="/projects")
+# main.py mounts this with prefix="/projects"; don't repeat it here or paths
+# double up to /projects/projects (matches the auth/orgs routers).
+router = APIRouter()
 
 
 async def _get_project(
@@ -89,6 +91,10 @@ async def update_project(
         proj.task_type = body.task_type
     if body.default_ontology_id is not None:
         proj.default_ontology_id = body.default_ontology_id
+    # Distinguish "omitted" from "explicit null" so the field can be cleared:
+    # an explicit null in the PATCH body unsets the default ingest workflow.
+    if "default_ingest_workflow_id" in body.model_fields_set:
+        proj.default_ingest_workflow_id = body.default_ingest_workflow_id
     if body.settings is not None:
         proj.settings = body.settings
     await session.flush()

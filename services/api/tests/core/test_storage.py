@@ -137,3 +137,110 @@ async def test_get_presigned_put_for_upload_returns_string() -> None:
 
     assert isinstance(url, str)
     assert "uploads/some-upload-id" in url
+
+
+async def test_promote_upload_copies_to_blob_key() -> None:
+    """promote_upload should server-side copy uploads/{id} → blobs/{hash} and
+    return (size, media_type, storage_key) without reading bytes through us."""
+    payload = b"a tiny fake video"
+    blob_hash = StorageBackend._sha256(payload)
+    expected_key = StorageBackend._bucket_key(blob_hash)
+
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            # Simulate the client's direct PUT to the transient uploads key.
+            backend._client.put_object(
+                Bucket=settings.S3_BUCKET,
+                Key="uploads/ds-1",
+                Body=payload,
+                ContentType="video/mp4",
+            )
+
+            size_bytes, media_type, storage_key = await backend.promote_upload(
+                "ds-1", blob_hash
+            )
+
+            assert size_bytes == len(payload)
+            assert media_type == "video/mp4"
+            assert storage_key == expected_key
+            # Bytes now live at the content-addressed key.
+            assert await backend.get_bytes(blob_hash) == payload
+
+
+async def test_presigned_url_uses_public_endpoint() -> None:
+    """Presigned URLs must be signed against S3_PUBLIC_ENDPOINT (browser-reachable),
+    not the internal S3_ENDPOINT."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e, patch.object(
+            settings, "S3_PUBLIC_ENDPOINT", "http://public-host:3900"
+        ):
+            backend = _mocked_backend()
+            put_url = await backend.get_presigned_put_for_upload("ds-1")
+            get_url = await backend.get_presigned_get("sha256:" + "a" * 64)
+
+    assert "public-host:3900" in put_url
+    assert "public-host:3900" in get_url
+
+
+async def test_presigned_url_honors_per_request_endpoint() -> None:
+    """A per-request endpoint (derived from the browser Host) overrides the
+    default signing host, so dev-VM uploads target the right address."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:  # S3_PUBLIC_ENDPOINT stays default (empty)
+            backend = _mocked_backend()
+            url = await backend.get_presigned_put_for_upload(
+                "ds-1", endpoint="http://dev-vm.example:3900"
+            )
+
+    assert "dev-vm.example:3900" in url
+
+
+def test_public_s3_endpoint_helper() -> None:
+    from cvops_api.core.storage import public_s3_endpoint
+
+    with patch.object(settings, "S3_PUBLIC_ENDPOINT", ""), patch.object(
+        settings, "S3_PUBLIC_PORT", 3900
+    ):
+        assert public_s3_endpoint("dev-vm") == "http://dev-vm:3900"
+        assert public_s3_endpoint(None) is None
+    with patch.object(settings, "S3_PUBLIC_ENDPOINT", "http://fixed:9000"):
+        assert public_s3_endpoint("dev-vm") == "http://fixed:9000"  # override wins
+
+
+async def test_ensure_cors_sets_bucket_rule() -> None:
+    """Instantiating the backend should install a permissive CORS rule allowing
+    cross-origin PUT (for direct browser uploads)."""
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            cors = backend._client.get_bucket_cors(Bucket=settings.S3_BUCKET)
+
+    rule = cors["CORSRules"][0]
+    assert "PUT" in rule["AllowedMethods"]
+    assert rule["AllowedOrigins"] == ["*"]
+
+
+async def test_promote_upload_idempotent() -> None:
+    """A second promote_upload for an already-registered blob must not error."""
+    payload = b"dup content"
+    blob_hash = StorageBackend._sha256(payload)
+
+    with mock_aws():
+        a, b, c, d, e = _moto_settings()
+        with a, b, c, d, e:
+            backend = _mocked_backend()
+            backend._client.put_object(
+                Bucket=settings.S3_BUCKET,
+                Key="uploads/ds-2",
+                Body=payload,
+                ContentType="application/octet-stream",
+            )
+            first = await backend.promote_upload("ds-2", blob_hash)
+            second = await backend.promote_upload("ds-2", blob_hash)
+
+    assert first == second

@@ -2,17 +2,31 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cvops_api.config import settings
 from cvops_api.core.auth import get_current_user
-from cvops_api.core.storage import get_storage
+from cvops_api.core.storage import get_storage, public_s3_endpoint
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
+from cvops_api.db.models.blobs import Blob
 from cvops_api.db.models.projects import Project
-from cvops_api.db.models.samples import DataSource
+from cvops_api.db.models.samples import DataSource, Sample
+from cvops_api.db.models.workflows import Workflow
+from cvops_api.engine.coordinator import advance_workflow
+from cvops_api.engine.dispatch import create_workflow_run
 from cvops_api.schemas.data_sources import (
+    ConfirmResponse,
     DataSourceCreate,
     DataSourceConfirm,
     DataSourceOut,
@@ -47,8 +61,28 @@ async def list_data_sources(
     session: AsyncSession = Depends(get_session),
 ) -> list[DataSourceOut]:
     await _check_project(project_id, current_user, session)
-    r = await session.execute(select(DataSource).where(DataSource.project_id == project_id))
-    return [DataSourceOut.model_validate(ds) for ds in r.scalars().all()]
+    r = await session.execute(
+        select(DataSource)
+        .where(DataSource.project_id == project_id)
+        .order_by(DataSource.created_at.desc())
+    )
+    sources = list(r.scalars().all())
+
+    # One grouped count instead of a per-source query, so the UI can show how
+    # many frames each source has produced (and detect "still processing").
+    counts_r = await session.execute(
+        select(Sample.source_id, func.count())
+        .where(Sample.project_id == project_id)
+        .group_by(Sample.source_id)
+    )
+    counts = {row[0]: row[1] for row in counts_r.all()}
+
+    out: list[DataSourceOut] = []
+    for ds in sources:
+        item = DataSourceOut.model_validate(ds)
+        item.sample_count = counts.get(ds.id, 0)
+        out.append(item)
+    return out
 
 
 @router.post(
@@ -59,6 +93,7 @@ async def list_data_sources(
 async def create_data_source(
     project_id: uuid.UUID,
     body: DataSourceCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> UploadResponse:
@@ -76,7 +111,11 @@ async def create_data_source(
 
     put_url: str | None = None
     if body.type != "external_uri":
-        put_url = await get_storage().get_presigned_put_for_upload(str(ds.id))
+        # Sign against the host the browser used so the direct upload is reachable.
+        endpoint = public_s3_endpoint(request.url.hostname)
+        put_url = await get_storage().get_presigned_put_for_upload(
+            str(ds.id), endpoint=endpoint
+        )
 
     await session.commit()
     return UploadResponse(
@@ -85,23 +124,69 @@ async def create_data_source(
     )
 
 
-@router.post("/data-sources/{id}/confirm-upload", response_model=DataSourceOut)
+@router.post("/data-sources/{id}/confirm-upload", response_model=ConfirmResponse)
 async def confirm_upload(
     id: uuid.UUID,
     body: DataSourceConfirm,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
-) -> DataSourceOut:
+) -> ConfirmResponse:
     r = await session.execute(select(DataSource).where(DataSource.id == id))
     ds = r.scalar_one_or_none()
     if ds is None:
         raise HTTPException(status_code=404, detail="DataSource not found")
-    await _check_project(ds.project_id, current_user, session)
+    proj = await _check_project(ds.project_id, current_user, session)
+
+    # Idempotent: a re-sent confirm must not register the blob twice or dispatch
+    # a duplicate run.
+    if ds.status != "pending":
+        return ConfirmResponse(data_source=DataSourceOut.model_validate(ds))
+
+    # Promote the finished upload to its content-addressed location (server-side
+    # copy — no bytes through the API) and register the blob row. ON CONFLICT
+    # DO NOTHING because identical content may already be registered.
+    size_bytes, media_type, storage_key = await get_storage().promote_upload(
+        str(ds.id), body.blob_hash
+    )
+    await session.execute(
+        pg_insert(Blob)
+        .values(
+            hash=body.blob_hash,
+            storage_backend=settings.S3_BACKEND,
+            storage_key=storage_key,
+            size_bytes=size_bytes,
+            media_type=media_type,
+        )
+        .on_conflict_do_nothing(index_elements=["hash"])
+    )
 
     ds.blob_hash = body.blob_hash
-    ds.status = "confirmed"
+    ds.status = "uploaded"
     await session.commit()
-    return DataSourceOut.model_validate(ds)
+
+    # Backend-owned trigger: if the project designates a default ingest workflow,
+    # start it now with the data source as the run parameter.
+    run_id: uuid.UUID | None = None
+    if proj.default_ingest_workflow_id is not None:
+        wf_r = await session.execute(
+            select(Workflow).where(
+                Workflow.id == proj.default_ingest_workflow_id,
+                Workflow.deleted_at == None,  # noqa: E711
+            )
+        )
+        wf = wf_r.scalar_one_or_none()
+        if wf is not None:
+            run = await create_workflow_run(
+                session, wf, {"source_id": str(ds.id)}, current_user.id
+            )
+            run_id = run.id
+            # Synchronous, fast: creates the first child step runs and rings
+            # their Redis queues. A worker picks them up out-of-process.
+            await advance_workflow(session, run.id, current_user.id)
+
+    return ConfirmResponse(
+        data_source=DataSourceOut.model_validate(ds), run_id=run_id
+    )
 
 
 @router.get("/data-sources/{id}", response_model=DataSourceOut)
@@ -116,6 +201,28 @@ async def get_data_source(
         raise HTTPException(status_code=404, detail="DataSource not found")
     await _check_project(ds.project_id, current_user, session)
     return DataSourceOut.model_validate(ds)
+
+
+@router.get("/data-sources/{id}/url")
+async def get_data_source_url(
+    id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    """Presigned GET URL for the source's raw blob so the browser can preview
+    the original video/image directly from object storage (no bytes via API)."""
+    r = await session.execute(select(DataSource).where(DataSource.id == id))
+    ds = r.scalar_one_or_none()
+    if ds is None:
+        raise HTTPException(status_code=404, detail="DataSource not found")
+    await _check_project(ds.project_id, current_user, session)
+    if ds.blob_hash is None:
+        raise HTTPException(status_code=404, detail="Data source has no uploaded blob")
+    url = await get_storage().get_presigned_get(
+        ds.blob_hash, endpoint=public_s3_endpoint(request.url.hostname)
+    )
+    return {"url": url}
 
 
 @router.delete("/data-sources/{id}", status_code=status.HTTP_204_NO_CONTENT)

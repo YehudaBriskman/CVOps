@@ -2,11 +2,10 @@
 deployer.py — Deploy a YOLO .pt model to CVAT via Nuclio.
 
 Flow:
-  1. Ensure base image exists (built once from nuclio_base/)
-  2. Extract class labels from the .pt file
-  3. Build thin model image: base + model.pt
-  4. Generate function.yaml with correct labels
-  5. nuctl deploy --run-image → model visible in CVAT
+  1. Extract class labels from the .pt file
+  2. Write model.pt + handler (main.py) into a temp build context
+  3. Generate function.yaml with baseImage + pip-install directives
+  4. nuctl deploy --path <context> → Nuclio builds image and registers function in CVAT
 """
 
 import json
@@ -17,16 +16,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import docker
 from ultralytics import YOLO
 
 CVAT_NETWORK = os.environ.get("CVAT_NETWORK",              "cvat_cvat")
 REDIS_HOST   = os.environ.get("CVAT_FUNCTIONS_REDIS_HOST", "cvat_redis_ondisk")
 REDIS_PORT   = os.environ.get("CVAT_FUNCTIONS_REDIS_PORT", "6666")
-BASE_IMAGE   = os.environ.get("YOLO_BASE_IMAGE",           "cvat/yolo-base:latest")
+BASE_IMAGE   = os.environ.get("YOLO_BASE_IMAGE",           "python:3.9-slim")
 NUCTL        = os.environ.get("NUCTL_PATH",                "/usr/local/bin/nuctl")
 
-_NUCLIO_BASE_DIR = Path(__file__).parent / "nuclio_base"
+_HANDLER_SRC = Path(__file__).parent / "nuclio_base" / "main.py"
 
 
 def _slugify(name: str) -> str:
@@ -35,33 +33,12 @@ def _slugify(name: str) -> str:
     return f"pth-custom-{slug}"
 
 
-def _ensure_base_image() -> None:
-    client = docker.from_env()
-    try:
-        client.images.get(BASE_IMAGE)
-    except docker.errors.ImageNotFound:
-        client.images.build(path=str(_NUCLIO_BASE_DIR), tag=BASE_IMAGE, rm=True)
-
-
 def _extract_labels(pt_path: Path) -> list[dict]:
     model = YOLO(str(pt_path))
     return [{"id": int(k), "name": v} for k, v in sorted(model.names.items())]
 
 
-def _build_model_image(pt_path: Path, image_tag: str) -> None:
-    dockerfile = (
-        f"FROM {BASE_IMAGE}\n"
-        "COPY model.pt /opt/nuclio/model.pt\n"
-        "ENV MODEL_PATH=/opt/nuclio/model.pt\n"
-    )
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        shutil.copy2(pt_path, tmp_path / "model.pt")
-        (tmp_path / "Dockerfile").write_text(dockerfile)
-        docker.from_env().images.build(path=str(tmp_path), tag=image_tag, rm=True)
-
-
-def _generate_function_yaml(func_name: str, display_name: str, labels: list[dict], image_tag: str) -> str:
+def _generate_function_yaml(func_name: str, display_name: str, labels: list[dict]) -> str:
     spec = json.dumps(labels)
     return f"""metadata:
   name: {func_name}
@@ -76,6 +53,33 @@ spec:
   description: {display_name} YOLO detector
   runtime: python:3.9
   handler: main:handler
+  eventTimeout: 30s
+
+  build:
+    baseImage: {BASE_IMAGE}
+    directives:
+      preCopy:
+        - kind: RUN
+          value: apt-get update && apt-get install -y --no-install-recommends libxcb1 libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+        - kind: RUN
+          value: pip install --no-cache-dir ultralytics pillow numpy
+      postCopy:
+        - kind: ENV
+          value: MODEL_PATH=/opt/nuclio/model.pt
+
+  triggers:
+    myHttpTrigger:
+      maxWorkers: 1
+      kind: http
+      workerAvailabilityTimeoutMilliseconds: 10000
+      attributes:
+        maxRequestBodySize: 33554432
+
+  resources:
+    requests:
+      memory: 512Mi
+    limits:
+      memory: 2048Mi
 
 platform:
   attributes:
@@ -83,46 +87,42 @@ platform:
       name: always
       maximumRetryCount: 3
     mountMode: volume
-
-build:
-  image: {image_tag}
-  codeEntryType: image
-
-triggers:
-  myHttpTrigger:
-    maxWorkers: 1
-    kind: http
-    workerAvailabilityTimeoutMilliseconds: 10000
-    attributes:
-      maxRequestBodySize: 33554432
-
-resources:
-  requests:
-    memory: 512Mi
-  limits:
-    memory: 2048Mi
 """
+
+
+def _ensure_project() -> None:
+    result = subprocess.run(
+        [NUCTL, "get", "project", "cvat", "--platform", "local"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        subprocess.run(
+            [NUCTL, "create", "project", "cvat", "--platform", "local"],
+            capture_output=True, text=True, check=True,
+        )
 
 
 def deploy(pt_path: Path, model_name: str) -> str:
     """Deploy a YOLO .pt to Nuclio. Returns the function name."""
     func_name = _slugify(model_name)
-    image_tag = f"cvat/{func_name}:latest"
-
-    _ensure_base_image()
     labels = _extract_labels(pt_path)
-    _build_model_image(pt_path, image_tag)
+    _ensure_project()
 
     with tempfile.TemporaryDirectory() as tmp:
-        yaml_path = Path(tmp) / "function.yaml"
-        yaml_path.write_text(_generate_function_yaml(func_name, model_name, labels, image_tag))
+        tmp_path = Path(tmp)
+        # Build context: handler + model file
+        shutil.copy2(_HANDLER_SRC, tmp_path / "main.py")
+        shutil.copy2(pt_path, tmp_path / "model.pt")
+
+        yaml_path = tmp_path / "function.yaml"
+        yaml_path.write_text(_generate_function_yaml(func_name, model_name, labels))
 
         result = subprocess.run(
             [
                 NUCTL, "deploy", func_name,
                 "--project-name", "cvat",
                 "--platform", "local",
-                "--run-image", image_tag,
+                "--path", str(tmp_path),
                 "--file", str(yaml_path),
                 "--env", f"CVAT_FUNCTIONS_REDIS_HOST={REDIS_HOST}",
                 "--env", f"CVAT_FUNCTIONS_REDIS_PORT={REDIS_PORT}",

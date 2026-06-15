@@ -74,8 +74,7 @@ services:
   #
   # Profiles:
   #   (default, no profile) → infra only (postgres, redis, garage). Tilt uses this.
-  #   --profile app         → api + frontend + nginx (production-target builds)
-  #   --profile worker      → celery async worker
+  #   --profile app         → api + frontend + nginx + worker-preprocessing (prod-target builds)
   #   --profile all         → everything
   #
   # For dev-target container builds, layer docker-compose.dev.yml on top:
@@ -85,6 +84,10 @@ services:
       context: ../services/api
       dockerfile: Dockerfile
       target: production
+      # cvops-steps is a sibling package; expose it as a named build context so
+      # the image's step registry is populated (see services/api/Dockerfile).
+      additional_contexts:
+        steps: ../packages/steps
     restart: unless-stopped
     ports: ["8000:8000"]
     depends_on:
@@ -94,6 +97,10 @@ services:
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       S3_ENDPOINT:     http://garage:3900
+      # Presign host is derived per-request from the browser's Host header, so
+      # uploads work from localhost and dev VMs alike. Set PUBLIC_HOST only to
+      # force a fixed host (otherwise this stays empty → dynamic).
+      S3_PUBLIC_ENDPOINT: ${PUBLIC_HOST:+http://${PUBLIC_HOST}:3900}
       S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
       S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
       S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
@@ -105,26 +112,55 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  # required for step.train Docker dispatch
     profiles: ["app", "all"]
 
-  worker:  # Celery async workers (formerly the "phase2" service)
+  worker-preprocessing:  # Redis-Streams preprocessing worker (extract_frames, …)
     build:
-      context: ../services/worker
-      dockerfile: Dockerfile
+      # Repo root: the worker image installs the sibling cvops-api + cvops-steps
+      # packages, which live outside services/worker-preprocessing.
+      context: ..
+      dockerfile: services/worker-preprocessing/Dockerfile
     restart: unless-stopped
-    # Worker consumes jobs from redis; it doesn't call the api. Combine with
-    # `--profile app --profile worker` if you want both running together.
+    # Consumes the `preprocessing` stream and writes directly to PG + Garage —
+    # it never calls the API. In the app/all profiles so the ingest flow works
+    # end-to-end under `--profile app`.
     depends_on:
-      redis: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      garage:   { condition: service_healthy }
+      redis:    { condition: service_healthy }
     environment:
       DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
       REDIS_URL:       redis://redis:6379/0
+      REDIS_STREAM:    preprocessing
       S3_ENDPOINT:     http://garage:3900
       S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
       S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
       S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
       S3_REGION:       garage
       WORKER_TOKEN:    ${WORKER_TOKEN}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      replicas: 2   # SELECT FOR UPDATE SKIP LOCKED makes this concurrency-safe
+    profiles: ["app", "all"]
+
+  worker-training:
+    build:
+      context: ..
+      dockerfile: services/worker-training/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      garage:   { condition: service_healthy }
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      REDIS_URL:       redis://redis:6379/0
+      REDIS_STREAM:    training
+      S3_ENDPOINT:     http://garage:3900
+      S3_ACCESS_KEY:   ${GARAGE_DEFAULT_ACCESS_KEY}
+      S3_SECRET_KEY:   ${GARAGE_DEFAULT_SECRET_KEY}
+      S3_BUCKET:       ${GARAGE_DEFAULT_BUCKET:-cvops-blobs}
+      S3_REGION:       garage
+      WORKER_TOKEN:    ${WORKER_TOKEN}
+      API_BASE_URL:    http://api:8000
+      DOCKER_TIMEOUT:  "7200"
     profiles: ["worker", "all"]
 
   frontend:
@@ -140,18 +176,22 @@ services:
     profiles: ["app", "all"]
 
   nginx:
-    # Rootless nginx: UID 101, listens on 8080 (no root in this container)
+    # Rootless nginx: UID 101, listens on 8080 (no root in this container).
+    # No profile: it's part of the base stack so `tilt up` (which loads only
+    # this compose file, no profiles) brings it up alongside the infra. It
+    # proxies /api/v1 to the host API (see nginx.conf), so it needs no api
+    # container — host.docker.internal resolves via the host-gateway alias.
     image: nginxinc/nginx-unprivileged:1.27-alpine
     restart: unless-stopped
     ports: ["80:8080"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      # `:z` lets the SELinux-labeled host file be readable inside the container
+      # `:z` lets the SELinux-labeled host files be readable inside the container
       # on Fedora/RHEL hosts. No-op on Ubuntu/macOS.
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
-    depends_on:
-      - api
-      - frontend
-    profiles: ["app", "all"]
+      # Placeholder static site. Swap for the frontend `dist/` build later.
+      - ./nginx/html:/usr/share/nginx/html:ro,z
 
   # ── External tools (Phase 2) ────────────────────────────────────────────
   # cvat:

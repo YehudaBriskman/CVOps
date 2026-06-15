@@ -4,12 +4,12 @@ import base64
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
-from cvops_api.core.storage import get_storage
+from cvops_api.core.storage import get_storage, public_s3_endpoint
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
@@ -100,6 +100,7 @@ async def get_sample(
 @router.get("/samples/{id}/image-url")
 async def get_image_url(
     id: uuid.UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -108,13 +109,16 @@ async def get_image_url(
     if s is None:
         raise HTTPException(status_code=404, detail="Sample not found")
     await _check_project(s.project_id, current_user, session)
-    url = await get_storage().get_presigned_get(s.blob_hash)
+    url = await get_storage().get_presigned_get(
+        s.blob_hash, endpoint=public_s3_endpoint(request.url.hostname)
+    )
     return {"url": url}
 
 
 @router.get("/samples/{id}/thumbnail-url")
 async def get_thumbnail_url(
     id: uuid.UUID,
+    request: Request,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
@@ -125,7 +129,9 @@ async def get_thumbnail_url(
     await _check_project(s.project_id, current_user, session)
     if s.thumbnail_hash is None:
         raise HTTPException(status_code=404, detail="No thumbnail")
-    url = await get_storage().get_presigned_get(s.thumbnail_hash)
+    url = await get_storage().get_presigned_get(
+        s.thumbnail_hash, endpoint=public_s3_endpoint(request.url.hostname)
+    )
     return {"url": url}
 
 

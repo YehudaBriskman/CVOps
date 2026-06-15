@@ -9,6 +9,17 @@ COPY src/ src/
 RUN pip install --no-cache-dir hatchling && \
     pip install --no-cache-dir -e ".[dev]"
 
+# Install the step implementations so the in-container registry is populated:
+# advance_workflow validates/resolves step types and would reject the ingest
+# workflow otherwise. cvops-steps comes from the `steps` named build context
+# (see additional_contexts in docker-compose.yml) and is installed non-editable
+# so it lands in site-packages and is carried into the production stage. No
+# ffmpeg binary needed here — the API never executes steps (the worker does);
+# step modules lazy-import their heavy deps inside run().
+COPY --from=steps pyproject.toml /tmp/steps/pyproject.toml
+COPY --from=steps src /tmp/steps/src
+RUN pip install --no-cache-dir /tmp/steps
+
 # ── development target ───────────────────────────────────────────────────
 FROM build AS development
 ENV PYTHONUNBUFFERED=1

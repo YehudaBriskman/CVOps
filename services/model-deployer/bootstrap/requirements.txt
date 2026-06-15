@@ -1,0 +1,1 @@
+# Minimal requirements for nuclio build — heavy packages (ultralytics etc.) added via docker build

@@ -11,7 +11,7 @@ class TrainStep(Step):
 
     async def run(self, ctx: StepContext, config: dict, inputs: dict) -> dict:
         # Phase 1: E8 — Nati/Yahav
-        # inputs: {export_blob_hash: str}
+        # inputs: {export_blob_hash: str, commit_id: str}
         # Returns: {model_version_id: str}
         # Uses Docker Python SDK + ICD config from training_containers table
         raise NotImplementedError

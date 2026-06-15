@@ -5,12 +5,15 @@
 #   • Stateful infra (postgres, redis, garage) → containers via docker_compose.
 #   • App code (api, frontend)                → host processes via local_resource
 #                                                (uvicorn --reload, npm run dev).
-#   • Nothing else. No edge nginx — Vite proxies /api → http://localhost:8000.
+#   • Edge nginx (container)                   → proxies / → host Vite dev (with
+#                                                HMR) and /api/v1 → host API, so
+#                                                the real app is browser-usable at
+#                                                http://localhost (and dev VMs).
+#   Vite also proxies /api/v1 → http://localhost:8000 for the React app.
 #
 # For container-based pre-prod testing, use docker compose with profiles directly:
 #   cd manifests
-#   docker compose --profile app up                       # prod-target stack
-#   docker compose --profile app --profile worker up      # + celery worker
+#   docker compose --profile app up                       # prod-target stack + worker-preprocessing
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile app up
 #
 # Usage:
@@ -30,11 +33,36 @@ require('python3',  'install Python 3.12+ (mise/pyenv/system)')
 require('node',     'install Node 20+')
 require('npm',      'usually bundled with node')
 require('docker',   'install Docker — needed for the infra containers')
+require('openssl',  'install openssl — needed to generate dev secrets')
 
 # ── Bootstrap manifests/.env from manifests/.env.example ────────────────────
 if not os.path.exists('manifests/.env'):
     print('⚠  No manifests/.env file found — copying manifests/.env.example. Edit secrets before going live.')
     local('cp manifests/.env.example manifests/.env', quiet=True)
+
+# Replace any leftover `change_me*` placeholders with freshly-generated secrets.
+# A copied-but-unedited .env carries `GARAGE_RPC_SECRET=change_me_rpc_secret_hex_32_bytes`,
+# which Garage rejects at startup ("Invalid RPC secret key: expected 32 bytes of
+# random hex"). Idempotent — only placeholder values are touched, and POSTGRES_PASSWORD
+# is left alone so it stays in sync with the DATABASE_URL string in the same file.
+local('''
+    cd manifests
+    grep -q change_me .env || exit 0
+    tmp=$(mktemp)
+    while IFS= read -r line; do
+        case "$line" in
+            POSTGRES_PASSWORD=*|DATABASE_URL=*)
+                echo "$line" ;;
+            GARAGE_DEFAULT_ACCESS_KEY=GKchange_me*)
+                echo "GARAGE_DEFAULT_ACCESS_KEY=GK$(openssl rand -hex 12)" ;;
+            *=change_me*)
+                echo "${line%%=*}=$(openssl rand -hex 32)" ;;
+            *)
+                echo "$line" ;;
+        esac
+    done < .env > "$tmp" && mv "$tmp" .env
+    echo "⚠  Generated dev secrets for change_me placeholders in manifests/.env"
+''', quiet=False)
 
 # Parse .env into a dict so we can build localhost-rewritten connection strings
 # for the host-side api and frontend processes.
@@ -136,9 +164,25 @@ local_resource('garage-bootstrap',
 
 # ── Host-side install resources (one-time, auto-run on first tilt up) ──────
 # Editable install for the API package; uvicorn comes in as a dep.
+# Build an isolated venv at services/api/.venv and install the API package into
+# it. A bare `pip install --user` fails on PEP-668 / externally-managed hosts
+# (Arch, Debian 12+): "error: externally-managed-environment". The venv sidesteps
+# that and keeps the editable install off the system interpreter. `python -m venv`
+# is idempotent, so re-running just reuses the existing venv.
 local_resource('api-install',
-    cmd='cd services/api && python3 -m pip install --user -e ".[dev]" >/dev/null',
+    cmd='cd services/api && python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]" >/dev/null',
     deps=['services/api/pyproject.toml'],
+    labels=['5-setup'],
+)
+
+# Install the step implementations (cvops_steps) into the API venv so the
+# engine registry picks up extract_frames at startup. Base deps only (no ml/train
+# extras → no torch); the engine import is best-effort, but without this the
+# registry is empty and workflow creation rejects step.extract_frames.
+local_resource('steps-install',
+    cmd='cd services/api && .venv/bin/python -m pip install -e ../../packages/steps >/dev/null',
+    deps=['packages/steps/pyproject.toml'],
+    resource_deps=['api-install'],
     labels=['5-setup'],
 )
 
@@ -158,6 +202,9 @@ api_env = {
     ),
     'REDIS_URL':       'redis://localhost:6379/0',
     'S3_ENDPOINT':     'http://localhost:3900',
+    # S3_PUBLIC_ENDPOINT intentionally unset: the API derives the presign host
+    # per-request from the browser's Host header, so uploads work from localhost
+    # and dev VMs alike. Set it only to force a fixed host/scheme (e.g. HTTPS).
     'S3_ACCESS_KEY':   envreq('GARAGE_DEFAULT_ACCESS_KEY'),
     'S3_SECRET_KEY':   envreq('GARAGE_DEFAULT_SECRET_KEY'),
     'S3_BUCKET':       envreq('GARAGE_DEFAULT_BUCKET'),
@@ -168,10 +215,10 @@ api_env = {
 }
 
 local_resource('api',
-    serve_cmd='cd services/api && python3 -m uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload',
+    serve_cmd='cd services/api && .venv/bin/python -m uvicorn cvops_api.main:app --host 0.0.0.0 --port 8000 --reload',
     serve_env=api_env,
     deps=['services/api/src'],
-    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'api-install'],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'api-install', 'steps-install', 'migrate-up'],
     readiness_probe=probe(
         period_secs=5,
         http_get=http_get_action(port=8000, path='/openapi.json'),
@@ -184,7 +231,7 @@ local_resource('api',
 )
 
 local_resource('frontend',
-    # Vite already proxies /api → http://localhost:8000 (see vite.config.ts).
+    # Vite already proxies /api/v1 → http://localhost:8000 (see vite.config.ts).
     serve_cmd='cd services/frontend && npm run dev -- --host 0.0.0.0 --port 5173',
     deps=['services/frontend/src', 'services/frontend/vite.config.ts', 'services/frontend/index.html'],
     resource_deps=['api', 'frontend-install'],
@@ -196,6 +243,17 @@ local_resource('frontend',
     labels=['2-app'],
 )
 
+# ── Edge proxy (container) ──────────────────────────────────────────────────
+# nginx proxies / → host Vite dev (with HMR) and /api/v1 → host API. This is
+# what makes `tilt up` a one-stop, browser-usable stack at http://localhost
+# (and http://<dev-vm>:80 for VM-based devs). Swap the Vite proxy for a static
+# frontend dist/ build later. Defined (profile-less) in docker-compose.yml.
+dc_resource('nginx',
+    labels=['2-app'],
+    resource_deps=['api', 'frontend'],
+    links=[link('http://localhost', 'app (nginx)')],
+)
+
 # ── Optional helper resources (manual trigger) ──────────────────────────────
 local_resource('git-hooks',
     cmd='sh scripts/git-setup.sh',
@@ -205,12 +263,27 @@ local_resource('git-hooks',
     trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
+# Install the preprocessing worker into the API venv (which already carries
+# cvops-api + cvops-steps). The worker reuses those packages, so it shares the env.
 local_resource('worker-install',
-    cmd='cd services/worker && python3 -m pip install --user -e .',
-    deps=['services/worker/pyproject.toml'],
+    cmd='cd services/api && .venv/bin/python -m pip install -e ../worker-preprocessing >/dev/null',
+    deps=['services/worker-preprocessing/pyproject.toml'],
+    resource_deps=['api-install', 'steps-install'],
     labels=['5-setup'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
+)
+
+# ── Worker processes (host) ─────────────────────────────────────────────────
+# Redis-Streams preprocessing worker: consumes the `preprocessing` stream and
+# runs extract_frames (and future preprocessing steps) out of the API process.
+worker_env = dict(api_env)
+worker_env['REDIS_STREAM'] = 'preprocessing'
+
+local_resource('worker-preprocessing',
+    serve_cmd='cd services/api && .venv/bin/python -m cvops_worker',
+    serve_env=worker_env,
+    deps=['services/worker-preprocessing/src'],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-install', 'migrate-up'],
+    labels=['2-app'],
 )
 
 # ── Quality gates ───────────────────────────────────────────────────────────
@@ -246,17 +319,17 @@ local_resource('frontend-build',
 # Alembic migrations execute on the host against the local DATABASE_URL.
 migrate_env = {'DATABASE_URL': api_env['DATABASE_URL']}
 
+# Auto-runs on `tilt up` (api depends on it) so the schema — including new
+# migrations like 0002 — is always applied before the API serves.
 local_resource('migrate-up',
-    cmd='cd services/api && alembic upgrade head',
+    cmd='cd services/api && .venv/bin/alembic upgrade head',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],
-    auto_init=False,
-    trigger_mode=TRIGGER_MODE_MANUAL,
 )
 
 local_resource('migrate-down',
-    cmd='cd services/api && alembic downgrade -1',
+    cmd='cd services/api && .venv/bin/alembic downgrade -1',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],
@@ -265,7 +338,7 @@ local_resource('migrate-down',
 )
 
 local_resource('migrate-revision',
-    cmd='cd services/api && alembic revision --autogenerate -m "tilt-generated"',
+    cmd='cd services/api && .venv/bin/alembic revision --autogenerate -m "tilt-generated"',
     env=migrate_env,
     labels=['7-db'],
     resource_deps=['postgres', 'api-install'],

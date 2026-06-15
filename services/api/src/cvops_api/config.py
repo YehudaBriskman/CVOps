@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = "changeme"
     S3_BUCKET: str = "cvops-blobs"
     S3_REGION: str = "garage"
+    S3_BACKEND: str = "garage"  # value recorded in blobs.storage_backend
+    # Browser-reachable endpoint for presigned URLs. S3_ENDPOINT (e.g.
+    # http://garage:3900) is internal and unresolvable from a browser. When this
+    # is empty (the default), the endpoint is derived per-request from the Host
+    # header as http://<request-host>:S3_PUBLIC_PORT — so it auto-adapts whether
+    # the page is opened at localhost or a dev VM. Set it only to force a fixed
+    # host/scheme (e.g. behind HTTPS).
+    S3_PUBLIC_ENDPOINT: str = ""
+    S3_PUBLIC_PORT: int = 3900
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
