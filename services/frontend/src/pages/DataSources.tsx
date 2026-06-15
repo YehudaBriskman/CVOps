@@ -10,6 +10,7 @@ import {
   useDataSourceUrl,
   useDataSources,
   useDeleteDataSource,
+  useUploadImages,
 } from '../api/data-sources'
 
 function errMessage(err: unknown): string {
@@ -48,6 +49,7 @@ function StatusBadge({ ds }: { ds: DataSource }) {
       spinner = true
       break
     case 'ingested':
+    case 'ready':
       label = 'Ready'
       cls = 'bg-success/10 text-success'
       break
@@ -66,6 +68,14 @@ function StatusBadge({ ds }: { ds: DataSource }) {
 
 function SourcePreview({ ds }: { ds: DataSource }) {
   const { data, isLoading, isError } = useDataSourceUrl(ds.id, ds.blob_hash != null)
+
+  if (ds.type === 'image_folder') {
+    return (
+      <div className="aspect-video flex items-center justify-center bg-surface-1 text-4xl text-text-muted">
+        🖼️
+      </div>
+    )
+  }
 
   if (ds.external_uri && !ds.blob_hash) {
     return (
@@ -120,7 +130,9 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
       <div className="p-4 flex flex-col gap-3 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-sm font-medium text-text-primary capitalize">{ds.type.replace('_', ' ')}</p>
+            <p className="text-sm font-medium text-text-primary capitalize">
+              {typeof ds.metadata?.name === 'string' ? ds.metadata.name : ds.type.replace('_', ' ')}
+            </p>
             <p className="text-xs text-text-muted mt-0.5 font-mono">{ds.id.slice(0, 8)}…</p>
           </div>
           <StatusBadge ds={ds} />
@@ -129,13 +141,13 @@ function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: st
         <div className="flex items-center justify-between mt-auto">
           {frames > 0 ? (
             <Link
-              to={`/projects/${projectId}/samples?source=${ds.id}`}
+              to={`/projects/${projectId}/samples?source_id=${ds.id}`}
               className="text-xs font-medium text-iris-400 hover:text-iris-400"
             >
-              View {frames} frame{frames === 1 ? '' : 's'} →
+              View {frames} sample{frames === 1 ? '' : 's'} →
             </Link>
           ) : (
-            <span className="text-xs text-text-muted">No frames yet</span>
+            <span className="text-xs text-text-muted">No samples yet</span>
           )}
           <button
             onClick={() => onDelete(ds.id)}
@@ -161,65 +173,60 @@ export default function DataSources() {
 
   const { data: sources, isLoading } = useDataSources(projectId)
   const deleteMutation = useDeleteDataSource(projectId)
+  const uploadImages = useUploadImages(projectId)
 
-  // One file → one data source: register → presigned PUT → confirm-upload.
-  // `type` is the backend DataSource.type ('video' | 'image'); the value drives
-  // whether the project's default ingest workflow frame-extracts (video) or
-  // leaves the source as a ready image.
-  async function uploadOne(file: File, type: 'video' | 'image') {
-    const { data: upload } = await client.post<UploadResponse>(
-      `/projects/${projectId}/data-sources`,
-      { type },
-    )
-
-    if (upload.presigned_put_url) {
-      const put = await fetch(upload.presigned_put_url, { method: 'PUT', body: file })
-      if (!put.ok) throw new Error(`Upload failed: ${put.status}`)
-    }
-
-    const blobHash = `sha256:${await sha256Hex(file)}`
-    await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, { blob_hash: blobHash })
+  function resetInputs() {
+    setUploading(false)
+    setProgress(null)
+    if (videoRef.current) videoRef.current.value = ''
+    if (imageRef.current) imageRef.current.value = ''
+    if (folderRef.current) folderRef.current.value = ''
   }
 
-  // Drives one or more files through `uploadOne` sequentially, reporting
-  // aggregate progress. A folder or multi-select lands here as several files,
-  // each registered as its own image data source (the backend has no
-  // folder-aware ingest, so N images is the faithful representation).
-  async function handleUpload(files: File[]) {
+  // Video: register → presigned PUT → confirm-upload, which dispatches the
+  // project's ingest workflow (frame extraction).
+  async function handleVideo(file: File) {
+    setError(null)
+    setUploading(true)
+    setProgress('Uploading video…')
+    try {
+      const { data: upload } = await client.post<UploadResponse>(
+        `/projects/${projectId}/data-sources`,
+        { type: 'video' },
+      )
+      if (upload.presigned_put_url) {
+        const put = await fetch(upload.presigned_put_url, { method: 'PUT', body: file })
+        if (!put.ok) throw new Error(`Upload failed: ${put.status}`)
+      }
+      const blobHash = `sha256:${await sha256Hex(file)}`
+      await client.post(`/data-sources/${upload.data_source.id}/confirm-upload`, {
+        blob_hash: blobHash,
+      })
+      qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
+      toast.success('Video uploaded')
+    } catch (err: unknown) {
+      toast.error('Video upload failed', errMessage(err))
+      setError(errMessage(err))
+    } finally {
+      resetInputs()
+    }
+  }
+
+  // Images (single / group / folder): all land in the shared "Uploads" folder
+  // and become samples immediately. `group` sub-labels the batch.
+  async function handleImages(files: File[], group?: string) {
     if (files.length === 0) return
     setError(null)
     setUploading(true)
-    let failed = 0
+    setProgress(`Uploading ${files.length} image${files.length === 1 ? '' : 's'}…`)
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]
-        const type: 'video' | 'image' = file.type.startsWith('image/') ? 'image' : 'video'
-        const label = files.length > 1 ? `Uploading ${i + 1} of ${files.length}…` : 'Uploading…'
-        setProgress(label)
-        try {
-          await uploadOne(file, type)
-        } catch (err: unknown) {
-          failed += 1
-          toast.error(`Failed to upload ${file.name}`, errMessage(err))
-        }
-        // Surface each finished source as soon as it lands.
-        qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
-      }
-
-      const ok = files.length - failed
-      if (failed > 0 && ok === 0) {
-        setError(`All ${failed} upload${failed === 1 ? '' : 's'} failed`)
-      } else if (failed > 0) {
-        toast.warning(`${ok} uploaded, ${failed} failed`)
-      } else if (files.length > 1) {
-        toast.success(`Uploaded ${files.length} files`)
-      }
+      const res = await uploadImages.mutateAsync({ files, group })
+      toast.success(`Uploaded ${res.created} image${res.created === 1 ? '' : 's'}`)
+    } catch (err: unknown) {
+      toast.error('Image upload failed', errMessage(err))
+      setError(errMessage(err))
     } finally {
-      setUploading(false)
-      setProgress(null)
-      if (videoRef.current) videoRef.current.value = ''
-      if (imageRef.current) imageRef.current.value = ''
-      if (folderRef.current) folderRef.current.value = ''
+      resetInputs()
     }
   }
 
@@ -250,7 +257,7 @@ export default function DataSources() {
                   className="hidden"
                   onChange={e => {
                     const file = e.target.files?.[0]
-                    if (file) handleUpload([file])
+                    if (file) handleVideo(file)
                   }}
                 />
               </label>
@@ -262,7 +269,7 @@ export default function DataSources() {
                   accept="image/*"
                   multiple
                   className="hidden"
-                  onChange={e => handleUpload(Array.from(e.target.files ?? []))}
+                  onChange={e => handleImages(Array.from(e.target.files ?? []))}
                 />
               </label>
               <label className="cursor-pointer bg-surface-3 text-text-primary border border-border px-4 py-2 rounded-lg text-sm font-medium hover:bg-surface-1 transition-colors">
@@ -278,7 +285,9 @@ export default function DataSources() {
                   onChange={e => {
                     // A directory picker yields every file in the tree; keep only images.
                     const imgs = Array.from(e.target.files ?? []).filter(f => f.type.startsWith('image/'))
-                    handleUpload(imgs)
+                    const rel = (imgs[0] as File & { webkitRelativePath?: string })?.webkitRelativePath
+                    const group = rel ? rel.split('/')[0] : undefined
+                    handleImages(imgs, group)
                   }}
                 />
               </label>
