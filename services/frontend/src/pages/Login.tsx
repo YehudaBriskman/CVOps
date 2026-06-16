@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { login, saveTokens } from '../api/auth'
+import { errorMessage } from '../lib/errors'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -18,9 +19,7 @@ export default function Login() {
       saveTokens(tokens)
       navigate('/projects', { replace: true })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail
-      setError(msg ?? 'Invalid email or password')
+      setError(errorMessage(err, 'Invalid email or password'))
     } finally {
       setLoading(false)
     }
