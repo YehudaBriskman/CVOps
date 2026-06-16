@@ -8,8 +8,8 @@ import { cn } from '../../lib/cn'
 import { BoxOverlay } from './BoxOverlay'
 
 const REVIEW_DOT: Record<string, string> = {
-  accepted: '#34D399',
-  rejected: '#FB7185',
+  accepted: 'var(--cv-success)',
+  rejected: 'var(--cv-error)',
   unreviewed: 'var(--text-muted)',
 }
 
