@@ -28,7 +28,7 @@ export function StepPalette({ steps }: Props) {
             className="rounded-lg border border-border bg-surface-2 shadow-sm p-3 cursor-grab active:cursor-grabbing hover:border-iris hover:shadow-md transition-all"
           >
             <div className="flex items-center gap-2 mb-1">
-              <div className={`w-2 h-2 rounded-full flex-shrink-0 ${step.accent}`} />
+              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: step.color }} />
               <span className="text-xs font-semibold text-text-primary">{step.label}</span>
             </div>
             <p className="text-xs text-text-muted leading-snug">{step.description}</p>
