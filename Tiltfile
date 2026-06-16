@@ -60,8 +60,18 @@ local('''
             *)
                 echo "$line" ;;
         esac
-    done < .env > "$tmp" && mv "$tmp" .env
-    echo "⚠  Generated dev secrets for change_me placeholders in manifests/.env"
+    done < .env > "$tmp"
+    # Only replace .env when something actually changed. POSTGRES_PASSWORD /
+    # DATABASE_URL keep their `change_me_postgres` value by design, so `grep
+    # change_me` stays true forever — an unconditional `mv` would rewrite .env on
+    # every Tiltfile parse, churn its mtime, and (since .env is a read_file dep +
+    # the compose env_file) trigger an endless re-parse + rebuild loop.
+    if cmp -s "$tmp" .env; then
+        rm -f "$tmp"
+    else
+        mv "$tmp" .env
+        echo "⚠  Generated dev secrets for change_me placeholders in manifests/.env"
+    fi
 ''', quiet=False)
 
 # Parse .env into a dict so we can build localhost-rewritten connection strings
