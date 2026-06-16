@@ -22,6 +22,15 @@ git config push.followTags true
 git config push.autoSetupRemote true
 echo "  [ok] push  -> default=current, followTags, autoSetupRemote"
 
+# ── aliases ─────────────────────────────────────────────────────────────────
+# `git open-pr` = convention-safe PR opener. When you've committed on a
+# protected/invalid branch (dev, main, detached), it moves the commits onto a
+# properly named feature branch, pushes, and opens an assigned PR. The pre-push
+# hook points here on rejection. Extra args pass straight through, e.g.
+#   git open-pr -B dev -c 87
+git config alias.open-pr '!sh "$(git rev-parse --show-toplevel)/scripts/open-pr.sh"'
+echo "  [ok] alias -> git open-pr  (scripts/open-pr.sh)"
+
 # ── pull / fetch ──────────────────────────────────────────────────────────
 git config pull.rebase true
 git config fetch.prune true
@@ -43,5 +52,8 @@ echo ""
 echo "  Example branches:"
 echo "    Feat/add-dataset-versioning-api"
 echo "    Claude-Bot/Fix/resolve-celery-worker-deadlock"
+echo ""
+echo "  Stuck on dev/main after committing? Recover with:"
+echo "    git open-pr -B dev          (moves commits to a branch, opens a PR)"
 echo "  ──────────────────────────────────────────────────────"
 echo ""
