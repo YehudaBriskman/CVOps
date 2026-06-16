@@ -1,19 +1,25 @@
-name: API · Lint & Type-check
+name: Python · Lint & Type-check
+
+# Only services/api declares ruff + mypy config today, so lint is scoped there.
+# The sibling packages are installed editable so mypy can resolve the
+# cvops_steps / cvops_worker_common imports the api source pulls in.
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'services/api/**'
-      - '.github/workflows/lint-api.yml'
+      - 'packages/**'
+      - '.github/workflows/lint-python.yml'
   pull_request:
     paths:
       - 'services/api/**'
-      - '.github/workflows/lint-api.yml'
+      - 'packages/**'
+      - '.github/workflows/lint-python.yml'
 
 jobs:
   lint:
-    name: ruff + mypy (Python 3.12)
+    name: ruff + mypy (services/api)
     runs-on: ubuntu-latest
 
     steps:
@@ -26,8 +32,14 @@ jobs:
           cache-dependency-path: services/api/pyproject.toml
 
       - name: Install dependencies
-        working-directory: services/api
-        run: pip install -e ".[dev]"
+        run: >-
+          pip install
+          -e packages/steps
+          -e packages/worker-common
+          -e packages/cvat-client
+          -e services/worker-preprocessing
+          -e "services/api[dev]"
+          respx
 
       - name: Ruff — lint
         working-directory: services/api
