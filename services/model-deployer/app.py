@@ -7,10 +7,12 @@ POST /annotate  — upload images to CVAT + trigger auto-annotation
 GET  /health
 """
 
+import hmac
+import os
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from cvops_cvat_client import annotate, list_models
@@ -19,13 +21,22 @@ from deployer import deploy
 app = FastAPI(title="Model Deployer", docs_url="/docs")
 
 
+def _require_token(authorization: str | None = Header(None)) -> None:
+    token = os.environ.get("WORKER_TOKEN", "change-me-worker-token")
+    if authorization is None:
+        raise HTTPException(401, "Unauthorized")
+    scheme, _, provided = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(provided, token):
+        raise HTTPException(401, "Unauthorized")
+
+
 class AnnotateRequest(BaseModel):
     task_name: str
     function_id: str
     threshold: float = 0.3
 
 
-@app.post("/deploy")
+@app.post("/deploy", dependencies=[Depends(_require_token)])
 async def deploy_model(
     model_name: str = Form(...),
     file: UploadFile = File(...),
@@ -44,7 +55,7 @@ async def deploy_model(
     return {"status": "ok", "function_name": func_name, "model_name": model_name}
 
 
-@app.get("/models")
+@app.get("/models", dependencies=[Depends(_require_token)])
 def get_models() -> list[dict]:
     try:
         return list_models()
@@ -52,7 +63,7 @@ def get_models() -> list[dict]:
         raise HTTPException(502, f"Could not reach CVAT: {e}")
 
 
-@app.post("/annotate")
+@app.post("/annotate", dependencies=[Depends(_require_token)])
 async def annotate_task(
     body: AnnotateRequest,
     files: list[UploadFile] = File(...),
