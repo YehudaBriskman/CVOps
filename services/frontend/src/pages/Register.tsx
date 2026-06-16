@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { register, saveTokens } from '../api/auth'
+import { errorMessage } from '../lib/errors'
 
 export default function Register() {
   const navigate = useNavigate()
@@ -19,9 +20,7 @@ export default function Register() {
       saveTokens(tokens)
       navigate('/projects', { replace: true })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail
-      setError(msg ?? 'Registration failed')
+      setError(errorMessage(err, 'Registration failed'))
     } finally {
       setLoading(false)
     }

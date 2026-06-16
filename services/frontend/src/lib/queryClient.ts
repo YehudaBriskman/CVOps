@@ -1,19 +1,6 @@
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query'
 import { toast } from '../store/toast'
-
-/** Narrow an unknown error (typically an AxiosError) to a human-readable message. */
-function errorMessage(error: unknown): string {
-  if (error && typeof error === 'object') {
-    const maybe = error as {
-      response?: { data?: { detail?: unknown } }
-      message?: unknown
-    }
-    const detail = maybe.response?.data?.detail
-    if (typeof detail === 'string') return detail
-    if (typeof maybe.message === 'string') return maybe.message
-  }
-  return 'An unexpected error occurred'
-}
+import { errorMessage } from './errors'
 
 /** HTTP status of an unknown error, if it looks like an Axios response error. */
 function errorStatus(error: unknown): number | undefined {
