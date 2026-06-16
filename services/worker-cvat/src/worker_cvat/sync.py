@@ -165,10 +165,29 @@ async def handle_cvat_sync(fields: dict[str, str]) -> None:
             )
             out_rev_ids.append(new_id)
 
+        # Guard against silent data loss: CVAT returned reviewed shapes but none
+        # mapped into a revision (e.g. no ontology to attach them to). Don't mark
+        # the job completed or resume the gate on an empty import — record the
+        # error and raise so the run stays parked and the failure is surfaced.
+        shape_count = sum(len(v) for v in by_frame.values())
+        if shape_count and not out_rev_ids:
+            msg = (
+                f"cvat_sync: pulled {shape_count} reviewed shapes for task "
+                f"{cvat_task_id} but imported 0 revisions — check the project ontology"
+            )
+            await session.execute(
+                text(
+                    "UPDATE labeling_jobs SET sync_error = :e WHERE id = CAST(:id AS uuid)"
+                ),
+                {"e": msg, "id": labeling_job_id},
+            )
+            await session.commit()
+            raise RuntimeError(msg)
+
         await session.execute(
             text(
                 "UPDATE labeling_jobs SET status='completed', completed_at=now(), "
-                "annotation_revision_ids_out = CAST(:out AS jsonb) "
+                "sync_error = NULL, annotation_revision_ids_out = CAST(:out AS jsonb) "
                 "WHERE id = CAST(:id AS uuid)"
             ),
             {"out": json.dumps(out_rev_ids), "id": labeling_job_id},

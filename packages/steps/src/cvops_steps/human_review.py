@@ -125,6 +125,40 @@ class HumanReviewStep(Step):
         if missing:
             raise ValueError(f"samples not found: {missing}")
 
+        # ── Label space ─────────────────────────────────────────────────────
+        # The CVAT task's label classes come from the project ontology, so
+        # reviewers annotate with the canonical set (not ad-hoc labels) and the
+        # pull maps them straight back. Required: without an ontology there is
+        # nowhere to store reviewed labels (annotation_revisions.ontology_id is
+        # NOT NULL), so fail loudly rather than create a class-less task.
+        ont_id = (
+            await session.execute(
+                text(
+                    "SELECT o.id FROM ontologies o JOIN projects p ON p.id = o.project_id "
+                    "WHERE o.project_id = CAST(:pid AS uuid) AND o.deleted_at IS NULL "
+                    "ORDER BY (p.default_ontology_id = o.id) DESC NULLS LAST, o.version DESC "
+                    "LIMIT 1"
+                ),
+                {"pid": ctx.project_id},
+            )
+        ).scalar()
+        if ont_id is None:
+            raise ValueError(
+                "human_review requires the project to have an ontology — its label "
+                "classes define what reviewers can annotate in CVAT"
+            )
+        label_names = [
+            r[0]
+            for r in (
+                await session.execute(
+                    text(
+                        "SELECT class_key FROM label_classes WHERE ontology_id = CAST(:oid AS uuid)"
+                    ),
+                    {"oid": str(ont_id)},
+                )
+            ).all()
+        ]
+
         # The gate's DAG node id — needed so the pull flow can resume this exact
         # waiting child (parent_run_id + step_id), mirroring resolve_gate.
         step_node_id = (
@@ -153,7 +187,7 @@ class HumanReviewStep(Step):
                         annotations=prelabels.get(sid, []),
                     )
                 )
-            pushed = push_review_task(task_name, images)
+            pushed = push_review_task(task_name, images, label_names=label_names)
 
         # ── Register completion webhook if configured (else poll fallback) ───
         # Best-effort: the webhook only enables auto-resume on CVAT completion.

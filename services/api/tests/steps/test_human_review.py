@@ -59,8 +59,12 @@ def fake_cvat_client():
             self.height = height
             self.annotations = annotations
 
-    def push_review_task(task_name, images):
-        calls["push"] = {"task_name": task_name, "images": list(images)}
+    def push_review_task(task_name, images, label_names=None):
+        calls["push"] = {
+            "task_name": task_name,
+            "images": list(images),
+            "label_names": label_names,
+        }
         return {
             "task_id": 4242,
             "job_ids": [99],
@@ -83,6 +87,15 @@ async def _seed(session):
     """One project + ontology + sample with a model pre-label revision + a gate run."""
     proj = await make_project(session)
     ont = await make_ontology(session, project_id=proj.id)
+    # A label class on the ontology — human_review seeds the CVAT task with it.
+    await session.execute(
+        text(
+            "INSERT INTO label_classes (id, ontology_id, class_key, display_name, "
+            "color, sort_order) VALUES (gen_random_uuid(), CAST(:oid AS uuid), "
+            "'person', 'Person', '#FF0000', 0)"
+        ),
+        {"oid": str(ont.id)},
+    )
     sample = await make_sample(session, project_id=proj.id)
     rev_id = str(uuid.uuid4())
     await session.execute(
@@ -140,6 +153,8 @@ async def test_push_gate_inserts_job_and_raises_gate(session, fake_cvat_client):
     pushed = fake_cvat_client["push"]
     assert len(pushed["images"]) == 1
     assert pushed["images"][0].annotations == PRELABEL
+    # The CVAT task's label space was seeded from the project ontology.
+    assert "person" in (pushed["label_names"] or [])
     # No webhook target configured → registration skipped.
     assert "webhook" not in fake_cvat_client
 
@@ -151,6 +166,7 @@ async def test_push_tolerates_none_revision_ids(session, fake_cvat_client):
     'invalid UUID None'). The sample is still pushed, just with no pre-labels.
     """
     proj = await make_project(session)
+    await make_ontology(session, project_id=proj.id)  # human_review requires one
     sample = await make_sample(session, project_id=proj.id)
     run = await make_run(
         session, project_id=proj.id, kind="step", status="running", step_id="review_node"
@@ -208,3 +224,18 @@ async def test_push_requires_inputs(session, fake_cvat_client):
     run = await make_run(session, project_id=proj.id, kind="step", status="running")
     with pytest.raises(ValueError, match="requires sample_ids"):
         await HumanReviewStep().run(_ctx(session, str(proj.id), str(run.id)), {}, {})
+
+
+async def test_push_requires_project_ontology(session, fake_cvat_client):
+    """Without a project ontology there's no label space + nowhere to store the
+    reviewed labels, so the step fails loudly instead of pushing a class-less task."""
+    proj = await make_project(session)
+    sample = await make_sample(session, project_id=proj.id)
+    run = await make_run(
+        session, project_id=proj.id, kind="step", status="running", step_id="review_node"
+    )
+    inputs = {"sample_ids": [str(sample.id)], "annotation_revision_ids": []}
+    with pytest.raises(ValueError, match="requires the project to have an ontology"):
+        await HumanReviewStep().run(_ctx(session, str(proj.id), str(run.id)), {}, inputs)
+    # Failed before any CVAT push.
+    assert "push" not in fake_cvat_client

@@ -132,12 +132,17 @@ def annotate(
 # --------------------------------------------------------------------------- #
 # Human-review push / pull (worker-cvat gate)
 # --------------------------------------------------------------------------- #
-def push_review_task(task_name: str, images: list[ReviewImage]) -> dict:
+def push_review_task(
+    task_name: str, images: list[ReviewImage], label_names: list[str] | None = None
+) -> dict:
     """Create a CVAT task with images and CVOps pre-labels for human review.
 
-    Builds the task label set from the distinct ``class_key``s across all
-    pre-labels, uploads the images in order, and sets pre-annotations converted
-    from canonical normalized boxes to CVAT pixel rectangles.
+    The task's label classes are the union of ``label_names`` (the project
+    ontology's class keys — the canonical set reviewers should annotate with)
+    and any ``class_key``s present on the pre-labels. When ``label_names`` is
+    omitted the set falls back to the pre-label keys alone. Uploads the images in
+    order and sets pre-annotations converted from canonical normalized boxes to
+    CVAT pixel rectangles.
 
     Returns ``{task_id, job_ids, cvat_url, label_map}`` where ``label_map`` is
     ``{class_key: label_id}`` and the frame order equals the order of ``images``.
@@ -148,8 +153,9 @@ def push_review_task(task_name: str, images: list[ReviewImage]) -> dict:
         TaskWriteRequest,
     )
 
-    class_keys = sorted({a.get("class_key") for img in images for a in img.annotations})
-    labels = [{"name": key} for key in class_keys if key]
+    class_keys = set(label_names or [])
+    class_keys |= {a.get("class_key") for img in images for a in img.annotations}
+    labels = [{"name": key} for key in sorted(k for k in class_keys if k)]
 
     client = _client()
     task = client.tasks.create(TaskWriteRequest(name=task_name, labels=labels))

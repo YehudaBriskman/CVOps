@@ -149,11 +149,12 @@ async def test_sample_without_prior_revision_uses_project_ontology(
     _patched.assert_awaited_once()
 
 
-async def test_skips_when_no_prior_revision_and_no_ontology(
+async def test_no_ontology_for_reviewed_shapes_fails_loudly(
     session_factory, _patched, fake_pull
 ):
-    """If the project has no usable ontology either, the sample is skipped (no
-    ontology to attach), but the job still completes and the gate resumes."""
+    """CVAT returned reviewed shapes but there's no ontology to attach them to:
+    don't silently complete the gate (that drops the review). Record sync_error,
+    leave the gate parked, and raise — no advance."""
     ids = await seed_review(session_factory, with_prior_revision=False)
     # Soft-delete the project's only ontology so the pull has no fallback.
     async with session_factory() as s:
@@ -163,22 +164,29 @@ async def test_skips_when_no_prior_revision_and_no_ontology(
         )
         await s.commit()
 
-    await sync.handle_cvat_sync({"cvat_task_id": str(ids["cvat_task_id"])})
+    with pytest.raises(RuntimeError, match="imported 0 revisions"):
+        await sync.handle_cvat_sync({"cvat_task_id": str(ids["cvat_task_id"])})
 
     assert await _count_revisions(session_factory, ids["sample_id"]) == 0
     async with session_factory() as s:
         lj = (
             await s.execute(
                 text(
-                    "SELECT status, annotation_revision_ids_out FROM labeling_jobs "
-                    "WHERE id = CAST(:id AS uuid)"
+                    "SELECT status, sync_error FROM labeling_jobs WHERE id = CAST(:id AS uuid)"
                 ),
                 {"id": ids["labeling_job_id"]},
             )
         ).first()
-        assert lj[0] == "completed"
-        assert lj[1] == []  # nothing attached, so nothing emitted
-    _patched.assert_awaited_once()
+        assert lj[0] == "pushed"  # NOT completed
+        assert lj[1] is not None  # sync_error recorded
+        run_status = (
+            await s.execute(
+                text("SELECT status FROM runs WHERE id = CAST(:id AS uuid)"),
+                {"id": ids["child_id"]},
+            )
+        ).scalar()
+        assert run_status == "waiting"  # gate still parked
+    _patched.assert_not_awaited()  # did not advance the workflow
 
 
 async def test_no_parent_skips_advance(session_factory, fake_pull, monkeypatch):
