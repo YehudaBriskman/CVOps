@@ -14,6 +14,7 @@ import RunView from './pages/RunView'
 import Runs from './pages/Runs'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
+import CvatModels from './pages/CvatModels'
 import ProjectSettings from './pages/ProjectSettings'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -38,6 +39,7 @@ function RouteFallback() {
 
 export default function App() {
   return (
+    <>
     <Routes>
       <Route path="/login"    element={<Login />} />
       <Route path="/register" element={<Register />} />
@@ -45,6 +47,7 @@ export default function App() {
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/" element={<Navigate to="/projects" replace />} />
         <Route path="/projects"                              element={<Projects />} />
+        <Route path="/cvat-models"                           element={<CvatModels />} />
         <Route path="/projects/:id"                          element={<Project />} />
         <Route path="/projects/:id/data-sources"             element={<DataSources />} />
         <Route path="/projects/:id/samples"                  element={<SampleBrowser />} />
@@ -67,5 +70,6 @@ export default function App() {
         <Route path="/projects/:id/settings"                 element={<ProjectSettings />} />
       </Route>
     </Routes>
+    </>
   )
 }
