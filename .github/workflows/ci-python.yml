@@ -42,10 +42,13 @@ jobs:
           - name: cvat-client
             path: packages/cvat-client
             install: pip install -e "packages/cvat-client[dev]"
+          # steps and worker-common both declare cvops-api, so api must be in
+          # the same install call for pip to resolve the name locally.
           - name: worker-training
             path: services/worker-training
             install: >-
               pip install
+              -e services/api
               -e packages/worker-common
               -e packages/steps
               -e "services/worker-training[dev]"
@@ -53,6 +56,7 @@ jobs:
             path: services/worker-cvat
             install: >-
               pip install
+              -e services/api
               -e packages/worker-common
               -e packages/steps
               -e packages/cvat-client
