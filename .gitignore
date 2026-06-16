@@ -38,6 +38,11 @@ build/
 *.tsbuildinfo
 .eslintcache
 .parcel-cache
+coverage/
+
+# ── SonarQube ─────────────────────────────────────────────────────────────
+.scannerwork/
+scripts/.sonar.env
 
 # ── Docker / Local data volumes ───────────────────────────────────────────
 minio_data/
