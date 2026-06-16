@@ -8,6 +8,7 @@ import { putWithProgress } from '../lib/upload'
 import { INGEST_WORKFLOW_DEFINITION, INGEST_WORKFLOW_NAME } from '../lib/ingest'
 import { useProject } from '../api/projects'
 import { useWorkflows, useCreateWorkflow } from '../api/workflows'
+import { LoadingState } from '../components/ui'
 import {
   type DataSource,
   type DataSourceMatch,
@@ -558,7 +559,7 @@ export default function DataSources() {
         </div>
       )}
 
-      {isLoading && <div className="text-center py-12 text-text-muted text-sm">Loading…</div>}
+      {isLoading && <LoadingState />}
 
       {sources && sources.length === 0 && (
         <div className="bg-surface-2 rounded-xl border border-border shadow-sm p-10 text-center">

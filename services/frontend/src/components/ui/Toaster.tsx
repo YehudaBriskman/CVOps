@@ -2,10 +2,10 @@ import { useEffect } from 'react'
 import { useToastStore, type Toast, type ToastVariant } from '../../store/toast'
 
 const ACCENT: Record<ToastVariant, string> = {
-  info: 'var(--text-muted)',
-  success: '#16A34A',
-  warning: '#F59E0B',
-  error: '#EF4444',
+  info: 'var(--cv-info)',
+  success: 'var(--cv-success)',
+  warning: 'var(--cv-warning)',
+  error: 'var(--cv-error)',
 }
 
 const GLYPH: Record<ToastVariant, string> = {
@@ -31,7 +31,7 @@ function ToastItem({ toast }: { toast: Toast }) {
     >
       <span
         aria-hidden
-        className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+        className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-text-onAccent"
         style={{ backgroundColor: ACCENT[toast.variant] }}
       >
         {GLYPH[toast.variant]}

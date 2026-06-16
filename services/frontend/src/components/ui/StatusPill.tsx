@@ -10,11 +10,11 @@ interface StatusMeta {
 // and `cancelled`/`canceled` are accepted and normalized to one display.
 const STATUS: Record<string, StatusMeta> = {
   pending: { label: 'Pending', color: 'var(--text-muted)' },
-  running: { label: 'Running', color: '#F59E0B', pulse: true },
-  waiting: { label: 'Waiting', color: '#F59E0B' },
-  succeeded: { label: 'Succeeded', color: '#16A34A' },
-  completed: { label: 'Completed', color: '#16A34A' },
-  failed: { label: 'Failed', color: '#EF4444' },
+  running: { label: 'Running', color: 'var(--cv-warning)', pulse: true },
+  waiting: { label: 'Waiting', color: 'var(--cv-warning)' },
+  succeeded: { label: 'Succeeded', color: 'var(--cv-success)' },
+  completed: { label: 'Completed', color: 'var(--cv-success)' },
+  failed: { label: 'Failed', color: 'var(--cv-error)' },
   cancelled: { label: 'Canceled', color: 'var(--text-muted)' },
   canceled: { label: 'Canceled', color: 'var(--text-muted)' },
 }
