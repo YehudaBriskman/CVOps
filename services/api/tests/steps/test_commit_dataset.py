@@ -198,6 +198,12 @@ async def test_second_commit_advances_branch_with_parent_link(session: AsyncSess
 
     assert second["ref_id"] == first["ref_id"]  # same branch, advanced
 
+    # Committing to an EXISTING dataset resolves its id via SELECT; it must stay a
+    # str so output_refs/event payloads stay JSON-serializable under the
+    # coordinator (regression: a raw UUID raised "not JSON serializable").
+    assert isinstance(second["dataset_id"], str)
+    json.dumps(second)
+
     parent = (
         await session.execute(
             text("SELECT parent_commit_id FROM commits WHERE id = CAST(:c AS uuid)"),

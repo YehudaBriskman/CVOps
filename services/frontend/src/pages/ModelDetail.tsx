@@ -1,15 +1,15 @@
 import { useParams } from 'react-router-dom'
 import { useModel, useWeightsUrl } from '../api/models'
+import { usePinProject } from '../lib/useActiveProject'
 import { Breadcrumbs, Card, ErrorState, SkeletonList } from '../components/ui'
-
-// Base URL of the MLflow tracking UI. When unset, the run id shows as plain
-// text (there's no server to link to yet — see the MLflow standup plan).
-const MLFLOW_URL = import.meta.env.VITE_MLFLOW_URL as string | undefined
+import { mlflowRunUrl } from '../lib/mlflow'
+import { formatValue } from '../lib/format'
 
 export default function ModelDetail() {
   const { id } = useParams<{ id: string }>()
   const { data: model, isLoading, isError, refetch } = useModel(id)
   const { data: weightsUrl } = useWeightsUrl(id)
+  usePinProject(model?.project_id)
 
   if (isLoading) {
     return (
@@ -26,6 +26,13 @@ export default function ModelDetail() {
       </div>
     )
   }
+
+  const mlflowUrl = model.mlflow_run_id
+    ? mlflowRunUrl(model.mlflow_run_id, (model.metrics?.mlflow_experiment_id as string | undefined) ?? '0')
+    : null
+  const displayMetrics = model.metrics
+    ? Object.entries(model.metrics).filter(([k]) => !k.startsWith('mlflow_'))
+    : []
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -72,17 +79,17 @@ export default function ModelDetail() {
             <div>
               <dt className="text-xs text-text-muted">MLflow run</dt>
               <dd className="font-medium mt-0.5 font-mono text-xs">
-                {MLFLOW_URL ? (
+                {mlflowUrl ? (
                   <a
-                    href={`${MLFLOW_URL}/#/experiments/0/runs/${model.mlflow_run_id}`}
+                    href={mlflowUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-iris-400 hover:text-iris-hover"
+                    className="text-iris-400 hover:opacity-80"
                   >
                     {model.mlflow_run_id.slice(0, 12)} ↗
                   </a>
                 ) : (
-                  <span className="text-text-primary">{model.mlflow_run_id.slice(0, 12)}</span>
+                  <span className="text-text-secondary">{model.mlflow_run_id.slice(0, 12)}</span>
                 )}
               </dd>
             </div>
@@ -90,14 +97,14 @@ export default function ModelDetail() {
         </dl>
       </Card>
 
-      {model.metrics && Object.keys(model.metrics).length > 0 && (
+      {displayMetrics.length > 0 && (
         <Card className="mb-4 p-6">
           <h3 className="mb-3 text-sm font-bold text-text-secondary">Metrics</h3>
           <div className="grid grid-cols-3 gap-3">
-            {Object.entries(model.metrics).map(([k, v]) => (
+            {displayMetrics.map(([k, v]) => (
               <div key={k} className="rounded-lg bg-surface-3 px-3 py-2">
                 <p className="text-xs capitalize text-text-muted">{k.replace(/_/g, ' ')}</p>
-                <p className="text-lg font-bold text-text-primary">{String(v)}</p>
+                <p className="break-words text-lg font-bold text-text-primary">{formatValue(v)}</p>
               </div>
             ))}
           </div>
@@ -111,7 +118,7 @@ export default function ModelDetail() {
             {Object.entries(model.hyperparams).map(([k, v]) => (
               <div key={k}>
                 <dt className="text-xs capitalize text-text-muted">{k.replace(/_/g, ' ')}</dt>
-                <dd className="mt-0.5 font-medium text-text-primary">{String(v)}</dd>
+                <dd className="mt-0.5 break-words font-medium text-text-primary">{formatValue(v)}</dd>
               </div>
             ))}
           </dl>

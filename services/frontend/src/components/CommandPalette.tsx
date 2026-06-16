@@ -22,6 +22,7 @@ const PROJECT_SECTIONS = [
   { label: 'Datasets', path: 'datasets' },
   { label: 'Workflows', path: 'workflows' },
   { label: 'Models', path: 'models' },
+  { label: 'Training', path: 'training-containers' },
   { label: 'Settings', path: 'settings' },
 ]
 

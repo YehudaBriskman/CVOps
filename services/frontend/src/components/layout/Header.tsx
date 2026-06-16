@@ -1,8 +1,29 @@
 import { useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeMode } from '../../lib/theme'
 import { logout, useMe } from '../../api/auth'
+import { useProject } from '../../api/projects'
+import { useActiveProjectId } from '../../lib/useActiveProject'
 import { useUIStore } from '../../store/ui'
 import { queryClient } from '../../lib/queryClient'
+
+function getSection(pathname: string): string {
+  if (pathname === '/projects')                   return 'Projects'
+  if (pathname.endsWith('/data-sources'))         return 'Data Sources'
+  if (pathname.endsWith('/samples'))              return 'Samples'
+  if (pathname.endsWith('/datasets'))             return 'Datasets'
+  if (pathname.endsWith('/workflows'))            return 'Workflows'
+  if (pathname.endsWith('/runs'))                 return 'Runs'
+  if (pathname.endsWith('/models'))               return 'Models'
+  if (pathname.endsWith('/training-containers'))  return 'Training Environments'
+  if (pathname.endsWith('/settings'))             return 'Settings'
+  if (pathname.includes('/commits/'))             return 'Commit'
+  if (pathname.startsWith('/datasets/'))          return 'Dataset'
+  if (pathname.startsWith('/workflows/'))         return 'Workflow Builder'
+  if (pathname.startsWith('/runs/'))              return 'Run'
+  if (pathname.startsWith('/models/'))            return 'Model'
+  if (/^\/projects\/[^/]+$/.test(pathname))       return 'Dashboard'
+  return 'CVOps'
+}
 
 const themeLabel: Record<ThemeMode, string> = {
   light:  'Switch to dark theme',
@@ -15,6 +36,9 @@ export function Header() {
   const { mode, toggle } = useTheme()
   const { data: me } = useMe()
   const setCommandOpen = useUIStore((s) => s.setCommandOpen)
+  const projectId = useActiveProjectId()
+  const { data: project } = useProject(projectId)
+  const section = getSection(location.pathname)
   const initial = me?.email?.[0]?.toUpperCase() ?? 'U'
 
   async function handleLogout() {
@@ -25,6 +49,18 @@ export function Header() {
 
   return (
     <header className="h-14 border-b border-border bg-surface-2 flex items-center px-6 flex-shrink-0 gap-3">
+      <h1 className="flex-1 truncate text-base font-semibold text-text-primary">
+        {project && section !== 'Projects' ? (
+          <>
+            <span className="text-text-muted">{project.name}</span>
+            <span className="mx-2 text-text-muted" aria-hidden>/</span>
+            <span>{section}</span>
+          </>
+        ) : (
+          section
+        )}
+      </h1>
+
       <button
         type="button"
         onClick={() => setCommandOpen(true)}

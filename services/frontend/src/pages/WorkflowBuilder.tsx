@@ -23,6 +23,7 @@ import { StepConfigPanel } from '../components/workflow/StepConfigPanel'
 import { useWorkflow, useUpdateWorkflow } from '../api/workflows'
 import { useCreateRun } from '../api/runs'
 import { useRegistryTypes } from '../api/registry'
+import { usePinProject } from '../lib/useActiveProject'
 import { STEP_TYPES } from '../lib/stepCatalog'
 import { STEP_META, stepColor, stepLabel, resolveInputs, buildInputs } from '../lib/stepMeta'
 import { Button, Drawer, Field, Input } from '../components/ui'
@@ -380,6 +381,7 @@ export default function WorkflowBuilder() {
   const { id } = useParams<{ id: string }>()
   const { data: workflow } = useWorkflow(id)
   const { data: registryTypes } = useRegistryTypes('step')
+  usePinProject(workflow?.project_id)
 
   const paletteSteps = useMemo(() => {
     const keys =

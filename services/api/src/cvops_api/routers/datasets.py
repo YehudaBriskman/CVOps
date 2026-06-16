@@ -25,9 +25,9 @@ from cvops_api.db.models.versioning import (
     ProjectDatasetLink,
 )
 from cvops_api.db.models.ontologies import Ontology
-from cvops_api.db.models.workflows import Workflow
+from cvops_api.db.models.models import TrainingContainer
 from cvops_api.engine.coordinator import advance_workflow
-from cvops_api.engine.dispatch import create_adhoc_run, create_workflow_run
+from cvops_api.engine.dispatch import create_adhoc_run
 from cvops_api.schemas.datasets import (
     DatasetCreate,
     DatasetOut,
@@ -45,27 +45,6 @@ from cvops_api.schemas.samples import CursorPage, SampleOut
 from cvops_api.schemas.runs import RunOut, TrainCommitRequest
 
 router = APIRouter()
-
-# Fixed single-step workflow that pushes a review set into CVAT and parks the run
-# at a gate. Provisioned lazily per project (see get_or_create_review_workflow) so
-# the entry point needs no migration. The step's inputs pull from the run params
-# the /review endpoint sets, via the engine's `$run.params.*` resolver.
-REVIEW_WORKFLOW_NAME = "human_review"
-REVIEW_WORKFLOW_DEF: dict[str, Any] = {
-    "steps": [
-        {
-            "id": "review",
-            "type": "step.human_review",
-            "config": {},
-            "inputs": {
-                "sample_ids": "$run.params.sample_ids",
-                "annotation_revision_ids": "$run.params.annotation_revision_ids",
-            },
-        }
-    ],
-    "edges": [],
-}
-
 
 async def _check_project(
     project_id: uuid.UUID,
@@ -162,32 +141,6 @@ async def _latest_commit_id(
     return r2.scalar_one_or_none()
 
 
-async def get_or_create_review_workflow(
-    session: AsyncSession, project_id: uuid.UUID
-) -> Workflow:
-    """Find (or lazily create) the project's `human_review` workflow."""
-    r = await session.execute(
-        select(Workflow).where(
-            Workflow.project_id == project_id,
-            Workflow.name == REVIEW_WORKFLOW_NAME,
-            Workflow.deleted_at == None,  # noqa: E711
-        )
-    )
-    wf = r.scalar_one_or_none()
-    if wf is not None:
-        return wf
-
-    wf = Workflow(
-        project_id=project_id,
-        name=REVIEW_WORKFLOW_NAME,
-        definition=REVIEW_WORKFLOW_DEF,
-    )
-    session.add(wf)
-    await session.commit()
-    await session.refresh(wf)
-    return wf
-
-
 @router.post("/datasets/{id}/review")
 async def review_dataset(
     id: uuid.UUID,
@@ -204,7 +157,7 @@ async def review_dataset(
     dataset = r.scalar_one_or_none()
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found")
-    await _check_project(dataset.project_id, current_user, session)
+    proj = await _check_project(dataset.project_id, current_user, session)
 
     commit_id = await _latest_commit_id(session, dataset.id)
     if commit_id is None:
@@ -224,13 +177,68 @@ async def review_dataset(
             status_code=400, detail="Dataset commit has no samples to review"
         )
 
+    # Pre-labels are optional: samples without a committed annotation revision
+    # have annotation_revision_id = NULL. Drop those (don't stringify None into
+    # the literal "None", which then fails the UUID cast in human_review). The
+    # full working set rides on sample_ids; revisions are matched by their own
+    # sample_id, so the lists need not be positionally aligned.
     params: dict[str, Any] = {
         "sample_ids": [str(sid) for sid, _ in rows],
-        "annotation_revision_ids": [str(arid) for _, arid in rows],
+        "annotation_revision_ids": [str(arid) for _, arid in rows if arid is not None],
     }
 
-    wf = await get_or_create_review_workflow(session, dataset.project_id)
-    run = await create_workflow_run(session, wf, params, current_user.id)
+    # The commit step (below) pins the reviewed revisions into a new commit, so it
+    # needs the project's ontology. Resolve it now (default, else latest) and fail
+    # clearly if absent — human_review requires one too.
+    ontology_id = proj.default_ontology_id
+    if ontology_id is None:
+        ontology_id = (
+            await session.execute(
+                select(Ontology.id)
+                .where(Ontology.project_id == dataset.project_id, Ontology.deleted_at.is_(None))
+                .order_by(Ontology.version.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    if ontology_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Project has no ontology — add label classes before reviewing",
+        )
+
+    # Ad-hoc DAG: human_review gate → commit_dataset. When the CVAT sync resolves
+    # the gate (writing the reviewed revisions onto the review step's output_refs),
+    # the coordinator enqueues commit_dataset, which freezes those revisions into a
+    # new commit on `main` — so reviewed labels land in the dataset automatically.
+    definition: dict[str, Any] = {
+        "steps": [
+            {
+                "id": "review",
+                "type": "step.human_review",
+                "config": {},
+                "inputs": {
+                    "sample_ids": "$run.params.sample_ids",
+                    "annotation_revision_ids": "$run.params.annotation_revision_ids",
+                },
+            },
+            {
+                "id": "commit",
+                "type": "step.commit_dataset",
+                "config": {
+                    "dataset_name": dataset.name,
+                    "ontology_id": str(ontology_id),
+                    "branch_name": "main",
+                    "message": "Committed from CVAT review",
+                },
+                "inputs": {
+                    "sample_ids": "$run.params.sample_ids",
+                    "annotation_revision_ids": "$steps.review.outputs.annotation_revision_ids",
+                },
+            },
+        ],
+        "edges": [{"from": "review", "to": "commit"}],
+    }
+    run = await create_adhoc_run(session, dataset.project_id, definition, params, current_user.id)
     await advance_workflow(session, run.id, current_user.id)
     return {"run_id": str(run.id)}
 
@@ -634,6 +642,19 @@ async def train_commit(
     if commit is None:
         raise HTTPException(status_code=404, detail="Commit not found")
 
+    # Optional saved training environment: load it scoped to this project so a
+    # container from another project (or org) is unreachable.
+    if body.training_container_id is not None:
+        rtc = await session.execute(
+            select(TrainingContainer).where(
+                TrainingContainer.id == body.training_container_id,
+                TrainingContainer.project_id == dataset.project_id,
+                TrainingContainer.deleted_at == None,  # noqa: E711
+            )
+        )
+        if rtc.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Training container not found")
+
     train_config: dict[str, Any] = {
         "git_url": body.git_url,
         "entry_point": body.entry_point,
@@ -641,6 +662,8 @@ async def train_commit(
     }
     if body.branch:
         train_config["branch"] = body.branch
+    if body.training_container_id is not None:
+        train_config["training_container_id"] = str(body.training_container_id)
 
     definition = {
         "steps": [

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import type { RunStep } from './types'
 import { StatusPill } from '../ui'
+import { mlflowRunUrl } from '../../lib/mlflow'
 
 // Category accent colors (saturated dots read on both themes).
 const ACCENT: Record<string, string> = {
@@ -46,10 +47,24 @@ export function StepRunCard({ step, defaultOpen = false }: { step: RunStep; defa
   const [open, setOpen] = useState(defaultOpen)
   const accent = ACCENT[step.type_key] ?? 'bg-slate-400'
 
+  // The train step writes mlflow_run_id / mlflow_experiment_id onto metrics as
+  // soon as the trainer opens its MLflow run, so a link appears mid-run. Pull
+  // them out so they show as a link, not raw rows in the metrics grid.
+  const mlflowRunId = step.metrics?.mlflow_run_id as string | undefined
+  const mlflowUrl = mlflowRunId
+    ? mlflowRunUrl(mlflowRunId, (step.metrics?.mlflow_experiment_id as string | undefined) ?? '0')
+    : null
+  const displayMetrics = step.metrics
+    ? Object.fromEntries(
+        Object.entries(step.metrics).filter(([k]) => !k.startsWith('mlflow_')),
+      )
+    : null
+
   const hasDetail =
     step.error ||
     step.cvat_url ||
-    (step.metrics && Object.keys(step.metrics).length > 0) ||
+    mlflowRunId ||
+    (displayMetrics && Object.keys(displayMetrics).length > 0) ||
     (step.outputs && Object.keys(step.outputs).length > 0) ||
     (step.inputs && Object.keys(step.inputs).length > 0) ||
     (step.config && Object.keys(step.config).length > 0)
@@ -103,7 +118,27 @@ export function StepRunCard({ step, defaultOpen = false }: { step: RunStep; defa
             </div>
           )}
 
-          {step.metrics && <DetailSection title="Metrics" values={step.metrics} />}
+          {mlflowRunId && (
+            <div className="rounded-lg border border-iris/30 bg-iris/5 p-3">
+              <p className="mb-1 text-xs font-semibold text-text-primary">MLflow tracking</p>
+              {mlflowUrl ? (
+                <a
+                  href={mlflowUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-xs text-iris-400 underline hover:opacity-80"
+                >
+                  Follow this run in MLflow ↗
+                </a>
+              ) : (
+                <span className="font-mono text-xs text-text-secondary">{mlflowRunId.slice(0, 12)}</span>
+              )}
+            </div>
+          )}
+
+          {displayMetrics && Object.keys(displayMetrics).length > 0 && (
+            <DetailSection title="Metrics" values={displayMetrics} />
+          )}
           {step.outputs && <DetailSection title="Outputs" values={step.outputs} />}
           {step.inputs && <DetailSection title="Resolved inputs" values={step.inputs} />}
           {step.config && <DetailSection title="Config" values={step.config} />}

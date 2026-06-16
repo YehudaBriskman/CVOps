@@ -23,6 +23,7 @@ isolated and disposable without spawning containers.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -32,13 +33,17 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from collections import deque
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cvops_api.config import settings
+from cvops_api.core.storage import StorageBackend
 from cvops_api.db.models.models import ModelVersion, TrainingContainer
 from cvops_api.engine.step import Step, StepContext
 
@@ -46,8 +51,16 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = 7200  # seconds
 _LOG_TAIL_CHARS = 2000
+_LOG_TAIL_LINES = 200  # streamed lines kept for error reporting
 _VENV_TIMEOUT = 120  # seconds to build the per-run venv
 _PIP_TIMEOUT = 600  # seconds to install repo requirements
+
+# Markers the trainer prints on its own stdout so the step can surface live
+# progress without waiting for the run to finish. The example trainer emits the
+# MLflow parent run + experiment ids the moment it opens the study run, so the
+# dashboard can link to MLflow while training is still going.
+_MARK_RUN_ID = "CVOPS_MLFLOW_RUN_ID"
+_MARK_EXP_ID = "CVOPS_MLFLOW_EXPERIMENT_ID"
 
 with open(Path(__file__).parent / "schemas" / "train.json") as _f:
     _SCHEMA = json.load(_f)
@@ -173,29 +186,57 @@ def _build_env(
     return env
 
 
-def _run_training(
+async def _run_training(
     repo_dir: Path,
     entry_point: str,
     env: dict[str, str],
     timeout: int,
     python_path: Path,
+    on_marker: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> tuple[int, str]:
-    """Run the training script with the per-run venv's interpreter.
+    """Run the training script with the per-run venv's interpreter, streaming
+    its output line-by-line to the worker log (so a long train is followable in
+    `worker-training` logs in real time) instead of buffering until exit.
 
-    Returns (returncode, combined_logs[-_LOG_TAIL_CHARS:]).
+    stderr is merged into stdout; each line is logged and kept in a bounded tail
+    for error reporting. ``CVOPS_MLFLOW_*`` marker lines are forwarded to
+    ``on_marker`` as soon as they appear, letting the caller surface live links.
+
+    Returns (returncode, combined_logs_tail[-_LOG_TAIL_CHARS:]).
     """
     script = (repo_dir / entry_point).resolve()
-    if not str(script).startswith(str(repo_dir.resolve()) + "/"):
+    if not str(script).startswith(str(repo_dir.resolve()) + os.sep):
         raise RuntimeError(f"entry_point escapes repo directory: {entry_point!r}")
-    result = subprocess.run(  # noqa: S603
-        [str(python_path), str(script)],
-        env=env,
+
+    proc = await asyncio.create_subprocess_exec(
+        str(python_path),
+        str(script),
         cwd=str(repo_dir),
-        capture_output=True,
-        timeout=timeout,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
-    logs = (result.stdout + result.stderr).decode("utf-8", errors="replace")[-_LOG_TAIL_CHARS:]
-    return result.returncode, logs
+    tail: deque[str] = deque(maxlen=_LOG_TAIL_LINES)
+
+    async def _drain() -> None:
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip("\n")
+            logger.info("[train] %s", line)
+            tail.append(line)
+            if on_marker and line.startswith((_MARK_RUN_ID, _MARK_EXP_ID)) and "=" in line:
+                key, _, value = line.partition("=")
+                await on_marker(key.strip(), value.strip())
+        await proc.wait()
+
+    try:
+        await asyncio.wait_for(_drain(), timeout=timeout)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise RuntimeError(f"training timed out after {timeout}s") from None
+
+    return proc.returncode or 0, "\n".join(tail)[-_LOG_TAIL_CHARS:]
 
 
 def _read_metrics(output_dir: Path, metrics_path_spec: str) -> dict[str, Any]:
@@ -229,7 +270,25 @@ async def _upload_weights(
         tf.add(str(weights_dir), arcname=weights_dir.name)
     weights_bytes = buf.getvalue()
 
-    return await ctx.storage.save_bytes(weights_bytes, "application/x-tar")
+    blob_hash = await ctx.storage.save_bytes(weights_bytes, "application/x-tar")
+    # save_bytes only uploads the object; register the blobs row too so the
+    # ModelVersion.blob_hash FK (fk_model_versions_blob_hash) resolves. Mirrors
+    # export_yolo's blob registration. ON CONFLICT keeps re-runs idempotent.
+    await ctx.session.execute(
+        text(
+            "INSERT INTO blobs (hash, storage_backend, storage_key, "
+            "size_bytes, media_type) VALUES (:h, :sb, :sk, :sz, :mt) "
+            "ON CONFLICT (hash) DO NOTHING"
+        ),
+        {
+            "h": blob_hash,
+            "sb": settings.S3_BACKEND,
+            "sk": StorageBackend._bucket_key(blob_hash),
+            "sz": len(weights_bytes),
+            "mt": "application/x-tar",
+        },
+    )
+    return blob_hash
 
 
 async def _write_model_version(
@@ -312,9 +371,33 @@ class TrainStep(Step):
             output_dir.mkdir(parents=True, exist_ok=True)
             env = _build_env(icd_config, hyperparams, dataset_dir, output_dir, venv_python)
 
-            # 6. Run training
-            returncode, logs = _run_training(
-                repo_dir, entry_point, env, timeout, venv_python
+            # 6. Run training, surfacing the MLflow run as soon as the trainer
+            #    opens it. Persisting to runs.metrics here also commits the
+            #    'running' transition the runner left uncommitted (and releases
+            #    the run-row lock), so the dashboard can link to MLflow and
+            #    follow along live rather than only seeing the final result.
+            live: dict[str, str] = {}
+
+            async def _on_marker(key: str, value: str) -> None:
+                field = {
+                    _MARK_RUN_ID: "mlflow_run_id",
+                    _MARK_EXP_ID: "mlflow_experiment_id",
+                }.get(key)
+                if not field or not value:
+                    return
+                live[field] = value
+                await ctx.session.execute(
+                    text(
+                        "UPDATE runs SET metrics = "
+                        "COALESCE(metrics, '{}'::jsonb) || CAST(:m AS jsonb) "
+                        "WHERE id = CAST(:i AS uuid)"
+                    ),
+                    {"m": json.dumps(live), "i": ctx.run_id},
+                )
+                await ctx.session.commit()
+
+            returncode, logs = await _run_training(
+                repo_dir, entry_point, env, timeout, venv_python, _on_marker
             )
 
             # 7. Handle result

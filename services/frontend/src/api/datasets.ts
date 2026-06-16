@@ -8,6 +8,7 @@ export interface TrainCommitRequest {
   entry_point?: string
   branch?: string | null
   hyperparams?: Record<string, string | number | boolean> | null
+  training_container_id?: string
 }
 
 export interface Dataset {
@@ -78,7 +79,10 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
   })
 }
 
-/** The samples frozen into a specific commit (cursor-paginated). */
+// The samples frozen into a specific commit (the dataset's curated, labeled
+// snapshot), cursor-paginated. Same page shape as useSamples, so it drops
+// straight into <SampleGrid>; the grid's box overlay shows each sample's latest
+// annotation revision.
 export function useCommitSamples(datasetId: string | undefined, commitId: string | null | undefined) {
   return useInfiniteQuery<CursorPage<Sample>>({
     queryKey: ['commit-samples', datasetId, commitId],
@@ -95,7 +99,6 @@ export function useCommitSamples(datasetId: string | undefined, commitId: string
     enabled: !!datasetId && !!commitId,
   })
 }
-
 export function useReviewDataset() {
   return useMutation({
     mutationFn: async (datasetId: string) => {

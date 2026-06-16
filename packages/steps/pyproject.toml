@@ -18,6 +18,14 @@ dependencies = [
 [project.optional-dependencies]
 ml = ["ultralytics>=8.2"]   # auto_label: YOLOv8 inference (pulls torch)
 train = ["docker>=7.1"]     # train: Docker container dispatch
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cvops_steps"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

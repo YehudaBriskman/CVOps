@@ -1,6 +1,11 @@
 # ── Claude Code ──────────────────────────────────────────────────────────
 /.claude
 
+# graphify knowledge-graph cache — local-only, regenerable. Not tracked: the
+# prebuilt graph + extraction cache (~80k lines) bloated diffs/PRs with no review
+# value. Regenerate locally with the graphify skill; the files stay on disk.
+/graphify-out/
+
 # ── Python ───────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

@@ -14,6 +14,11 @@ class RunOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     kind: str
+    # The DAG node id + step type — the frontend needs step_id to address gate
+    # actions (POST /runs/{id}/gates/{step_id}/resolve|sync); without it the UI
+    # falls back to the run id and the gate lookup 404s.
+    step_id: str | None = None
+    step_type: str | None = None
     status: str
     attempt: int
     input_refs: dict[str, Any] | None = None
@@ -52,3 +57,4 @@ class TrainCommitRequest(BaseModel):
     entry_point: str = "train.py"
     branch: str | None = None
     hyperparams: dict[str, Any] | None = None
+    training_container_id: uuid.UUID | None = None

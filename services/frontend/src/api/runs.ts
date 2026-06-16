@@ -164,3 +164,16 @@ export function useResolveGate() {
     onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ['run', vars.runId] }),
   })
 }
+
+// Pull reviewed annotations from CVAT and complete the gate (the manual
+// replacement for the completion webhook). The actual pull + resume happens
+// asynchronously in worker-cvat; the run view polls for the status change.
+export function useSyncGate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: { runId: string; stepId: string }) => {
+      await client.post(`/runs/${body.runId}/gates/${body.stepId}/sync`)
+    },
+    onSuccess: (_d, vars) => qc.invalidateQueries({ queryKey: ['run', vars.runId] }),
+  })
+}

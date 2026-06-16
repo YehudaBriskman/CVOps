@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useModels } from '../api/models'
 import { Breadcrumbs, Card, EmptyState, ErrorState, SkeletonList } from '../components/ui'
+import { formatValue } from '../lib/format'
 
 export default function Models() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -37,11 +38,16 @@ export default function Models() {
                 </div>
                 {m.metrics && (
                   <div className="text-right">
-                    {Object.entries(m.metrics).slice(0, 2).map(([k, v]) => (
-                      <p key={k} className="text-xs text-text-muted">
-                        {k}: <span className="font-medium text-text-secondary">{String(v)}</span>
-                      </p>
-                    ))}
+                    {Object.entries(m.metrics)
+                      // Teaser shows scalar headline metrics; skip nested blobs
+                      // like best_params (full detail lives on the model page).
+                      .filter(([, v]) => v !== null && typeof v !== 'object')
+                      .slice(0, 2)
+                      .map(([k, v]) => (
+                        <p key={k} className="text-xs text-text-muted">
+                          {k}: <span className="font-medium text-text-secondary">{formatValue(v)}</span>
+                        </p>
+                      ))}
                   </div>
                 )}
               </Card>

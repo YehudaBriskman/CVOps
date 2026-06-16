@@ -140,12 +140,17 @@ def annotate(
 # --------------------------------------------------------------------------- #
 # Human-review push / pull (worker-cvat gate)
 # --------------------------------------------------------------------------- #
-def push_review_task(task_name: str, images: list[ReviewImage]) -> dict:
+def push_review_task(
+    task_name: str, images: list[ReviewImage], label_names: list[str] | None = None
+) -> dict:
     """Create a CVAT task with images and CVOps pre-labels for human review.
 
-    Builds the task label set from the distinct ``class_key``s across all
-    pre-labels, uploads the images in order, and sets pre-annotations converted
-    from canonical normalized boxes to CVAT pixel rectangles.
+    The task's label classes are the union of ``label_names`` (the project
+    ontology's class keys — the canonical set reviewers should annotate with)
+    and any ``class_key``s present on the pre-labels. When ``label_names`` is
+    omitted the set falls back to the pre-label keys alone. Uploads the images in
+    order and sets pre-annotations converted from canonical normalized boxes to
+    CVAT pixel rectangles.
 
     Returns ``{task_id, job_ids, cvat_url, label_map}`` where ``label_map`` is
     ``{class_key: label_id}`` and the frame order equals the order of ``images``.
@@ -156,8 +161,9 @@ def push_review_task(task_name: str, images: list[ReviewImage]) -> dict:
         TaskWriteRequest,
     )
 
-    class_keys = sorted({a.get("class_key") for img in images for a in img.annotations})
-    labels = [{"name": key} for key in class_keys if key]
+    class_keys = set(label_names or [])
+    class_keys |= {a.get("class_key") for img in images for a in img.annotations}
+    labels = [{"name": key} for key in sorted(k for k in class_keys if k)]
 
     client = _client()
     task = client.tasks.create(TaskWriteRequest(name=task_name, labels=labels))
@@ -217,7 +223,9 @@ def pull_review_task(task_id: int, frame_dims: list[tuple[int, int]]) -> dict[in
 
     by_frame: dict[int, list[dict]] = {}
     for shape in getattr(data, "shapes", []):
-        if getattr(shape, "type", None) != "rectangle":
+        # shape.type is a cvat_sdk enum (str() == "rectangle"), not a plain
+        # string — compare its string value, not the enum object.
+        if str(getattr(shape, "type", "")) != "rectangle":
             continue  # gate is detection-only for now; skip polygons/polylines
         frame = shape.frame
         if frame >= len(frame_dims):
@@ -237,10 +245,16 @@ def register_webhook(task_id: int, target_url: str, secret: str) -> int:
     """Register a CVAT webhook firing on annotation/job updates for a task.
 
     Returns the created webhook id. The receiver must validate ``secret``.
+
+    NOTE: CVAT removed task-scoped webhooks — ``WebhookType`` now only allows
+    ``organization``/``project``, so this task-scoped registration fails against
+    CVAT >= 2.x. Callers (human_review) treat failure as non-fatal and fall back
+    to polling/manual gate resolution. Re-scoping to a project webhook (and
+    creating tasks under a CVAT project) is the proper fix for auto-resume.
     """
     from cvat_sdk.api_client.models import (
         EventsEnum,
-        WebhookContentTypeEnum,
+        WebhookContentType,
         WebhookWriteRequest,
     )
 
@@ -249,7 +263,7 @@ def register_webhook(task_id: int, target_url: str, secret: str) -> int:
         WebhookWriteRequest(
             target_url=target_url,
             type="task",
-            content_type=WebhookContentTypeEnum("application/json"),
+            content_type=WebhookContentType("application/json"),
             secret=secret,
             events=[EventsEnum("update:job"), EventsEnum("update:task")],
             task_id=task_id,

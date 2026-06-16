@@ -14,6 +14,7 @@ import RunView from './pages/RunView'
 import Runs from './pages/Runs'
 import Models from './pages/Models'
 import ModelDetail from './pages/ModelDetail'
+import TrainingContainers from './pages/TrainingContainers'
 import CvatModels from './pages/CvatModels'
 import ProjectSettings from './pages/ProjectSettings'
 import Login from './pages/Login'
@@ -67,6 +68,7 @@ export default function App() {
         <Route path="/runs/:id"                              element={<RunView />} />
         <Route path="/projects/:id/models"                   element={<Models />} />
         <Route path="/models/:id"                            element={<ModelDetail />} />
+        <Route path="/projects/:id/training-containers"      element={<TrainingContainers />} />
         <Route path="/projects/:id/settings"                 element={<ProjectSettings />} />
       </Route>
     </Routes>

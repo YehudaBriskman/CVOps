@@ -336,3 +336,48 @@ async def test_create_label_class_cross_org_404(factory) -> None:
             json={"class_key": "person", "display_name": "Person", "sort_order": 0},
         )
     assert res.status_code == 404, res.text
+
+
+# ── GET /ontologies/{id}/classes (list, ordered by sort_order) ───────────────
+
+
+async def _make_ontology_with_classes(factory, project: Project) -> uuid.UUID:
+    """An ontology with two label classes inserted out of order, to prove the
+    list endpoint sorts by sort_order rather than insertion order."""
+    async with factory() as s:
+        ont = Ontology(project_id=project.id, name=f"ont-{uuid.uuid4().hex[:6]}")
+        s.add(ont)
+        await s.flush()
+        s.add_all(
+            [
+                LabelClass(ontology_id=ont.id, class_key="car", display_name="Car", color="#0F0", sort_order=1),
+                LabelClass(ontology_id=ont.id, class_key="plane", display_name="Plane", color="#F00", sort_order=0),
+            ]
+        )
+        await s.commit()
+        return ont.id
+
+
+async def test_list_classes_ordered_by_sort_order(factory) -> None:
+    user, project = await _seed(factory)
+    ont_id = await _make_ontology_with_classes(factory, project)
+    async with _client(factory, user) as c:
+        res = await c.get(f"/ontologies/{ont_id}/classes")
+    assert res.status_code == 200, res.text
+    assert [lc["class_key"] for lc in res.json()] == ["plane", "car"]  # sort_order 0, 1
+
+
+async def test_list_classes_missing_ontology_404(factory) -> None:
+    user, _project = await _seed(factory)
+    async with _client(factory, user) as c:
+        res = await c.get(f"/ontologies/{uuid.uuid4()}/classes")
+    assert res.status_code == 404, res.text
+
+
+async def test_list_classes_cross_org_404(factory) -> None:
+    _owner, project = await _seed(factory)
+    other, _p2 = await _seed(factory)
+    ont_id = await _make_ontology_with_classes(factory, project)
+    async with _client(factory, other) as c:
+        res = await c.get(f"/ontologies/{ont_id}/classes")
+    assert res.status_code == 404, res.text

@@ -161,6 +161,47 @@ async def test_advance_reuses_prior_succeeded_run(
     assert parent.status == "succeeded"
 
 
+async def test_advance_reuses_when_multiple_prior_succeeded_runs(
+    session, fake_redis, echo_step
+) -> None:
+    """A deterministic step run to success more than once leaves several rows
+    sharing one idem key. advance must not choke (regression: scalar_one_or_none
+    raised MultipleResultsFound) — it reuses the most recent one."""
+    from datetime import UTC, datetime, timedelta
+
+    parent, source_id = await _seed_parent(session, _SINGLE_STEP_DEF)
+    actor = uuid.uuid4()
+
+    idem_key = EchoStep().idempotency_key({}, {"src": source_id})
+    base = datetime.now(UTC)
+    for i, out in enumerate(["older", "newer"]):
+        session.add(
+            Run(
+                project_id=parent.project_id,
+                kind="step",
+                step_type="test.echo",
+                status="succeeded",
+                input_refs={"src": source_id},
+                output_refs={"echoed": out},
+                config={"_idem_key": idem_key},
+                finished_at=base + timedelta(minutes=i),
+            )
+        )
+    await session.commit()
+
+    await advance_workflow(session, parent.id, actor)
+
+    child = (
+        (await session.execute(select(Run).where(Run.parent_run_id == parent.id)))
+        .scalars()
+        .one()
+    )
+    # Most recent prior (by finished_at) wins; nothing enqueued.
+    assert child.status == "succeeded"
+    assert child.output_refs == {"echoed": "newer"}
+    assert await fake_redis.xlen(STREAM) == 0
+
+
 async def test_advance_adhoc_run_uses_inline_definition(
     session, fake_redis, echo_step
 ) -> None:
