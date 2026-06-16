@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { toast } from 'sonner'
+import { toast } from '../store/toast'
 import { useCvatModels, useDeployCvatModel, useDeleteCvatModel } from '../api/cvat'
 
 export default function CvatModels() {
@@ -16,27 +16,31 @@ export default function CvatModels() {
     e.preventDefault()
     if (!file) return
     const name = modelName
-    const toastId = toast.loading(`Deploying "${name}"… this may take a few minutes`)
+    const toastId = toast.info(`Deploying "${name}"…`, 'This may take a few minutes', 0)
     try {
       await deploy.mutateAsync({ modelName: name, file })
-      toast.success(`Model "${name}" deployed successfully`, { id: toastId })
+      toast.dismiss(toastId)
+      toast.success(`Model "${name}" deployed successfully`)
       setModelName('')
       setFile(null)
       if (fileRef.current) fileRef.current.value = ''
       setShowForm(false)
     } catch {
-      toast.error(`Failed to deploy "${name}"`, { id: toastId })
+      toast.dismiss(toastId)
+      toast.error(`Failed to deploy "${name}"`)
     }
   }
 
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Delete "${name}"?`)) return
-    const toastId = toast.loading(`Deleting "${name}"…`)
+    const toastId = toast.info(`Deleting "${name}"…`, undefined, 0)
     try {
       await deleteModel.mutateAsync(id)
-      toast.success(`Model "${name}" deleted`, { id: toastId })
+      toast.dismiss(toastId)
+      toast.success(`Model "${name}" deleted`)
     } catch {
-      toast.error(`Failed to delete "${name}"`, { id: toastId })
+      toast.dismiss(toastId)
+      toast.error(`Failed to delete "${name}"`)
     }
   }
 

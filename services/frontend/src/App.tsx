@@ -1,6 +1,5 @@
 import { Suspense, lazy } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { Toaster } from 'sonner'
 import { Layout } from './components/layout/Layout'
 import { Spinner } from './components/ui'
 import Projects from './pages/Projects'
@@ -41,7 +40,6 @@ function RouteFallback() {
 export default function App() {
   return (
     <>
-    <Toaster position="bottom-right" richColors closeButton />
     <Routes>
       <Route path="/login"    element={<Login />} />
       <Route path="/register" element={<Register />} />
