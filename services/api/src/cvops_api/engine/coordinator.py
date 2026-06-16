@@ -227,15 +227,21 @@ async def advance_workflow(
         idem_key = step_impl.idempotency_key(config, resolved)
 
         # Idempotency reuse: a prior succeeded run with the same key short
-        # -circuits execution — copy its outputs, no enqueue.
+        # -circuits execution — copy its outputs, no enqueue. A deterministic
+        # step (e.g. export_yolo on the same commit) can have run to success
+        # many times, so several rows share the key; their outputs are identical
+        # by construction, so the most recent one is an equally valid source.
         idem_result = await session.execute(
-            select(Run).where(
+            select(Run)
+            .where(
                 Run.step_type == type_key,
                 Run.status == "succeeded",
                 Run.config["_idem_key"].astext == idem_key,
             )
+            .order_by(Run.finished_at.desc())
+            .limit(1)
         )
-        prior = idem_result.scalar_one_or_none()
+        prior = idem_result.scalars().first()
         if prior is not None:
             child = Run(
                 project_id=parent.project_id,
