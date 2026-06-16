@@ -4,7 +4,9 @@ import base64
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select, update
+from datetime import datetime
+
+from sqlalchemy import select, tuple_, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, cast
@@ -263,19 +265,26 @@ async def list_commits(
         raise HTTPException(status_code=404, detail="Dataset not found")
     await _check_project(dataset.project_id, current_user, session)
 
+    # Commit ids are random UUIDs, so they are NOT chronological — order by
+    # (created_at, id) DESC for true newest-first history. The cursor encodes
+    # the last item's "<iso_created_at>|<uuid>" and the next page filters with a
+    # tuple/row comparison so it stays stable across ties on created_at.
     q = select(Commit).where(Commit.dataset_id == id)
     if cursor is not None:
-        cursor_uuid = uuid.UUID(base64.b64decode(cursor).decode())
-        q = q.where(Commit.id > cursor_uuid)
-    q = q.order_by(Commit.id).limit(limit + 1)
+        cursor_created_at_raw, _, cursor_id_raw = base64.b64decode(cursor).decode().partition("|")
+        cursor_created_at = datetime.fromisoformat(cursor_created_at_raw)
+        cursor_id = uuid.UUID(cursor_id_raw)
+        q = q.where(tuple_(Commit.created_at, Commit.id) < (cursor_created_at, cursor_id))
+    q = q.order_by(Commit.created_at.desc(), Commit.id.desc()).limit(limit + 1)
 
     result = await session.execute(q)
     items = list(result.scalars().all())
 
     next_cursor: str | None = None
     if len(items) == limit + 1:
-        next_cursor = base64.b64encode(str(items[-1].id).encode()).decode()
         items = items[:limit]
+        last = items[-1]
+        next_cursor = base64.b64encode(f"{last.created_at.isoformat()}|{last.id}".encode()).decode()
 
     return CursorPage(
         items=[CommitOut.model_validate(c) for c in items],
@@ -503,7 +512,6 @@ async def create_commit_from_samples(
     committed = valid
     if not committed:
         raise HTTPException(status_code=422, detail="no samples to commit")
-    annotated_count = sum(1 for sid in committed if sid in winning)
 
     # Optional ontology: (1) body; (2) shared across winning revisions; (3)
     # project default; else None (raw-image commits have no ontology).
@@ -532,26 +540,34 @@ async def create_commit_from_samples(
     ref = r_ref.scalar_one_or_none()
     parent_commit_id = ref.target_commit_id if ref is not None else None
 
-    # Create commit
-    commit = Commit(
-        dataset_id=dataset.id,
-        project_id=dataset.project_id,
-        ontology_id=ontology_id,
-        ontology_version=ont_version,
-        message=body.message,
-        stats={"sample_count": len(committed), "annotated": annotated_count},
-        parent_commit_id=parent_commit_id,
-    )
-    session.add(commit)
-    await session.flush()
-
-    # Assign splits over committed
+    # Assign splits over the new batch.
     total = len(committed)
     train_ratio = body.split_strategy.get("train_ratio", 0.7)
     val_ratio = body.split_strategy.get("val_ratio", 0.15)
     train_count = int(total * train_ratio)
     val_count = int(total * val_ratio)
 
+    # Cumulative state (a git "tree"): the new commit's commit_samples are the
+    # parent commit's commit_samples UNION this batch. The batch wins on overlap
+    # (fresh revision + freshly-assigned split); parent-only samples carry forward
+    # unchanged; batch-only samples are added. Keyed by sample_id.
+    merged: dict[uuid.UUID, tuple[uuid.UUID | None, str]] = {}
+
+    # Carry forward the parent commit's pinned samples first.
+    if parent_commit_id is not None:
+        r_parent = await session.execute(
+            select(
+                CommitSample.sample_id,
+                CommitSample.annotation_revision_id,
+                CommitSample.split,
+            ).where(CommitSample.commit_id == parent_commit_id)
+        )
+        for p_sid, p_rev, p_split in r_parent.all():
+            merged[p_sid] = (p_rev, p_split)
+
+    # The batch wins on overlap (and adds batch-only samples).
+    # TODO(#141): removal semantics — a future "this commit deletes sample X"
+    # would drop X from `merged` here instead of always unioning.
     for idx, sid in enumerate(committed):
         if idx < train_count:
             split = "train"
@@ -559,11 +575,39 @@ async def create_commit_from_samples(
             split = "val"
         else:
             split = "test"
+        merged[sid] = (winning[sid][0] if sid in winning else None, split)
+
+    # Recompute stats over the FULL cumulative set, not just the batch.
+    by_split: dict[str, int] = {}
+    cumulative_annotated = 0
+    for rev_id, split in merged.values():
+        by_split[split] = by_split.get(split, 0) + 1
+        if rev_id is not None:
+            cumulative_annotated += 1
+
+    # Create commit
+    commit = Commit(
+        dataset_id=dataset.id,
+        project_id=dataset.project_id,
+        ontology_id=ontology_id,
+        ontology_version=ont_version,
+        message=body.message,
+        stats={
+            "sample_count": len(merged),
+            "annotated": cumulative_annotated,
+            "by_split": by_split,
+        },
+        parent_commit_id=parent_commit_id,
+    )
+    session.add(commit)
+    await session.flush()
+
+    for sid, (rev_id, split) in merged.items():
         session.add(
             CommitSample(
                 commit_id=commit.id,
                 sample_id=sid,
-                annotation_revision_id=winning[sid][0] if sid in winning else None,
+                annotation_revision_id=rev_id,
                 split=split,
             )
         )
@@ -772,8 +816,8 @@ async def delete_ref(
 @router.get("/datasets/{id}/diff", response_model=DiffOut)
 async def diff_commits(
     id: uuid.UUID,
-    from_commit: uuid.UUID = Query(...),
-    to_commit: uuid.UUID = Query(...),
+    from_commit: uuid.UUID = Query(..., alias="from"),
+    to_commit: uuid.UUID = Query(..., alias="to"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DiffOut:
