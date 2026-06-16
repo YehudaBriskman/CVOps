@@ -374,7 +374,10 @@ worker_env['REDIS_STREAM'] = 'preprocessing'
 local_resource('worker-preprocessing',
     serve_cmd='cd services/api && .venv/bin/python -m cvops_worker',
     serve_env=worker_env,
-    deps=['services/worker-preprocessing/src'],
+    # Watch the step impls too — extract_frames/commit_dataset/export_yolo are
+    # editable-installed from packages/steps, so the worker must restart to pick
+    # up their changes (Python doesn't hot-reload).
+    deps=['services/worker-preprocessing/src', 'packages/steps/src/cvops_steps'],
     resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-install', 'migrate-up'],
     labels=['2-app'],
 )
