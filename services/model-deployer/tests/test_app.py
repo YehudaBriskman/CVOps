@@ -18,6 +18,34 @@ def test_health(client) -> None:
     assert res.json() == {"status": "ok"}
 
 
+def test_health_no_auth_allowed(unauth_client) -> None:
+    res = unauth_client.get("/health")
+    assert res.status_code == 200
+
+
+def test_deploy_requires_auth(unauth_client) -> None:
+    res = unauth_client.post(
+        "/deploy",
+        data={"model_name": "yolo"},
+        files={"file": ("weights.pt", io.BytesIO(b"x"), "application/octet-stream")},
+    )
+    assert res.status_code == 401
+
+
+def test_models_requires_auth(unauth_client) -> None:
+    res = unauth_client.get("/models")
+    assert res.status_code == 401
+
+
+def test_annotate_requires_auth(unauth_client) -> None:
+    res = unauth_client.post(
+        "/annotate",
+        data={"task_name": "t", "function_id": "fn", "threshold": "0.3"},
+        files={"files": ("a.jpg", io.BytesIO(b"img"), "image/jpeg")},
+    )
+    assert res.status_code == 401
+
+
 # --------------------------------------------------------------------------- #
 # POST /deploy
 # --------------------------------------------------------------------------- #

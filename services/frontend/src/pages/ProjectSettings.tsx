@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useProject, useUpdateProject, useDeleteProject } from '../api/projects'
 import { useWorkflows, useCreateWorkflow } from '../api/workflows'
 import { INGEST_WORKFLOW_DEFINITION, INGEST_WORKFLOW_NAME } from '../lib/ingest'
+import { LoadingState } from '../components/ui'
 
 export default function ProjectSettings() {
   const { id } = useParams<{ id: string }>()
@@ -54,7 +55,7 @@ export default function ProjectSettings() {
     navigate('/projects', { replace: true })
   }
 
-  if (isLoading) return <div className="p-6 text-sm text-text-muted">Loading…</div>
+  if (isLoading) return <LoadingState className="p-6" />
 
   return (
     <div className="p-6 max-w-2xl mx-auto">
