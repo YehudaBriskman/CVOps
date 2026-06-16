@@ -111,6 +111,41 @@ async def test_run_doorbell_routes_to_run_handler():
     assert redis.acked == ["2-0"]
 
 
+async def test_blocking_timeout_is_not_fatal():
+    """A RedisTimeoutError from the blocking read is a normal idle tick: the loop
+    keeps going and still delivers the next message (regression: it was caught by
+    the generic handler, logged as an error, and penalised with a 2s backoff)."""
+    from redis.exceptions import TimeoutError as RedisTimeoutError
+
+    run_handler = AsyncMock()
+    loop = ConsumerLoop(stream="cvat", step_types=["step.human_review"], handler=run_handler)
+
+    class _TimeoutThenMessage:
+        def __init__(self, loop):
+            self._loop = loop
+            self._calls = 0
+            self.acked: list[str] = []
+
+        async def xreadgroup(self, **kwargs):
+            self._calls += 1
+            if self._calls == 1:
+                raise RedisTimeoutError("Timeout reading from localhost:6379")
+            if self._calls == 2:
+                return [("cvat", [("9-0", {"job_id": "j9", "step_type": "step.human_review"})])]
+            self._loop.stop()
+            return []
+
+        async def xack(self, stream, group, msg_id):
+            self.acked.append(msg_id)
+
+    redis = _TimeoutThenMessage(loop)
+    await loop._consume_loop(redis)
+
+    # The timeout didn't end the loop; the message right after it was delivered.
+    run_handler.assert_awaited_once_with("j9", "step.human_review")
+    assert redis.acked == ["9-0"]
+
+
 async def test_handler_exception_still_acks():
     """A failing handler must not block the stream — the message is acked anyway
     (failures are recorded in PG, never auto-requeued)."""
