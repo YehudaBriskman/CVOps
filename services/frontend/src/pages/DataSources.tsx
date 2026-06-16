@@ -65,9 +65,33 @@ function StatusBadge({ ds }: { ds: DataSource }) {
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>
       {spinner && <span className="w-3 h-3 border-2 border-iris-400 border-t-iris rounded-full animate-spin" />}
       {label}
+    </span>
+  )
+}
+
+// Every preview renders into the same fixed-height band (160px ≤ 180px), so card
+// height is governed by the layout, never by the intrinsic size of the media.
+const MEDIA_FRAME = 'relative h-40 w-full overflow-hidden flex items-center justify-center bg-surface-1'
+
+function FolderGlyph() {
+  return (
+    <svg className="w-10 h-10 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+      <circle cx="9" cy="13" r="1.5" />
+      <path d="m7 18 3.5-3.5 2 2L16 13l4 4" />
+    </svg>
+  )
+}
+
+function PlayBadge() {
+  return (
+    <span className="absolute bottom-2 right-2 inline-flex items-center justify-center w-7 h-7 rounded-full bg-black/55 backdrop-blur-sm text-white pointer-events-none">
+      <svg className="w-3.5 h-3.5 translate-x-px" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M8 5v14l11-7z" />
+      </svg>
     </span>
   )
 }
@@ -77,16 +101,16 @@ function SourcePreview({ ds }: { ds: DataSource }) {
 
   if (ds.type === 'image_folder') {
     return (
-      <div className="aspect-video flex items-center justify-center bg-surface-1 text-4xl text-text-muted">
-        🖼️
+      <div className={MEDIA_FRAME}>
+        <FolderGlyph />
       </div>
     )
   }
 
   if (ds.external_uri && !ds.blob_hash) {
     return (
-      <div className="aspect-video bg-surface-1 flex items-center justify-center px-4">
-        <a href={ds.external_uri} target="_blank" rel="noreferrer" className="text-xs text-iris-400 hover:underline break-all text-center">
+      <div className={`${MEDIA_FRAME} px-4`}>
+        <a href={ds.external_uri} target="_blank" rel="noreferrer" className="text-xs text-iris-400 hover:underline break-all text-center line-clamp-3">
           {ds.external_uri}
         </a>
       </div>
@@ -94,12 +118,12 @@ function SourcePreview({ ds }: { ds: DataSource }) {
   }
 
   if (ds.blob_hash == null) {
-    return <div className="aspect-video bg-surface-3" />
+    return <div className={`${MEDIA_FRAME} bg-surface-3`} />
   }
 
   if (isLoading) {
     return (
-      <div className="aspect-video bg-surface-3 flex items-center justify-center">
+      <div className={`${MEDIA_FRAME} bg-surface-3`}>
         <div className="w-6 h-6 border-2 border-border-strong border-t-text-secondary rounded-full animate-spin" />
       </div>
     )
@@ -107,7 +131,7 @@ function SourcePreview({ ds }: { ds: DataSource }) {
 
   if (isError || !data?.url) {
     return (
-      <div className="aspect-video bg-surface-1 flex items-center justify-center text-xs text-text-muted">
+      <div className={`${MEDIA_FRAME} text-xs text-text-muted`}>
         Preview unavailable
       </div>
     )
@@ -115,15 +139,16 @@ function SourcePreview({ ds }: { ds: DataSource }) {
 
   if (ds.type === 'image') {
     return (
-      <div className="aspect-video bg-slate-900">
-        <img src={data.url} alt="source" className="w-full h-full object-contain" loading="lazy" />
+      <div className={`${MEDIA_FRAME} bg-black/40`}>
+        <img src={data.url} alt="source" className="w-full h-full object-cover" loading="lazy" />
       </div>
     )
   }
 
   return (
-    <div className="aspect-video bg-black">
-      <video src={data.url} controls preload="metadata" className="w-full h-full object-contain" />
+    <div className={`${MEDIA_FRAME} bg-black`}>
+      <video src={data.url} controls preload="metadata" className="w-full h-full object-cover" />
+      <PlayBadge />
     </div>
   )
 }
@@ -131,12 +156,12 @@ function SourcePreview({ ds }: { ds: DataSource }) {
 function SourceCard({ ds, projectId, onDelete }: { ds: DataSource; projectId: string; onDelete: (id: string) => void }) {
   const frames = ds.sample_count ?? 0
   return (
-    <div className="bg-surface-2 rounded-xl border border-border shadow-sm overflow-hidden flex flex-col">
+    <div className="group h-full bg-surface-2 rounded-xl border border-border shadow-sm overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-lg">
       <SourcePreview ds={ds} />
       <div className="p-4 flex flex-col gap-3 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-sm font-medium text-text-primary capitalize">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text-primary capitalize line-clamp-1">
               {typeof ds.metadata?.name === 'string' ? ds.metadata.name : ds.type.replace('_', ' ')}
             </p>
             <p className="text-xs text-text-muted mt-0.5 font-mono">{ds.id.slice(0, 8)}…</p>
@@ -543,7 +568,7 @@ export default function DataSources() {
       )}
 
       {sources && sources.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
           {sources.map(ds => (
             <SourceCard
               key={ds.id}

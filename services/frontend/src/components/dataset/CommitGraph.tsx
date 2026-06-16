@@ -1,45 +1,74 @@
-import { Link } from 'react-router-dom'
 import type { Commit } from '../../api/datasets'
+import { cn } from '../../lib/cn'
 
 interface Props {
-  datasetId: string | undefined
   commits: Commit[]
+  selectedId: string | null
+  onSelect: (id: string) => void
 }
 
-export function CommitGraph({ datasetId, commits }: Props) {
+/**
+ * Vertical commit timeline rail. Each commit is a node on a single trunk line;
+ * selecting one drives the contents pane beside it. The commits endpoint returns
+ * a linear history, so this renders a trunk rather than a branching DAG.
+ */
+export function CommitGraph({ commits, selectedId, onSelect }: Props) {
   if (commits.length === 0) {
     return (
-      <div className="bg-surface-2 rounded-xl border border-border shadow-sm p-10 text-center">
+      <div className="rounded-xl border border-border bg-surface-2 p-6 text-center shadow-sm">
         <p className="text-sm font-medium text-text-primary">No commits yet</p>
-        <p className="text-xs text-text-muted mt-1">Commits are created by workflow commit steps</p>
+        <p className="mt-1 text-xs text-text-muted">Commits are created by workflow commit steps</p>
       </div>
     )
   }
 
   return (
-    <div className="space-y-2">
-      {commits.map((c, i) => (
-        <Link
-          key={c.id}
-          to={`/datasets/${datasetId}/commits/${c.id}`}
-          className="flex items-center gap-4 bg-surface-2 rounded-xl border border-border shadow-sm px-5 py-3 hover:border-iris hover:shadow-md transition-all"
-        >
-          <div className="flex flex-col items-center flex-shrink-0">
-            <div className="w-3 h-3 rounded-full bg-iris border-2 border-surface-2 ring-1 ring-iris/40" />
-            {i < commits.length - 1 && <div className="w-0.5 h-6 bg-border mt-0.5" />}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-text-primary truncate">
-              {c.message ?? 'Commit'}
-            </p>
-            <p className="text-xs text-text-muted mt-0.5">
-              {new Date(c.created_at).toLocaleString()}
-              {c.stats?.sample_count != null && ` · ${c.stats.sample_count} samples`}
-            </p>
-          </div>
-          <span className="text-xs font-mono text-text-muted">{c.id.slice(0, 7)}</span>
-        </Link>
-      ))}
-    </div>
+    <ol className="space-y-1">
+      {commits.map((c, i) => {
+        const selected = c.id === selectedId
+        const count = (c.stats?.sample_count as number | undefined) ?? null
+        return (
+          <li key={c.id}>
+            <button
+              type="button"
+              onClick={() => onSelect(c.id)}
+              aria-current={selected}
+              className={cn(
+                'flex w-full items-stretch gap-3 rounded-lg border px-3 py-2 text-left transition-colors',
+                selected
+                  ? 'border-iris bg-iris/10'
+                  : 'border-transparent hover:border-border hover:bg-surface-2',
+              )}
+            >
+              <div className="flex flex-col items-center">
+                <span
+                  className={cn(
+                    'mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-surface-1',
+                    selected ? 'bg-iris ring-2 ring-iris/40' : 'bg-text-muted',
+                  )}
+                />
+                {i < commits.length - 1 && <span className="mt-0.5 w-0.5 flex-1 bg-border" />}
+              </div>
+              <div className="min-w-0 flex-1 pb-1">
+                <p className={cn('truncate text-sm', selected ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary')}>
+                  {c.message ?? 'Commit'}
+                </p>
+                <p className="mt-0.5 flex items-center gap-2 text-xs text-text-muted">
+                  <span className="font-mono">{c.id.slice(0, 7)}</span>
+                  <span>·</span>
+                  <span>{new Date(c.created_at).toLocaleDateString()}</span>
+                  {count != null && (
+                    <>
+                      <span>·</span>
+                      <span>{count} samples</span>
+                    </>
+                  )}
+                </p>
+              </div>
+            </button>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
