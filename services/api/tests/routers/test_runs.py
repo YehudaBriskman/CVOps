@@ -231,3 +231,42 @@ async def test_sync_gate_without_waiting_gate_404(factory, fake_redis) -> None:
 
     assert res.status_code == 404
     assert await fake_redis.xlen(runs.CVAT_STREAM) == 0
+
+
+async def test_run_detail_exposes_step_id(factory) -> None:
+    """RunOut must surface step_id/step_type so the UI can address gate actions
+    (regression: gate resolve/sync 404'd because step_id was absent → the UI fell
+    back to the run id, which never matches Run.step_id)."""
+    suffix = uuid.uuid4().hex[:8]
+    async with factory() as s:
+        org = Org(name=f"org-{suffix}")
+        s.add(org)
+        await s.flush()
+        user = User(org_id=org.id, email=f"u-{suffix}@test.com")
+        project = Project(org_id=org.id, name=f"proj-{suffix}")
+        s.add_all([user, project])
+        await s.flush()
+        parent = Run(project_id=project.id, kind="workflow", status="pending")
+        s.add(parent)
+        await s.flush()
+        child = Run(
+            project_id=project.id,
+            parent_run_id=parent.id,
+            kind="step",
+            status="waiting",
+            step_id="review",
+            step_type="step.human_review",
+        )
+        s.add(child)
+        await s.commit()
+        await s.refresh(user)
+        parent_id = parent.id
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/runs/{parent_id}")
+
+    assert res.status_code == 200
+    steps = res.json()["steps"]
+    assert len(steps) == 1
+    assert steps[0]["step_id"] == "review"
+    assert steps[0]["step_type"] == "step.human_review"
