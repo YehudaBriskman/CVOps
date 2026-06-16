@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { toast } from '../store/toast'
 import { useCvatModels, useDeployCvatModel, useDeleteCvatModel } from '../api/cvat'
+import { Badge, Button, Card, Dialog, EmptyState, ErrorState, Field, Input, Label, Spinner } from '../components/ui'
 
 export default function CvatModels() {
   const { data: models, isLoading, error } = useCvatModels()
@@ -10,6 +11,7 @@ export default function CvatModels() {
   const [showForm, setShowForm] = useState(false)
   const [modelName, setModelName] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleDeploy(e: React.FormEvent) {
@@ -31,8 +33,10 @@ export default function CvatModels() {
     }
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete "${name}"?`)) return
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const { id, name } = pendingDelete
+    setPendingDelete(null)
     const toastId = toast.info(`Deleting "${name}"…`, undefined, 0)
     try {
       await deleteModel.mutateAsync(id)
@@ -45,122 +49,94 @@ export default function CvatModels() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-5xl p-6">
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Deployed Models</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Models currently deployed in CVAT via Nuclio</p>
+          <h2 className="text-xl font-bold text-text-primary">Deployed Models</h2>
+          <p className="mt-0.5 text-sm text-text-muted">Models currently deployed in CVAT via Nuclio</p>
         </div>
-        <button
-          onClick={() => setShowForm(v => !v)}
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors"
-        >
-          + Deploy Model
-        </button>
+        <Button onClick={() => setShowForm((v) => !v)}>+ Deploy Model</Button>
       </div>
 
       {showForm && (
-        <form
-          onSubmit={handleDeploy}
-          className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 mb-6 flex flex-col gap-3"
-        >
-          <div className="flex gap-3 items-end">
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Model name</label>
-              <input
-                required
-                autoFocus
-                value={modelName}
-                onChange={e => setModelName(e.target.value)}
-                placeholder="e.g. yolov8n"
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+        <Card className="mb-6 p-4">
+          <form onSubmit={handleDeploy} className="flex flex-col gap-3">
+            <div className="flex items-end gap-3">
+              <Field label="Model name" className="flex-1">
+                <Input
+                  required
+                  autoFocus
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  placeholder="e.g. yolov8n"
+                />
+              </Field>
+              <div className="flex-1">
+                <Label>Weights file (.pt)</Label>
+                <input
+                  required
+                  ref={fileRef}
+                  type="file"
+                  accept=".pt"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                  className="w-full text-sm text-text-secondary file:mr-3 file:rounded-lg file:border-0 file:bg-iris/10 file:px-3 file:py-2 file:text-sm file:font-medium file:text-iris-400 hover:file:bg-iris/20"
+                />
+              </div>
             </div>
-            <div className="flex-1">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Weights file (.pt)</label>
-              <input
-                required
-                ref={fileRef}
-                type="file"
-                accept=".pt"
-                onChange={e => setFile(e.target.files?.[0] ?? null)}
-                className="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-              />
-            </div>
-          </div>
 
-          <div className="flex gap-2 items-center">
-            <button
-              type="submit"
-              disabled={deploy.isPending || !file}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-2"
-            >
+            <div className="flex items-center gap-2">
+              <Button type="submit" loading={deploy.isPending} disabled={!file}>
+                {deploy.isPending ? 'Deploying…' : 'Deploy'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowForm(false)}
+                disabled={deploy.isPending}
+              >
+                Cancel
+              </Button>
               {deploy.isPending && (
-                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                </svg>
+                <span className="text-xs text-text-muted">Building Docker image, may take a few minutes…</span>
               )}
-              {deploy.isPending ? 'Deploying…' : 'Deploy'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              disabled={deploy.isPending}
-              className="border border-slate-300 text-slate-600 px-4 py-2 rounded-lg text-sm hover:bg-slate-50 disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            {deploy.isPending && (
-              <span className="text-xs text-slate-400">Building Docker image, may take a few minutes…</span>
-            )}
-          </div>
-        </form>
+            </div>
+          </form>
+        </Card>
       )}
 
       {isLoading && (
-        <div className="flex items-center justify-center py-16 gap-3 text-slate-400 text-sm">
-          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-          </svg>
+        <div className="flex items-center justify-center gap-3 py-16 text-sm text-text-muted">
+          <Spinner className="h-5 w-5" />
           Loading models…
         </div>
       )}
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
-          Failed to load models
-        </div>
-      )}
+      {error && <ErrorState description="Failed to load models." />}
 
       {models && models.length === 0 && (
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-10 text-center">
-          <p className="text-sm font-medium text-slate-700">No models deployed</p>
-          <p className="text-xs text-slate-400 mt-1">Click "Deploy Model" to upload a .pt file</p>
-        </div>
+        <EmptyState
+          title="No models deployed"
+          description='Click "Deploy Model" to upload a .pt file'
+        />
       )}
 
       {models && models.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2">
-          {models.map(m => (
-            <div
-              key={m.id}
-              className="bg-white rounded-xl border border-slate-200 shadow-sm px-5 py-4"
-            >
+          {models.map((m) => (
+            <Card key={m.id} className="px-5 py-4">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold text-slate-800">{m.name}</p>
-                  <p className="text-xs text-slate-400 mt-1 font-mono">{m.id}</p>
+                  <p className="font-semibold text-text-primary">{m.name}</p>
+                  <p className="mt-1 font-mono text-xs text-text-muted">{m.id}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs bg-indigo-50 text-indigo-600 font-medium px-2 py-0.5 rounded-full capitalize">
+                  <Badge tone="info" className="capitalize">
                     {m.kind || 'detector'}
-                  </span>
+                  </Badge>
                   <button
-                    onClick={() => handleDelete(m.id, m.name)}
+                    onClick={() => setPendingDelete({ id: m.id, name: m.name })}
                     disabled={deleteModel.isPending}
-                    className="text-slate-400 hover:text-red-500 transition-colors disabled:opacity-40"
+                    className="text-text-muted transition-colors hover:text-error disabled:opacity-40"
                     title="Delete model"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -169,13 +145,30 @@ export default function CvatModels() {
                   </button>
                 </div>
               </div>
-              {m.description && (
-                <p className="text-xs text-slate-500 mt-2">{m.description}</p>
-              )}
-            </div>
+              {m.description && <p className="mt-2 text-xs text-text-secondary">{m.description}</p>}
+            </Card>
           ))}
         </div>
       )}
+
+      <Dialog
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title="Delete model"
+      >
+        <p className="text-sm text-text-secondary">
+          Delete <span className="font-medium text-text-primary">{pendingDelete?.name}</span>? This
+          removes it from CVAT and cannot be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={deleteModel.isPending} onClick={confirmDelete}>
+            Delete
+          </Button>
+        </div>
+      </Dialog>
     </div>
   )
 }

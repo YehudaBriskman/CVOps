@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useProjectRuns } from '../api/runs'
 import type { RunOut } from '../api/runs'
-import { Breadcrumbs, Button, EmptyState, StatusPill } from '../components/ui'
+import { Breadcrumbs, Button, EmptyState, LoadingState, StatusPill } from '../components/ui'
 
 const FILTERS: { label: string; value?: string }[] = [
   { label: 'All' },
@@ -45,7 +45,7 @@ export default function Runs() {
         </div>
       </div>
 
-      {isLoading && <div className="text-center py-12 text-text-muted text-sm">Loading…</div>}
+      {isLoading && <LoadingState />}
 
       {!isLoading && runs.length === 0 && (
         <EmptyState
