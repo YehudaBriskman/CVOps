@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { toast } from '../store/toast'
 import { useCvatModels, useDeployCvatModel, useDeleteCvatModel } from '../api/cvat'
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, Label, Spinner } from '../components/ui'
+import { Badge, Button, Card, Dialog, EmptyState, ErrorState, Field, Input, Label, Spinner } from '../components/ui'
 
 export default function CvatModels() {
   const { data: models, isLoading, error } = useCvatModels()
@@ -11,6 +11,7 @@ export default function CvatModels() {
   const [showForm, setShowForm] = useState(false)
   const [modelName, setModelName] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleDeploy(e: React.FormEvent) {
@@ -32,8 +33,10 @@ export default function CvatModels() {
     }
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`Delete "${name}"?`)) return
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const { id, name } = pendingDelete
+    setPendingDelete(null)
     const toastId = toast.info(`Deleting "${name}"…`, undefined, 0)
     try {
       await deleteModel.mutateAsync(id)
@@ -131,7 +134,7 @@ export default function CvatModels() {
                     {m.kind || 'detector'}
                   </Badge>
                   <button
-                    onClick={() => handleDelete(m.id, m.name)}
+                    onClick={() => setPendingDelete({ id: m.id, name: m.name })}
                     disabled={deleteModel.isPending}
                     className="text-text-muted transition-colors hover:text-error disabled:opacity-40"
                     title="Delete model"
@@ -147,6 +150,25 @@ export default function CvatModels() {
           ))}
         </div>
       )}
+
+      <Dialog
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title="Delete model"
+      >
+        <p className="text-sm text-text-secondary">
+          Delete <span className="font-medium text-text-primary">{pendingDelete?.name}</span>? This
+          removes it from CVAT and cannot be undone.
+        </p>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={deleteModel.isPending} onClick={confirmDelete}>
+            Delete
+          </Button>
+        </div>
+      </Dialog>
     </div>
   )
 }
