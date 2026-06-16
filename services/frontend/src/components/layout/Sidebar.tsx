@@ -5,8 +5,8 @@ function navClass({ isActive }: { isActive: boolean }) {
   return clsx(
     'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
     isActive
-      ? 'bg-surface-3 text-white'
-      : 'text-text-muted hover:bg-surface-3 hover:text-white',
+      ? 'bg-surface-3 text-text-primary'
+      : 'text-text-muted hover:bg-surface-3 hover:text-text-primary',
   )
 }
 
@@ -47,7 +47,7 @@ export function Sidebar() {
     <aside className="w-60 bg-surface-2 flex flex-col flex-shrink-0 overflow-hidden">
       {/* Logo */}
       <div className="h-14 flex items-center px-4 border-b border-border flex-shrink-0">
-        <Link to="/projects" className="flex items-center gap-2 text-white font-bold text-lg">
+        <Link to="/projects" className="flex items-center gap-2 text-text-primary font-bold text-lg">
           <span className="text-iris-400 text-xl">◈</span>
           CVOps
         </Link>
