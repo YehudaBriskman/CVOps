@@ -6,9 +6,17 @@ import os
 
 from cvat_sdk import Client
 
-CVAT_HOST     = os.environ.get("CVAT_HOST",     "http://cvat_server:8080")
-CVAT_USERNAME = os.environ.get("CVAT_USERNAME", "admin")
-CVAT_PASSWORD = os.environ.get("CVAT_PASSWORD", "Admin1234!")
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} env var is not set")
+    return value
+
+
+CVAT_HOST     = os.environ.get("CVAT_HOST", "http://cvat_server:8080")
+CVAT_USERNAME = _require_env("CVAT_USERNAME")
+CVAT_PASSWORD = _require_env("CVAT_PASSWORD")
 
 
 def _client() -> Client:
