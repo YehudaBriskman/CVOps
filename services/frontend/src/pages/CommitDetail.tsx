@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useCommit, useDataset, useTrainCommit } from '../api/datasets'
+import { useCommit, useCommitSamples, useDataset, useTrainCommit } from '../api/datasets'
 import { useTrainingContainers } from '../api/training-containers'
 import { usePinProject } from '../lib/useActiveProject'
 import { icdInputsToRjsfSchema } from '../lib/icdSchema'
 import { CommitStats } from '../components/dataset/CommitStats'
+import { SampleGrid } from '../components/dataset/SampleGrid'
 import { StepConfigForm } from '../components/workflow/StepConfigForm'
 import { Breadcrumbs, Button, Card, ErrorState, Select, SkeletonList } from '../components/ui'
 
@@ -178,6 +179,7 @@ export default function CommitDetail() {
   const { id: datasetId, cid: commitId } = useParams<{ id: string; cid: string }>()
   const { data: commit, isLoading, isError, refetch } = useCommit(datasetId, commitId)
   const { data: dataset } = useDataset(datasetId)
+  const commitSamples = useCommitSamples(datasetId, commitId)
   const [trainOpen, setTrainOpen] = useState(false)
   usePinProject(dataset?.project_id)
 
@@ -230,6 +232,18 @@ export default function CommitDetail() {
       </Card>
 
       <CommitStats stats={commit.stats} />
+
+      <div className="mt-6">
+        <h3 className="mb-3 text-sm font-bold text-text-primary">Samples</h3>
+        <SampleGrid
+          data={commitSamples.data}
+          isLoading={commitSamples.isLoading}
+          hasNextPage={commitSamples.hasNextPage}
+          isFetchingNextPage={commitSamples.isFetchingNextPage}
+          fetchNextPage={commitSamples.fetchNextPage}
+          projectId={dataset?.project_id}
+        />
+      </div>
 
       {trainOpen && datasetId && commitId && (
         <TrainModal

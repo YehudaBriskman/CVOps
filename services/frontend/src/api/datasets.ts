@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query'
 import { client } from '../lib/client'
-import type { CursorPage } from './samples'
+import type { CursorPage, Sample } from './samples'
 import type { RunOut } from './runs'
 
 export interface TrainCommitRequest {
@@ -76,6 +76,26 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
     },
     enabled: !!datasetId && !!commitId,
     staleTime: Infinity,
+  })
+}
+
+// The samples in a commit (the dataset's curated, labeled snapshot). Same page
+// shape as useSamples, so it drops straight into <SampleGrid>; the grid's box
+// overlay shows each sample's latest annotation revision.
+export function useCommitSamples(datasetId: string | undefined, commitId: string | undefined) {
+  return useInfiniteQuery<CursorPage<Sample>>({
+    queryKey: ['commit-samples', datasetId, commitId],
+    queryFn: async ({ pageParam }) => {
+      const params = new URLSearchParams()
+      if (pageParam) params.set('cursor', pageParam as string)
+      const { data } = await client.get<CursorPage<Sample>>(
+        `/datasets/${datasetId}/commits/${commitId}/samples?${params}`,
+      )
+      return data
+    },
+    initialPageParam: null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: !!datasetId && !!commitId,
   })
 }
 
