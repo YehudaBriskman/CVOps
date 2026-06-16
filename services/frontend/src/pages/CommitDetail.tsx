@@ -74,7 +74,7 @@ function TrainModal({
       <form
         onClick={e => e.stopPropagation()}
         onSubmit={submit}
-        className="bg-surface-2 rounded-xl border border-border shadow-xl p-6 w-full max-w-md"
+        className="bg-surface-2 rounded-xl border border-border shadow-xl p-6 w-full max-w-md max-h-[85vh] overflow-y-auto"
       >
         <h3 className="text-lg font-bold text-text-primary mb-4">Train this commit</h3>
 
@@ -136,13 +136,13 @@ function TrainModal({
                   value={row.key}
                   onChange={e => setRow(i, { key: e.target.value })}
                   placeholder="epochs"
-                  className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
+                  className="flex-1 min-w-0 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
                 />
                 <input
                   value={row.value}
                   onChange={e => setRow(i, { value: e.target.value })}
                   placeholder="10"
-                  className="flex-1 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
+                  className="flex-1 min-w-0 border border-border-strong bg-surface-2 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-iris"
                 />
               </div>
             ))}
