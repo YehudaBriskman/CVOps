@@ -13,10 +13,19 @@ CONTRACT — CVOps passes these as environment variables:
 
 PRODUCES — CVOps reads these back to create a ModelVersion:
   {OUTPUT_DIR}/weights/best.pt   best model across all Optuna trials
-  {OUTPUT_DIR}/metrics.json      {map50_95, best_params, n_trials, mlflow_run_id}
+  {OUTPUT_DIR}/metrics.json      {map50_95, map50, precision, recall, best_map50_95,
+                                  best_params, n_trials, mlflow_run_id,
+                                  mlflow_experiment_id}
 
-MLflow layout: one parent "optuna-study" run with each trial nested under it;
-metrics.json pins the parent run id so the dashboard's "View in MLflow" opens it.
+PROGRESS — printed to stdout (CVOps streams it into the worker log live and
+parses the markers to surface a "follow in MLflow" link mid-run):
+  CVOPS_MLFLOW_RUN_ID=<parent run id>          (once, as the study opens)
+  CVOPS_MLFLOW_EXPERIMENT_ID=<experiment id>   (once, as the study opens)
+  [trial N epoch e/E] map50_95=… precision=… …  (per epoch, per trial)
+
+MLflow layout: one parent "optuna-study" run with each trial nested under it,
+and per-epoch metrics logged on each trial run; metrics.json pins the parent run
+id so the dashboard's "View in MLflow" opens it.
 """
 
 from __future__ import annotations
@@ -25,6 +34,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import mlflow
 import optuna
@@ -44,6 +54,11 @@ MODEL = os.environ.get("MODEL", "yolov8n.pt")
 TRIALS_DIR = OUTPUT_DIR / "trials"
 
 
+def emit(line: str) -> None:
+    """Print a progress line, flushed, so CVOps streams it without buffering."""
+    print(line, flush=True)
+
+
 def build_data_yaml() -> Path:
     """Normalize the export's data.yaml into an ultralytics-ready one: absolute
     `path`, explicit train/val, names carried over. Falls back to train-as-val
@@ -52,7 +67,7 @@ def build_data_yaml() -> Path:
     val_dir = DATASET_PATH / "images" / "val"
     has_val = val_dir.is_dir() and any(val_dir.iterdir())
     if not has_val:
-        print("WARNING: export has no val split — validating on train; HPO metric is optimistic.")
+        emit("WARNING: export has no val split — validating on train; HPO metric is optimistic.")
     data = {
         "path": str(DATASET_PATH),
         "train": "images/train",
@@ -64,6 +79,38 @@ def build_data_yaml() -> Path:
     return out
 
 
+def _trial_metrics(results: Any) -> dict[str, float]:
+    """Pull the headline detection metrics off an ultralytics results object."""
+    box = results.box
+    return {
+        "map50_95": float(box.map),
+        "map50": float(box.map50),
+        "precision": float(box.mp),
+        "recall": float(box.mr),
+    }
+
+
+def _epoch_logger(trial_number: int):
+    """ultralytics `on_fit_epoch_end` callback: log this epoch's metrics to the
+    active (nested) MLflow run and print a concise progress line CVOps streams."""
+
+    def _cb(trainer: Any) -> None:
+        epoch = int(getattr(trainer, "epoch", 0)) + 1
+        raw = dict(getattr(trainer, "metrics", {}) or {})
+        # ultralytics keys look like 'metrics/precision(B)' — keep the leaf name.
+        clean = {
+            k.split("/")[-1].replace("(B)", ""): float(v)
+            for k, v in raw.items()
+            if isinstance(v, (int, float))
+        }
+        if clean:
+            mlflow.log_metrics({f"epoch_{k}": v for k, v in clean.items()}, step=epoch)
+        shown = " ".join(f"{k}={v:.4f}" for k, v in clean.items())
+        emit(f"[trial {trial_number} epoch {epoch}/{EPOCHS}] {shown}")
+
+    return _cb
+
+
 def objective(trial: optuna.Trial, data_yaml: Path) -> float:
     params = {
         "lr0": trial.suggest_float("lr0", 1e-4, 1e-1, log=True),
@@ -73,35 +120,45 @@ def objective(trial: optuna.Trial, data_yaml: Path) -> float:
     }
     with mlflow.start_run(run_name=f"trial-{trial.number}", nested=True):
         mlflow.log_params({**params, "epochs": EPOCHS, "imgsz": IMGSZ, "model": MODEL})
-        results = YOLO(MODEL).train(
+        model = YOLO(MODEL)
+        model.add_callback("on_fit_epoch_end", _epoch_logger(trial.number))
+        results = model.train(
             data=str(data_yaml),
             epochs=EPOCHS,
             imgsz=IMGSZ,
             project=str(TRIALS_DIR),
             name=f"t{trial.number}",
             exist_ok=True,
-            verbose=False,
+            verbose=True,
             **params,
         )
-        score = float(results.box.map)  # mAP50-95
-        mlflow.log_metric("map50_95", score)
+        metrics = _trial_metrics(results)
+        mlflow.log_metrics(metrics)
+        trial.set_user_attr("metrics", metrics)
         trial.set_user_attr("weights", str(TRIALS_DIR / f"t{trial.number}" / "weights" / "best.pt"))
-    return score
+    emit(f"[trial {trial.number}] done map50_95={metrics['map50_95']:.4f}")
+    return metrics["map50_95"]
 
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if os.environ.get("MLFLOW_TRACKING_URI"):
         mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-    mlflow.set_experiment("cvops-yolo-hpo")
+    experiment = mlflow.set_experiment("cvops-yolo-hpo")
 
     data_yaml = build_data_yaml()
 
     with mlflow.start_run(run_name="optuna-study") as parent:
         run_id = parent.info.run_id
+        # Emit the markers immediately so CVOps can link to MLflow while the
+        # study is still running (before any trial finishes).
+        emit(f"CVOPS_MLFLOW_RUN_ID={run_id}")
+        emit(f"CVOPS_MLFLOW_EXPERIMENT_ID={experiment.experiment_id}")
+
         study = optuna.create_study(direction="maximize")
         study.optimize(lambda t: objective(t, data_yaml), n_trials=N_TRIALS)
 
+        best = study.best_trial.user_attrs.get("metrics", {"map50_95": study.best_value})
         mlflow.log_params({f"best_{k}": v for k, v in study.best_params.items()})
         mlflow.log_metric("best_map50_95", study.best_value)
 
@@ -116,14 +173,16 @@ def main() -> None:
     (OUTPUT_DIR / "metrics.json").write_text(
         json.dumps(
             {
-                "map50_95": study.best_value,
+                **best,
+                "best_map50_95": study.best_value,
                 "best_params": study.best_params,
                 "n_trials": N_TRIALS,
                 "mlflow_run_id": run_id,
+                "mlflow_experiment_id": experiment.experiment_id,
             }
         )
     )
-    print(f"Best mAP50-95={study.best_value:.4f} params={study.best_params}")
+    emit(f"Best mAP50-95={study.best_value:.4f} params={study.best_params}")
 
 
 if __name__ == "__main__":
