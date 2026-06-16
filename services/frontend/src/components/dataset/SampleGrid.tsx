@@ -5,6 +5,7 @@ import { useImageUrl, useThumbnailUrl } from '../../api/samples'
 import { useSelectionStore } from '../../store/selection'
 import { useAnnotations } from '../../api/annotations'
 import { cn } from '../../lib/cn'
+import { LoadingState } from '../ui'
 import { BoxOverlay } from './BoxOverlay'
 
 const REVIEW_DOT: Record<string, string> = {
@@ -271,7 +272,7 @@ export function SampleGrid({
   const selecting = selectable && selectMode
 
   if (isLoading) {
-    return <div className="py-12 text-center text-sm text-text-muted">Loading…</div>
+    return <LoadingState />
   }
 
   if (samples.length === 0) {
