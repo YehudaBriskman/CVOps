@@ -191,10 +191,26 @@ dc_resource('cvat_redis_ondisk',   labels=['3-cvat'], resource_deps=['cvat-netwo
 dc_resource('cvat_clickhouse',     labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
 dc_resource('cvat_opa',            labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
 dc_resource('cvat_server',         labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
-# NOTE: cvat_db is ephemeral — tilt down wipes all CVAT users. After every
-# tilt down + tilt up you must recreate the superuser manually:
-#   docker exec cvat_server python manage.py createsuperuser --username nati --email natipinyan@gmail.com --noinput
-#   docker exec cvat_server python manage.py shell -c "from django.contrib.auth.models import User; u=User.objects.get(username='nati'); u.set_password('Nati2133'); u.save()"
+
+# Auto-create the CVAT superuser from CVAT_USERNAME/CVAT_PASSWORD in .env.
+# Idempotent: createsuperuser exits 0 even if the user already exists (--noinput
+# skips the interactive prompt), and set_password is safe to run repeatedly.
+# cvat_db is ephemeral — tilt down wipes it — so this runs on every tilt up.
+local_resource('cvat-superuser',
+    cmd='''
+        user="%s"
+        pass="%s"
+        for i in $(seq 1 30); do
+            docker exec cvat_server python manage.py createsuperuser \
+                --username "$user" --email "$user@cvops.local" --noinput 2>/dev/null && break
+            sleep 2
+        done
+        docker exec cvat_server python manage.py shell -c \
+            "from django.contrib.auth.models import User; u=User.objects.get(username='$user'); u.set_password('$pass'); u.save(); print('password set')"
+    ''' % (env.get('CVAT_USERNAME', 'admin'), env.get('CVAT_PASSWORD', 'admin')),
+    resource_deps=['cvat_server'],
+    labels=['3-cvat'],
+)
 dc_resource('cvat_ui',             labels=['3-cvat'])
 dc_resource('traefik',
     labels=['3-cvat'],
