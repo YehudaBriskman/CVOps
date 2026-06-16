@@ -28,11 +28,19 @@ from typing import Any
 
 from cvops_cvat_client.geometry import cvat_rect_to_norm_bbox, norm_bbox_to_cvat_rect
 
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} env var is not set")
+    return value
+
+
 # CVAT_URL is the spec name; CVAT_HOST is the legacy model-deployer name. Accept
 # either so this client drops into both contexts.
 CVAT_URL = os.environ.get("CVAT_URL") or os.environ.get("CVAT_HOST", "http://cvat_server:8080")
-CVAT_USERNAME = os.environ.get("CVAT_USERNAME", "admin")
-CVAT_PASSWORD = os.environ.get("CVAT_PASSWORD", "Admin1234!")
+CVAT_USERNAME = _require_env("CVAT_USERNAME")
+CVAT_PASSWORD = _require_env("CVAT_PASSWORD")
 # Browser-reachable base for the links we hand back to the dashboard.
 CVAT_PUBLIC_URL = os.environ.get("CVAT_PUBLIC_URL", "http://localhost:8080")
 

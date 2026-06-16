@@ -18,6 +18,7 @@ from cvops_api.db.models.models import ModelVersion
 router = APIRouter()
 
 DEPLOYER_URL = settings.MODEL_DEPLOYER_URL
+_DEPLOYER_HEADERS = {"Authorization": f"Bearer {settings.WORKER_TOKEN}"}
 
 
 async def _get_model_version(mv_id: uuid.UUID, user: User, session: AsyncSession) -> ModelVersion:
@@ -49,6 +50,7 @@ async def cvat_deploy_model(
 
         deploy_resp = await http.post(
             f"{DEPLOYER_URL}/deploy",
+            headers=_DEPLOYER_HEADERS,
             data={"model_name": model_name},
             files={"file": (f"{model_name}.pt", weights_resp.content, "application/octet-stream")},
             timeout=300,
@@ -68,7 +70,7 @@ async def list_cvat_models(
 ) -> list[dict]:
     """Return all models currently deployed in CVAT."""
     async with httpx.AsyncClient(timeout=10) as http:
-        resp = await http.get(f"{DEPLOYER_URL}/models")
+        resp = await http.get(f"{DEPLOYER_URL}/models", headers=_DEPLOYER_HEADERS)
     if resp.status_code != 200:
         raise HTTPException(502, f"Deployer error: {resp.text}")
     return resp.json()
@@ -87,6 +89,7 @@ async def cvat_deploy_file(
     async with httpx.AsyncClient(timeout=300) as http:
         resp = await http.post(
             f"{DEPLOYER_URL}/deploy",
+            headers=_DEPLOYER_HEADERS,
             data={"model_name": model_name},
             files={"file": (file.filename or "model.pt", contents, "application/octet-stream")},
         )
@@ -104,7 +107,7 @@ async def cvat_delete_model(
 ) -> dict:
     """Remove a Nuclio function from CVAT."""
     async with httpx.AsyncClient(timeout=30) as http:
-        resp = await http.delete(f"{DEPLOYER_URL}/models/{function_id}")
+        resp = await http.delete(f"{DEPLOYER_URL}/models/{function_id}", headers=_DEPLOYER_HEADERS)
     if resp.status_code != 200:
         raise HTTPException(502, f"Delete error: {resp.text}")
     return resp.json()
@@ -139,6 +142,7 @@ async def cvat_annotate(
     async with httpx.AsyncClient(timeout=600) as http:
         resp = await http.post(
             f"{DEPLOYER_URL}/annotate",
+            headers=_DEPLOYER_HEADERS,
             data=form_data,
             files=upload_files,
         )
