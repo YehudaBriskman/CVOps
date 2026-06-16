@@ -108,6 +108,8 @@ services:
       REDIS_URL:       redis://redis:6379/0
       JWT_SECRET:      ${JWT_SECRET}
       WORKER_TOKEN:    ${WORKER_TOKEN}
+      # worker-cvat exposes GET /models on :8001 (proxied by cvat.py router).
+      MODEL_DEPLOYER_URL: http://worker-cvat:8001
       # Verifies HMAC signatures on CVAT review-completion webhooks.
       CVAT_WEBHOOK_SECRET: ${CVAT_WEBHOOK_SECRET}
     volumes:

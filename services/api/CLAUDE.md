@@ -3,7 +3,7 @@
 ## 1. What's Implemented
 
 - 21 SQLAlchemy 2.0 async DB models in `src/cvops_api/db/models/`
-- Alembic migrations in `alembic/versions/`: `0001_initial_schema`, `0002_project_default_ingest_workflow`, `0003_data_source_unique_blob_per_project`, `0004_model_version_optional_container`, `0005_samples_collections_tags`, `0006_nullable_commit_ontology_annotation`
+- Single squashed Alembic migration `0001_initial_schema` in `alembic/versions/` (regenerate from the models with `alembic revision --autogenerate`; the chain was collapsed while pre-prod since tests build the schema from the models, not migrations). The two circular `projects` FKs (`default_ontology_id`, `default_ingest_workflow_id`) are appended as explicit `op.create_foreign_key` calls — keep them manual.
 - Fully implemented routers: auth, orgs, projects, data_sources, samples, ontologies, datasets, workflows, runs, models, training_containers, registry
 - Workflow engine: coordinator (`advance_workflow`/`process_step`) + ref_resolver in `src/cvops_api/engine/` — steps run out-of-process on Redis Streams (`docs/services/redis-streams.md`), not as in-process BackgroundTasks
 - Backend-triggered ingest: `confirm-upload` registers the blob and auto-dispatches the project's `default_ingest_workflow_id`

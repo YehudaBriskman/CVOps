@@ -1,20 +1,19 @@
-name: Frontend · Test, Lint & Type-check
+name: Frontend · Test, Lint, Type-check & Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'services/frontend/**'
       - '.github/workflows/ci-frontend.yml'
   pull_request:
-    branches: [main]
     paths:
       - 'services/frontend/**'
       - '.github/workflows/ci-frontend.yml'
 
 jobs:
   test:
-    name: vitest + eslint + tsc (Node 20)
+    name: eslint + tsc + vite build + vitest (Node 20)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,6 +36,9 @@ jobs:
 
       - name: Type-check
         run: npm run typecheck
+
+      - name: Build
+        run: npm run build
 
       - name: Vitest
         run: npm test

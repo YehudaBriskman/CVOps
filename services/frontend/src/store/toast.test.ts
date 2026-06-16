@@ -1,54 +1,72 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { toast, useToastStore } from './toast'
 
-describe('toast store', () => {
-  beforeEach(() => {
-    useToastStore.setState({ toasts: [] })
-  })
+describe('useToastStore', () => {
+  beforeEach(() => useToastStore.setState({ toasts: [] }))
 
-  it('push adds a toast with a generated id and returns it', () => {
+  it('push returns an id and appends the toast', () => {
     const id = useToastStore.getState().push({ title: 'Hi', variant: 'info', duration: 1000 })
+    expect(id).toMatch(/^toast-\d+$/)
     const toasts = useToastStore.getState().toasts
     expect(toasts).toHaveLength(1)
-    expect(toasts[0].id).toBe(id)
-    expect(toasts[0].title).toBe('Hi')
+    expect(toasts[0]).toMatchObject({ id, title: 'Hi', variant: 'info', duration: 1000 })
   })
 
-  it('generates unique ids across pushes', () => {
-    const a = useToastStore.getState().push({ title: 'A', variant: 'info', duration: 0 })
-    const b = useToastStore.getState().push({ title: 'B', variant: 'info', duration: 0 })
-    expect(a).not.toBe(b)
-    expect(useToastStore.getState().toasts).toHaveLength(2)
+  it('push appends in order, each with a distinct id', () => {
+    const id1 = useToastStore.getState().push({ title: 'A', variant: 'info', duration: 1000 })
+    const id2 = useToastStore.getState().push({ title: 'B', variant: 'success', duration: 1000 })
+    expect(id1).not.toBe(id2)
+    const toasts = useToastStore.getState().toasts
+    expect(toasts.map((t) => t.title)).toEqual(['A', 'B'])
   })
 
-  it('dismiss removes only the matching toast', () => {
-    const a = useToastStore.getState().push({ title: 'A', variant: 'info', duration: 0 })
-    useToastStore.getState().push({ title: 'B', variant: 'info', duration: 0 })
-    useToastStore.getState().dismiss(a)
+  it('dismiss removes the toast by id', () => {
+    const id1 = useToastStore.getState().push({ title: 'A', variant: 'info', duration: 1000 })
+    const id2 = useToastStore.getState().push({ title: 'B', variant: 'info', duration: 1000 })
+    useToastStore.getState().dismiss(id1)
     const toasts = useToastStore.getState().toasts
     expect(toasts).toHaveLength(1)
-    expect(toasts[0].title).toBe('B')
+    expect(toasts[0].id).toBe(id2)
   })
+})
 
-  it('toast.error uses the longer 6500ms default duration', () => {
-    toast.error('Boom')
-    expect(useToastStore.getState().toasts[0].duration).toBe(6500)
-  })
+describe('toast imperative helpers', () => {
+  beforeEach(() => useToastStore.setState({ toasts: [] }))
 
-  it('toast.success uses the 4000ms default duration', () => {
-    toast.success('Saved')
-    expect(useToastStore.getState().toasts[0].duration).toBe(4000)
-  })
-
-  it('an explicit duration overrides the variant default', () => {
-    toast.error('Boom', undefined, 100)
-    expect(useToastStore.getState().toasts[0].duration).toBe(100)
-  })
-
-  it('helpers set the right variant', () => {
-    toast.warning('careful', 'details')
+  it('info pushes with variant info and default duration 4000', () => {
+    toast.info('Title', 'Desc')
     const t = useToastStore.getState().toasts[0]
-    expect(t.variant).toBe('warning')
-    expect(t.description).toBe('details')
+    expect(t).toMatchObject({ variant: 'info', title: 'Title', description: 'Desc', duration: 4000 })
+  })
+
+  it('success pushes with variant success and default duration 4000', () => {
+    toast.success('Title')
+    const t = useToastStore.getState().toasts[0]
+    expect(t).toMatchObject({ variant: 'success', title: 'Title', duration: 4000 })
+  })
+
+  it('warning pushes with variant warning and default duration 4000', () => {
+    toast.warning('Title')
+    const t = useToastStore.getState().toasts[0]
+    expect(t).toMatchObject({ variant: 'warning', title: 'Title', duration: 4000 })
+  })
+
+  it('error pushes with variant error and default duration 6500', () => {
+    toast.error('Boom')
+    const t = useToastStore.getState().toasts[0]
+    expect(t).toMatchObject({ variant: 'error', title: 'Boom', duration: 6500 })
+  })
+
+  it('respects an explicit duration over the variant default', () => {
+    toast.error('Boom', undefined, 999)
+    const t = useToastStore.getState().toasts[0]
+    expect(t.duration).toBe(999)
+  })
+
+  it('returns the pushed toast id, dismissable via toast.dismiss', () => {
+    const id = toast.info('Title')
+    expect(useToastStore.getState().toasts).toHaveLength(1)
+    toast.dismiss(id)
+    expect(useToastStore.getState().toasts).toHaveLength(0)
   })
 })

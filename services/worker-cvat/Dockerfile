@@ -1,21 +1,36 @@
-# Build context is the REPO ROOT (see manifests/docker-compose.yml): the cvops
-# packages are siblings in this monorepo, not on PyPI.
+# Build context is the REPO ROOT (same as worker-preprocessing) because
+# cvops-api is a sibling package in this monorepo, not on PyPI.
 FROM python:3.12-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
-COPY services/api ./services/api
-COPY packages/worker-common ./packages/worker-common
-COPY packages/cvat-client ./packages/cvat-client
-COPY packages/steps ./packages/steps
-RUN pip install --no-cache-dir \
-    ./services/api ./packages/worker-common ./packages/cvat-client ./packages/steps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates libxcb1 libgl1 libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY services/worker-cvat ./services/worker-cvat
-RUN pip install --no-cache-dir ./services/worker-cvat
+# nuctl — deploys Nuclio functions into CVAT
+RUN curl -fsSL \
+    "https://github.com/nuclio/nuclio/releases/download/1.15.9/nuctl-1.15.9-linux-amd64" \
+    -o /usr/local/bin/nuctl && chmod +x /usr/local/bin/nuctl
+
+# Docker CLI — needed by nuctl for container operations
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz \
+    | tar -xz --strip-components=1 -C /usr/local/bin/ docker/docker
+
+RUN pip install --no-cache-dir hatchling
+
+COPY services/api/pyproject.toml services/api/pyproject.toml
+COPY services/api/src/ services/api/src/
+RUN pip install --no-cache-dir -e services/api
+
+COPY services/worker-cvat/pyproject.toml services/worker-cvat/pyproject.toml
+COPY services/worker-cvat/src/ services/worker-cvat/src/
+RUN pip install --no-cache-dir -e services/worker-cvat
 
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "-m", "worker_cvat.main"]
+
+RUN groupadd --system --gid 1001 app && \
+    useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app && \
+    chown -R 1001:1001 /app
+USER 1001:1001
+
+ENTRYPOINT ["python", "-m", "worker_cvat"]

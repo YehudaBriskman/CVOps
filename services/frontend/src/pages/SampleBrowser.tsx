@@ -3,11 +3,13 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useSamples } from '../api/samples'
 import type { Sample } from '../api/samples'
 import { SampleGrid } from '../components/dataset/SampleGrid'
-import { SampleFilterBar, parseSampleFilters } from '../components/samples/SampleFilterBar'
+import { SampleFilterBar } from '../components/samples/SampleFilterBar'
+import { parseSampleFilters } from '../lib/sampleFilters'
 import { BulkActionBar } from '../components/samples/BulkActionBar'
 import { SampleEditDrawer } from '../components/samples/SampleEditDrawer'
 import { useSelectionStore } from '../store/selection'
 import { Breadcrumbs, ErrorState } from '../components/ui'
+import { cn } from '../lib/cn'
 
 export default function SampleBrowser() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -19,7 +21,12 @@ export default function SampleBrowser() {
     useSamples(projectId, filters)
 
   const clear = useSelectionStore((s) => s.clear)
+  const selectMode = useSelectionStore((s) => s.selectMode)
+  const setSelectMode = useSelectionStore((s) => s.setSelectMode)
   const [editId, setEditId] = useState<string | null>(null)
+
+  // Selection mode is page-scoped UI state — never leak it into another view.
+  useEffect(() => () => setSelectMode(false), [setSelectMode])
 
   // Drop the selection whenever the active filters change — selected ids from a
   // previous view would otherwise leak into bulk actions.
@@ -49,7 +56,23 @@ export default function SampleBrowser() {
         </div>
       </div>
 
-      {projectId && <SampleFilterBar projectId={projectId} />}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">{projectId && <SampleFilterBar projectId={projectId} />}</div>
+        <button
+          type="button"
+          onClick={() => setSelectMode(!selectMode)}
+          aria-pressed={selectMode}
+          title={selectMode ? 'Exit selection mode' : 'Select multiple samples'}
+          className={cn(
+            'shrink-0 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+            selectMode
+              ? 'border-iris bg-iris text-white hover:bg-iris-hover'
+              : 'border-border-strong bg-surface-2 text-text-secondary hover:text-text-primary',
+          )}
+        >
+          {selectMode ? 'Done' : 'Select'}
+        </button>
+      </div>
 
       {isError ? (
         <ErrorState description="Could not load samples." onRetry={() => refetch()} />
@@ -61,8 +84,6 @@ export default function SampleBrowser() {
           isFetchingNextPage={isFetchingNextPage}
           fetchNextPage={fetchNextPage}
           selectable
-          projectId={projectId}
-          onEdit={(s) => setEditId(s.id)}
         />
       )}
 

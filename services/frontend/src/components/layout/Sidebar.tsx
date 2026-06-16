@@ -5,9 +5,13 @@ import { useActiveProjectId } from '../../lib/useActiveProject'
 function navClass({ isActive }: { isActive: boolean }) {
   return clsx(
     'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+    // Theme-aware: in light mode surface-2/3 are white, so a hardcoded
+    // text-white active/hover was invisible. The active item is an iris accent
+    // pill with the on-accent text token; inactive items resolve via the muted/
+    // primary text tokens so they stay legible in both themes.
     isActive
-      ? 'bg-surface-3 text-white'
-      : 'text-text-muted hover:bg-surface-3 hover:text-white',
+      ? 'bg-iris text-text-onAccent'
+      : 'text-text-muted hover:bg-surface-3 hover:text-text-primary',
   )
 }
 
@@ -47,7 +51,7 @@ export function Sidebar() {
     <aside className="w-60 bg-surface-2 flex flex-col flex-shrink-0 overflow-hidden">
       {/* Logo */}
       <div className="h-14 flex items-center px-4 border-b border-border flex-shrink-0">
-        <Link to="/projects" className="flex items-center gap-2 text-white font-bold text-lg">
+        <Link to="/projects" className="flex items-center gap-2 text-text-primary font-bold text-lg">
           <span className="text-iris-400 text-xl">◈</span>
           CVOps
         </Link>
@@ -58,6 +62,9 @@ export function Sidebar() {
         <nav className="space-y-0.5">
           <NavLink to="/projects" end className={navClass}>
             All Projects
+          </NavLink>
+          <NavLink to="/cvat-models" className={navClass}>
+            Models
           </NavLink>
         </nav>
 

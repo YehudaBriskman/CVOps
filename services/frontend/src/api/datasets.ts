@@ -79,14 +79,15 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
   })
 }
 
-// The samples in a commit (the dataset's curated, labeled snapshot). Same page
-// shape as useSamples, so it drops straight into <SampleGrid>; the grid's box
-// overlay shows each sample's latest annotation revision.
-export function useCommitSamples(datasetId: string | undefined, commitId: string | undefined) {
+// The samples frozen into a specific commit (the dataset's curated, labeled
+// snapshot), cursor-paginated. Same page shape as useSamples, so it drops
+// straight into <SampleGrid>; the grid's box overlay shows each sample's latest
+// annotation revision.
+export function useCommitSamples(datasetId: string | undefined, commitId: string | null | undefined) {
   return useInfiniteQuery<CursorPage<Sample>>({
     queryKey: ['commit-samples', datasetId, commitId],
     queryFn: async ({ pageParam }) => {
-      const params = new URLSearchParams()
+      const params = new URLSearchParams({ limit: '100' })
       if (pageParam) params.set('cursor', pageParam as string)
       const { data } = await client.get<CursorPage<Sample>>(
         `/datasets/${datasetId}/commits/${commitId}/samples?${params}`,
@@ -98,7 +99,6 @@ export function useCommitSamples(datasetId: string | undefined, commitId: string
     enabled: !!datasetId && !!commitId,
   })
 }
-
 export function useReviewDataset() {
   return useMutation({
     mutationFn: async (datasetId: string) => {

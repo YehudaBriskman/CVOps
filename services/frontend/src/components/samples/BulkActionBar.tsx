@@ -36,7 +36,7 @@ export function BulkActionBar({
       toast.success(`Marked ${res.affected} ${status}`)
       clear()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 
@@ -49,7 +49,7 @@ export function BulkActionBar({
       setTagIds([])
       clear()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 
@@ -62,7 +62,7 @@ export function BulkActionBar({
       setCollectionId('')
       clear()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 
@@ -73,7 +73,7 @@ export function BulkActionBar({
       setShowDelete(false)
       clear()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 

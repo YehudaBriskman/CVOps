@@ -1,0 +1,143 @@
+"""HTTP-layer tests for the model-deployer FastAPI app.
+
+All external work is mocked: ``deploy`` (Nuclio/nuctl), ``list_models`` and
+``annotate`` (CVAT) are monkeypatched on the ``app`` module so no real model,
+container build, or CVAT server is touched. ``ultralytics`` is stubbed in
+conftest before import. These tests pin the service's request handling,
+validation, and error mapping.
+"""
+
+from __future__ import annotations
+
+import io
+
+
+def test_health(client) -> None:
+    res = client.get("/health")
+    assert res.status_code == 200, res.text
+    assert res.json() == {"status": "ok"}
+
+
+# --------------------------------------------------------------------------- #
+# POST /deploy
+# --------------------------------------------------------------------------- #
+
+
+def test_deploy_happy_path(client, app_module, monkeypatch) -> None:
+    captured: dict = {}
+
+    def _fake_deploy(pt_path, model_name):
+        captured["pt_name"] = pt_path.name
+        captured["model_name"] = model_name
+        return "yolo-detector"
+
+    monkeypatch.setattr(app_module, "deploy", _fake_deploy)
+
+    res = client.post(
+        "/deploy",
+        data={"model_name": "yolo"},
+        files={
+            "file": (
+                "weights.pt",
+                io.BytesIO(b"fake-weights"),
+                "application/octet-stream",
+            )
+        },
+    )
+
+    assert res.status_code == 200, res.text
+    assert res.json() == {
+        "status": "ok",
+        "function_name": "yolo-detector",
+        "model_name": "yolo",
+    }
+    assert captured["model_name"] == "yolo"
+    assert captured["pt_name"] == "weights.pt"
+
+
+def test_deploy_rejects_non_pt_file(client, app_module, monkeypatch) -> None:
+    monkeypatch.setattr(app_module, "deploy", lambda *a, **k: "should-not-be-called")
+
+    res = client.post(
+        "/deploy",
+        data={"model_name": "yolo"},
+        files={"file": ("weights.onnx", io.BytesIO(b"x"), "application/octet-stream")},
+    )
+
+    assert res.status_code == 400, res.text
+    assert "Only .pt files" in res.text
+
+
+def test_deploy_maps_deploy_error_to_500(client, app_module, monkeypatch) -> None:
+    def _boom(pt_path, model_name):
+        raise RuntimeError("nuctl exploded")
+
+    monkeypatch.setattr(app_module, "deploy", _boom)
+
+    res = client.post(
+        "/deploy",
+        data={"model_name": "yolo"},
+        files={"file": ("weights.pt", io.BytesIO(b"x"), "application/octet-stream")},
+    )
+
+    assert res.status_code == 500, res.text
+    assert "nuctl exploded" in res.text
+
+
+# --------------------------------------------------------------------------- #
+# GET /models
+# --------------------------------------------------------------------------- #
+
+
+def test_models_passthrough(client, app_module, monkeypatch) -> None:
+    models = [{"id": "yolo", "name": "YOLOv8", "kind": "detector", "description": ""}]
+    monkeypatch.setattr(app_module, "list_models", lambda: models)
+
+    res = client.get("/models")
+
+    assert res.status_code == 200, res.text
+    assert res.json() == models
+
+
+def test_models_maps_cvat_error_to_502(client, app_module, monkeypatch) -> None:
+    def _boom():
+        raise RuntimeError("cvat down")
+
+    monkeypatch.setattr(app_module, "list_models", _boom)
+
+    res = client.get("/models")
+
+    assert res.status_code == 502, res.text
+    assert "Could not reach CVAT" in res.text
+    assert "cvat down" in res.text
+
+
+# --------------------------------------------------------------------------- #
+# POST /annotate
+# --------------------------------------------------------------------------- #
+
+
+def test_annotate_multipart_body_is_uncallable_422(client, app_module, monkeypatch) -> None:
+    """BUG (pinned): annotate_task mixes a Pydantic body (`body: AnnotateRequest`)
+    with `files: list[UploadFile] = File(...)`. In a multipart request FastAPI
+    treats `body` as an embedded field that arrives as a raw string and is not
+    JSON-decoded (the field isn't `Json`-typed), so pydantic rejects it and the
+    request 422s before `annotate` is ever called. The fix is to take the fields
+    as individual `Form(...)` params (or annotate the body with `Form()`/`Json`).
+    Same defect as routers/cvat.py::cvat_annotate. Pinning current behavior."""
+    called = {"annotate": False}
+
+    def _spy(**kwargs):
+        called["annotate"] = True
+        return {"task_id": 1, "job_id": 2, "cvat_url": "http://x"}
+
+    monkeypatch.setattr(app_module, "annotate", _spy)
+
+    res = client.post(
+        "/annotate",
+        data={"task_name": "t", "function_id": "fn", "threshold": "0.3"},
+        files={"files": ("a.jpg", io.BytesIO(b"img"), "image/jpeg")},
+    )
+
+    assert res.status_code == 422, res.text
+    assert called["annotate"] is False  # never reached the handler body

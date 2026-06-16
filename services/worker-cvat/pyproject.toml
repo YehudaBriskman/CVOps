@@ -12,6 +12,10 @@ dependencies = [
   "cvops-worker-common",  # ConsumerLoop, session factory
   "cvops-cvat-client",    # CVAT REST: pull reviewed annotations
   "redis[asyncio]>=5.0",
+  "cvat-sdk>=2.3.0",      # list Nuclio/Lambda functions from CVAT
+  "ultralytics>=8.3.0",   # extract class labels from .pt model
+  "fastapi>=0.111.0",     # GET /models, POST /deploy HTTP endpoints
+  "uvicorn[standard]>=0.29.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,88 @@
+name: Python · Tests
+
+# Monorepo test matrix. The packages are not on PyPI, so every job installs its
+# local siblings editable in one `pip install` call (pip resolves the cvops-*
+# names from the working tree). Install recipes are the minimal set each suite
+# actually imports — verified locally before wiring them here.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'services/**'
+      - 'packages/**'
+      - '.github/workflows/ci-python.yml'
+  pull_request:
+    paths:
+      - 'services/**'
+      - 'packages/**'
+      - '.github/workflows/ci-python.yml'
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # api — the integration hub. Needs Docker (testcontainers spins up a
+          # real PostgreSQL) and the worker/step packages its tests import.
+          # respx is used by test_cvat.py but isn't declared in [dev] yet.
+          - name: api
+            path: services/api
+            install: >-
+              pip install
+              -e packages/steps
+              -e packages/worker-common
+              -e packages/cvat-client
+              -e services/worker-preprocessing
+              -e "services/api[dev]"
+              respx
+          - name: cvat-client
+            path: packages/cvat-client
+            install: pip install -e "packages/cvat-client[dev]"
+          # steps and worker-common both declare cvops-api, so api must be in
+          # the same install call for pip to resolve the name locally.
+          - name: worker-training
+            path: services/worker-training
+            install: >-
+              pip install
+              -e services/api
+              -e packages/worker-common
+              -e packages/steps
+              -e "services/worker-training[dev]"
+          - name: worker-cvat
+            path: services/worker-cvat
+            install: >-
+              pip install
+              -e services/api
+              -e packages/worker-common
+              -e packages/steps
+              -e packages/cvat-client
+              -e "services/worker-cvat[dev]"
+          # model-deployer ships a requirements.txt pinning ultralytics (torch,
+          # gigabytes). Its tests stub ultralytics in conftest, so CI installs
+          # only the lightweight set the HTTP-layer tests need.
+          - name: model-deployer
+            path: services/model-deployer
+            install: >-
+              pip install
+              -e packages/cvat-client
+              fastapi python-multipart httpx pytest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: '**/pyproject.toml'
+
+      - name: Install ${{ matrix.name }}
+        run: ${{ matrix.install }}
+
+      - name: Run tests
+        working-directory: ${{ matrix.path }}
+        run: pytest tests/ -q --tb=short

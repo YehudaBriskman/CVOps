@@ -241,7 +241,6 @@ export default function CommitDetail() {
           hasNextPage={commitSamples.hasNextPage}
           isFetchingNextPage={commitSamples.isFetchingNextPage}
           fetchNextPage={commitSamples.fetchNextPage}
-          projectId={dataset?.project_id}
         />
       </div>
 

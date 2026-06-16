@@ -1,13 +1,12 @@
-"""Router tests for the training-containers CRUD + /validate endpoints.
+"""Router tests for the training-containers surface.
 
-A training container is a per-project, reusable training environment (a Docker
-`image` + an `icd_config` Interface Contract Document). The router exposes full
-CRUD plus a `/validate` endpoint that checks a candidate icd_config instance
-against the container's stored icd_config (used as a JSON Schema).
+Covers list, create, get (404 + cross-org 404), patch, delete (soft-delete),
+and the POST .../validate endpoint, which validates a candidate icd_config
+payload against the container's stored icd_config (used as a JSON Schema).
 
-Same minimal-app pattern as test_datasets_train / test_projects: mount only the
-training_containers router, override session/current_user onto the
-testcontainers Postgres. Org/project scoping is asserted via a cross-org 404.
+Pattern mirrors test_projects/test_data_sources: a minimal app mounting only
+the training_containers router with get_session/get_current_user overridden
+onto the testcontainers Postgres.
 """
 
 from __future__ import annotations
@@ -17,11 +16,7 @@ import uuid
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from cvops_api.core.auth import get_current_user
 from cvops_api.db.session import get_session
@@ -29,6 +24,15 @@ from cvops_api.db.models.auth import Org, User
 from cvops_api.db.models.projects import Project
 from cvops_api.db.models.models import TrainingContainer
 from cvops_api.routers import training_containers
+
+
+# A real JSON Schema, stored as the container's icd_config; /validate checks a
+# candidate payload against it.
+_SCHEMA = {
+    "type": "object",
+    "properties": {"epochs": {"type": "integer"}},
+    "required": ["epochs"],
+}
 
 
 @pytest_asyncio.fixture
@@ -40,8 +44,6 @@ async def factory(postgres_url: str):
 
 def _client(factory, current_user: User) -> AsyncClient:
     app = FastAPI()
-    # main.py mounts this router with just the /api/v1 prefix; the routes define
-    # their own full paths. Mount bare here so paths match.
     app.include_router(training_containers.router)
 
     async def _get_session_dep():
@@ -53,7 +55,8 @@ def _client(factory, current_user: User) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _seed_user_project(factory) -> tuple[User, Project]:
+async def _seed(factory):
+    """Create org/user/project. Returns (user, project)."""
     suffix = uuid.uuid4().hex[:8]
     async with factory() as s:
         org = Org(name=f"org-{suffix}")
@@ -69,123 +72,146 @@ async def _seed_user_project(factory) -> tuple[User, Project]:
         return user, project
 
 
-async def test_crud_happy_path(factory) -> None:
-    user, project = await _seed_user_project(factory)
+def _create_body(name: str = "trainer") -> dict:
+    return {
+        "name": name,
+        "description": "desc",
+        "image": "registry/trainer:1",
+        "icd_config": _SCHEMA,
+        "icd_schema_version": "1.0",
+    }
 
+
+async def test_create_and_list(factory) -> None:
+    user, project = await _seed(factory)
     async with _client(factory, user) as c:
-        # create
-        res = await c.post(
-            f"/projects/{project.id}/training-containers",
-            json={
-                "name": "yolo-trainer",
-                "description": "ultralytics yolo",
-                "image": "ghcr.io/example/trainer:latest",
-                "icd_config": {"inputs": {"epochs": {"env": "EPOCHS"}}},
-            },
-        )
+        res = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
         assert res.status_code == 201, res.text
-        tc = res.json()
-        tc_id = tc["id"]
-        assert tc["name"] == "yolo-trainer"
-        assert tc["project_id"] == str(project.id)
-        assert tc["image"] == "ghcr.io/example/trainer:latest"
+        body = res.json()
+        assert body["name"] == "trainer"
+        assert body["image"] == "registry/trainer:1"
+        assert body["icd_config"] == _SCHEMA
 
-        # get
-        res = await c.get(f"/training-containers/{tc_id}")
-        assert res.status_code == 200
-        assert res.json()["id"] == tc_id
+        listed = await c.get(f"/projects/{project.id}/training-containers")
+        assert listed.status_code == 200, listed.text
+        assert [tc["id"] for tc in listed.json()] == [body["id"]]
 
-        # list
-        res = await c.get(f"/projects/{project.id}/training-containers")
-        assert res.status_code == 200
-        assert [t["id"] for t in res.json()] == [tc_id]
 
-        # patch
+async def test_get_and_404(factory) -> None:
+    user, project = await _seed(factory)
+    async with _client(factory, user) as c:
+        created = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+        tcid = created.json()["id"]
+
+        got = await c.get(f"/training-containers/{tcid}")
+        assert got.status_code == 200, got.text
+        assert got.json()["id"] == tcid
+
+        missing = await c.get(f"/training-containers/{uuid.uuid4()}")
+        assert missing.status_code == 404, missing.text
+
+
+async def test_get_cross_org_404(factory) -> None:
+    owner, project = await _seed(factory)
+    other, _p2 = await _seed(factory)
+    async with _client(factory, owner) as c:
+        created = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+        tcid = created.json()["id"]
+
+    async with _client(factory, other) as c:
+        res = await c.get(f"/training-containers/{tcid}")
+    assert res.status_code == 404, res.text
+
+
+async def test_patch(factory) -> None:
+    user, project = await _seed(factory)
+    async with _client(factory, user) as c:
+        created = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+        tcid = created.json()["id"]
+
         res = await c.patch(
-            f"/training-containers/{tc_id}",
-            json={"description": "updated", "image": "ghcr.io/example/trainer:v2"},
+            f"/training-containers/{tcid}",
+            json={"name": "renamed", "image": "registry/trainer:2"},
         )
-        assert res.status_code == 200
-        assert res.json()["description"] == "updated"
-        assert res.json()["image"] == "ghcr.io/example/trainer:v2"
-
-        # delete (soft) — then it's gone from get + list
-        res = await c.delete(f"/training-containers/{tc_id}")
-        assert res.status_code == 204
-        assert (await c.get(f"/training-containers/{tc_id}")).status_code == 404
-        res = await c.get(f"/projects/{project.id}/training-containers")
-        assert res.status_code == 200
-        assert res.json() == []
-
-
-async def test_cross_org_get_404(factory) -> None:
-    """A container under another org's project is invisible."""
-    _owner, project = await _seed_user_project(factory)
-    other_user, _other_project = await _seed_user_project(factory)
+        assert res.status_code == 200, res.text
+        assert res.json()["name"] == "renamed"
+        assert res.json()["image"] == "registry/trainer:2"
 
     async with factory() as s:
-        tc = TrainingContainer(
-            project_id=project.id,
-            name="owned",
-            image="ghcr.io/example/trainer:latest",
-            icd_config={},
-        )
-        s.add(tc)
-        await s.commit()
-        await s.refresh(tc)
-
-    async with _client(factory, other_user) as c:
-        assert (await c.get(f"/training-containers/{tc.id}")).status_code == 404
-        # And the list under the foreign project 404s (project scoping).
-        res = await c.get(f"/projects/{project.id}/training-containers")
-        assert res.status_code == 404
+        refreshed = await s.get(TrainingContainer, uuid.UUID(tcid))
+        assert refreshed.name == "renamed"
+        assert refreshed.image == "registry/trainer:2"
 
 
-async def test_create_under_foreign_project_404(factory) -> None:
-    _owner, project = await _seed_user_project(factory)
-    other_user, _other_project = await _seed_user_project(factory)
+async def test_delete_soft_deletes(factory) -> None:
+    user, project = await _seed(factory)
+    async with _client(factory, user) as c:
+        created = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+        tcid = created.json()["id"]
 
-    async with _client(factory, other_user) as c:
-        res = await c.post(
-            f"/projects/{project.id}/training-containers",
-            json={"name": "x", "image": "img", "icd_config": {}},
-        )
-        assert res.status_code == 404
+        d = await c.delete(f"/training-containers/{tcid}")
+        assert d.status_code == 204, d.text
+
+        # Gone for reads.
+        g = await c.get(f"/training-containers/{tcid}")
+        assert g.status_code == 404, g.text
+
+        # And not in the list.
+        listed = await c.get(f"/projects/{project.id}/training-containers")
+        assert [tc["id"] for tc in listed.json()] == []
+
+    async with factory() as s:
+        row = await s.get(TrainingContainer, uuid.UUID(tcid))
+        assert row is not None
+        assert row.deleted_at is not None
 
 
 async def test_validate_valid_and_invalid(factory) -> None:
-    user, project = await _seed_user_project(factory)
-
+    user, project = await _seed(factory)
     async with _client(factory, user) as c:
-        res = await c.post(
-            f"/projects/{project.id}/training-containers",
-            json={
-                "name": "schema-tc",
-                "image": "img",
-                "icd_config": {
-                    "type": "object",
-                    "properties": {"epochs": {"type": "integer"}},
-                    "required": ["epochs"],
-                },
-            },
-        )
-        assert res.status_code == 201, res.text
-        tc_id = res.json()["id"]
+        created = await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+        tcid = created.json()["id"]
 
-        # valid instance
-        res = await c.post(
-            f"/training-containers/{tc_id}/validate",
-            json={"icd_config": {"epochs": 5}},
+        # Valid candidate: satisfies the required "epochs" integer.
+        ok = await c.post(
+            f"/training-containers/{tcid}/validate",
+            json={"icd_config": {"epochs": 10}},
         )
-        assert res.status_code == 200
-        assert res.json() == {"valid": True, "errors": []}
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["valid"] is True
+        assert ok.json()["errors"] == []
 
-        # invalid instance (wrong type)
-        res = await c.post(
-            f"/training-containers/{tc_id}/validate",
-            json={"icd_config": {"epochs": "not-an-int"}},
+        # Invalid candidate: wrong type for "epochs".
+        bad = await c.post(
+            f"/training-containers/{tcid}/validate",
+            json={"icd_config": {"epochs": "lots"}},
         )
-        assert res.status_code == 200
-        body = res.json()
-        assert body["valid"] is False
-        assert body["errors"]
+        assert bad.status_code == 200, bad.text
+        assert bad.json()["valid"] is False
+        assert len(bad.json()["errors"]) >= 1
+
+
+async def test_create_under_foreign_project_404(factory) -> None:
+    """Creating a container under another org's project is rejected (project
+    scoping enforced on the create path, not just reads)."""
+    _owner, project = await _seed(factory)
+    other_user, _other_project = await _seed(factory)
+
+    async with _client(factory, other_user) as c:
+        res = await c.post(
+            f"/projects/{project.id}/training-containers", json=_create_body()
+        )
+        assert res.status_code == 404, res.text
+
+
+async def test_list_cross_org_404(factory) -> None:
+    """Listing under a foreign project 404s — the list endpoint scopes on the
+    project's org, so a cross-org caller can't even enumerate."""
+    owner, project = await _seed(factory)
+    other_user, _other_project = await _seed(factory)
+    async with _client(factory, owner) as c:
+        await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+
+    async with _client(factory, other_user) as c:
+        res = await c.get(f"/projects/{project.id}/training-containers")
+        assert res.status_code == 404, res.text

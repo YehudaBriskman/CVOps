@@ -1,15 +1,10 @@
-/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Test config lives in vitest.config.ts (jsdom + MSW harness), kept separate so
+// this dev-server config stays focused on the edge/proxy wiring below.
 export default defineConfig({
   plugins: [react()],
-  test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['src/test/setup.ts'],
-    css: false,
-  },
   server: {
     // Accept the dev-VM Host header that the nginx edge forwards — Vite 5
     // otherwise rejects it with "Blocked request. This host is not allowed".

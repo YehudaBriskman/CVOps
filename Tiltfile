@@ -102,15 +102,16 @@ def envreq(key):
         fail('manifests/.env is missing required key: %s' % key)
     return env[key]
 
-# ── Infra containers (docker compose, no profile = infra only) ──────────────
-# Paths inside the compose files are relative to manifests/ (their own dir).
+# ── Infra containers (docker compose) ───────────────────────────────────────
+# Two separate compose projects so that CVAT failures never affect the main
+# infra (postgres, redis, garage, nginx). If the cvops-cvat project has issues
+# (disk full, Docker daemon problems, etc.) the API and frontend stay up.
+# Main project: base infra (postgres, redis, garage, mlflow, nginx) only — the
+# CVAT stack lives in the separate `cvops-cvat` project below, so its services
+# are NOT loaded here (loading the override in both projects would double-declare
+# every CVAT dc_resource, e.g. cvat_clickhouse).
 docker_compose(
-    # The override adds the CVAT stack (server, ui, traefik:8080, db, redis,
-    # opa, workers + analytics). Its profile-less services come up with the
-    # infra; the auto-label layer (nuclio, model-deployer) and the containerised
-    # worker-cvat stay profile-gated, so Tilt skips them — worker-cvat runs as a
-    # host process below instead.
-    ['manifests/docker-compose.yml', 'manifests/docker-compose.override.yml'],
+    ['manifests/docker-compose.yml'],
     env_file='manifests/.env',
     project_name='cvops',
     # Activate the `worker` profile so worker-training (the `training` queue
@@ -120,6 +121,15 @@ docker_compose(
     # `app`-profile services (api/frontend/worker-cvat run on the host / are
     # gated), so it doesn't collide with the host processes.
     profiles=['worker'],
+)
+
+# cvat_cvat must exist before Docker Compose validates the override file.
+local('docker network inspect cvat_cvat >/dev/null 2>&1 || docker network create cvat_cvat', quiet=True)
+
+docker_compose(
+    ['manifests/docker-compose.override.yml'],
+    env_file='manifests/.env',
+    project_name='cvops-cvat',
 )
 
 dc_resource('postgres',
@@ -158,51 +168,86 @@ dc_resource('mlflow',
     links=[link('http://localhost:5000', 'mlflow ui')],
 )
 
-# ── CVAT stack (containers, from docker-compose.override.yml) ────────────────
-# The override's profile-less services come up here (cvat_server/ui, the data
-# layer, workers, traefik). The analytics layer (cvat_vector/grafana) and the
-# auto-label layer (nuclio/model-deployer) stay profile-gated, so Tilt skips
-# them. Reach CVAT at :8080 (traefik).
-#
-# CVAT's compose bind-mounts a few config files from the services/cvat
-# submodule (traefik's routing rules). `tilt up` doesn't init submodules, so do
-# it here (shallow, idempotent) before the CVAT containers mount them —
-# otherwise Docker auto-creates root-owned junk dirs at those paths. start_env.sh
-# does the same init for its full-analytics run.
-local_resource('cvat-submodule',
-    cmd='git submodule update --init --depth 1 services/cvat',
-    deps=['.gitmodules'],
-    labels=['3-cvat'],
+# cvat_cvat is declared `external: true` in docker-compose.override.yml — it
+# must exist before any CVAT container starts. This is idempotent.
+local_resource('cvat-network',
+    cmd='docker network inspect cvat_cvat >/dev/null 2>&1 || docker network create cvat_cvat',
+    labels=['1-infra'],
 )
 
+# nuctl talks directly to /var/run/docker.sock. The socket is owned by the
+# `docker` group, so only members can access it. Group membership only takes
+# effect in a fresh login shell — processes started before `usermod` (including
+# Tilt itself) won't see the new group. Widening the socket permissions here
+# ensures nuctl and the CVAT worker always have Docker access on any machine,
+# without requiring a logout/re-login cycle.
+#
+# Skip the chmod entirely if the socket is already writable (the common case —
+# user is in the `docker` group, or perms were widened on a prior run). Only
+# then reach for sudo, and use `sudo -n` so Tilt never hangs on a hidden
+# password prompt — if passwordless sudo isn't available, fail with an
+# actionable message instead of a stuck build.
+local_resource('docker-socket-perms',
+    cmd='test -w /var/run/docker.sock || sudo -n chmod 666 /var/run/docker.sock || ' +
+        '{ echo "docker socket not writable and passwordless sudo unavailable." >&2; ' +
+        'echo "Run once: sudo chmod 666 /var/run/docker.sock  (or: sudo usermod -aG docker $USER && re-login)" >&2; exit 1; }',
+    labels=['1-infra'],
+)
+
+# ── CVAT stack (from docker-compose.override.yml) ───────────────────────────
+# CVAT's compose bind-mounts config files (vector.toml, grafana_conf.yml, …)
+# straight out of the `services/cvat` git submodule. If the submodule isn't
+# checked out, those host paths don't exist and Docker silently creates them as
+# root-owned *directories* — which then fail to mount onto the container's
+# config *files*. Initialise the submodule before any CVAT container starts so
+# the real files are always present. Idempotent: a no-op once checked out.
+local_resource('cvat-submodule',
+    cmd='git submodule update --init services/cvat',
+    labels=['1-infra'],
+)
+
+dc_resource('cvat_db',             labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+dc_resource('cvat_redis_inmem',    labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+dc_resource('cvat_redis_ondisk',   labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+dc_resource('cvat_clickhouse',     labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+dc_resource('cvat_opa',            labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+dc_resource('cvat_server',         labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
+
+# The CVAT superuser is bootstrapped by the `cvat_admin_init` compose service
+# (docker-compose.override.yml) — an idempotent get_or_create + set_password that
+# runs under both `tilt up` and `docker compose --profile app`. We deliberately
+# do NOT also run a `cvat-superuser` local_resource here: the two raced (whichever
+# created the admin first made the other's `createsuperuser` loop spin), which
+# left the resource stuck in_progress and blocked anything depending on it.
+dc_resource('cvat_ui',             labels=['3-cvat'])
 dc_resource('traefik',
     labels=['3-cvat'],
     resource_deps=['cvat-submodule'],
-)
-dc_resource('cvat_server',
-    labels=['3-cvat'],
     links=[link('http://localhost:8080', 'cvat')],
 )
-dc_resource('cvat_ui',
-    labels=['3-cvat'],
-    resource_deps=['cvat_server'],
-)
+dc_resource('cvat_worker_utils',           labels=['3-cvat'])
+dc_resource('cvat_worker_import',          labels=['3-cvat'])
+dc_resource('cvat_worker_export',          labels=['3-cvat'])
+dc_resource('cvat_worker_annotation',      labels=['3-cvat'])
+dc_resource('cvat_worker_webhooks',        labels=['3-cvat'])
+dc_resource('cvat_worker_quality_reports', labels=['3-cvat'])
+dc_resource('cvat_worker_chunks',          labels=['3-cvat'])
+dc_resource('cvat_worker_consensus',       labels=['3-cvat'])
+# nuclio (auto-label serving) and cvat_grafana (CVAT's ClickHouse analytics UI)
+# are profile-gated to `app`/`all` in the override, so the Tilt inner loop skips
+# them — no dc_resource here (dc_resource on an unloaded service errors). They
+# come up under `docker compose --profile app`. cvat_vector is profile-less, so
+# it loads and is labelled.
+dc_resource('cvat_vector',         labels=['3-cvat'], resource_deps=['cvat-submodule'])
 
 # Training-queue worker (container — torch/ultralytics live on its image, so it
 # can't be a host process). Consumes the `training` stream: clones the trainer
 # repo, runs it against the exported dataset, logs to MLflow, writes a
-# ModelVersion. First `tilt up` builds the image (heavy ML deps) once.
+# ModelVersion. Comes up under the `worker` compose profile (activated in the
+# docker_compose call above). First `tilt up` builds the image (heavy ML deps).
 dc_resource('worker-training',
     labels=['2-app'],
     resource_deps=['postgres', 'redis', 'garage-bootstrap', 'mlflow', 'migrate-up'],
-)
-
-# CVAT admin provisioning runs as the one-shot `cvat_admin_init` compose service
-# (docker-compose.override.yml), so it happens under both `tilt up` and
-# `docker compose --profile app` — not just here. dc_resource only labels it.
-dc_resource('cvat_admin_init',
-    labels=['3-cvat'],
-    resource_deps=['cvat_server'],
 )
 
 # ── Garage S3 bootstrap (cluster layout + bucket + key) ─────────────────────
@@ -251,8 +296,15 @@ local_resource('garage-bootstrap',
 # (Arch, Debian 12+): "error: externally-managed-environment". The venv sidesteps
 # that and keeps the editable install off the system interpreter. `python -m venv`
 # is idempotent, so re-running just reuses the existing venv.
+#
+# TMPDIR override: pip unpacks/builds wheels in $TMPDIR, which defaults to /tmp.
+# On this host /tmp is a RAM-backed tmpfs with a per-user quota (~7.7G shared),
+# so large dependency trees (torch, etc.) blow the quota with EDQUOTA mid-install.
+# Point pip at a dir under .venv instead — it lives on the root fs (noquota,
+# hundreds of GB free) and is already gitignored. Applied to every host pip
+# install below for the same reason.
 local_resource('api-install',
-    cmd='cd services/api && python3 -m venv .venv && .venv/bin/python -m pip install -e ".[dev]" >/dev/null',
+    cmd='cd services/api && python3 -m venv .venv && mkdir -p .venv/pip-tmp && TMPDIR="$PWD/.venv/pip-tmp" PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10 .venv/bin/python -m pip install -e ".[dev]"',
     deps=['services/api/pyproject.toml'],
     labels=['5-setup'],
 )
@@ -262,7 +314,7 @@ local_resource('api-install',
 # extras → no torch); the engine import is best-effort, but without this the
 # registry is empty and workflow creation rejects step.extract_frames.
 local_resource('steps-install',
-    cmd='cd services/api && .venv/bin/python -m pip install -e ../../packages/steps >/dev/null',
+    cmd='cd services/api && mkdir -p .venv/pip-tmp && TMPDIR="$PWD/.venv/pip-tmp" PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10 .venv/bin/python -m pip install -e ../../packages/steps',
     deps=['packages/steps/pyproject.toml'],
     resource_deps=['api-install'],
     labels=['5-setup'],
@@ -298,6 +350,8 @@ api_env = {
     # registers the webhook with (below).
     'CVAT_WEBHOOK_SECRET': envreq('CVAT_WEBHOOK_SECRET'),
     'PYTHONUNBUFFERED': '1',
+    # worker-cvat exposes GET /models on port 8001 (proxied by cvats.py router).
+    'MODEL_DEPLOYER_URL': 'http://localhost:8001',
 }
 
 local_resource('api',
@@ -355,24 +409,38 @@ local_resource('git-hooks',
 # Install the preprocessing worker into the API venv (which already carries
 # cvops-api + cvops-steps). The worker reuses those packages, so it shares the env.
 local_resource('worker-install',
-    cmd='cd services/api && .venv/bin/python -m pip install -e ../worker-preprocessing >/dev/null',
+    cmd='cd services/api && mkdir -p .venv/pip-tmp && TMPDIR="$PWD/.venv/pip-tmp" PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10 .venv/bin/python -m pip install -e ../worker-preprocessing',
     deps=['services/worker-preprocessing/pyproject.toml'],
     resource_deps=['api-install', 'steps-install'],
     labels=['5-setup'],
 )
 
-# Install the CVAT worker (and its siblings worker-common + cvat-client, which
-# pulls cvat-sdk) into the API venv so the host worker-cvat process can import
-# them. Shares the venv with the API + steps, same as worker-preprocessing.
+# Install the CVAT worker into the API venv so the host worker-cvat process can
+# import it. worker-common + cvat-client are local monorepo packages (not on
+# PyPI), so they must be installed editable explicitly; the unioned pyproject
+# then pulls the PyPI deps (cvat-sdk/ultralytics/fastapi/uvicorn). Shares the
+# venv with the API + steps, same as worker-preprocessing.
 local_resource('worker-cvat-install',
-    cmd='cd services/api && .venv/bin/python -m pip install -e ../../packages/worker-common -e ../../packages/cvat-client -e ../worker-cvat >/dev/null',
+    cmd='cd services/api && mkdir -p .venv/pip-tmp && TMPDIR="$PWD/.venv/pip-tmp" PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10 .venv/bin/python -m pip install -e ../../packages/worker-common -e ../../packages/cvat-client -e ../worker-cvat',
     deps=[
         'services/worker-cvat/pyproject.toml',
         'packages/worker-common/pyproject.toml',
         'packages/cvat-client/pyproject.toml',
     ],
     resource_deps=['api-install', 'steps-install'],
-    labels=['5-setup'],
+    labels=['4-cvat-app'],
+)
+
+# Download nuctl (Nuclio CLI) once — used by the CVAT worker to deploy .pt models.
+# Idempotent: skipped if the binary is already present and executable.
+# Resumable & stall-proof: `-C -` continues a partial download from where it
+# stopped (the chmod only runs on success, so a half-downloaded file stays
+# non-executable and the `test -x` guard re-enters the curl to finish it).
+# `--speed-limit/--speed-time` abort a connection that stalls below 2KB/s for
+# 20s instead of hanging forever, and `--retry` then resumes it.
+local_resource('nuctl-install',
+    cmd='test -x services/worker-cvat/nuctl || curl -fSL -C - --retry 10 --retry-delay 2 --retry-all-errors --connect-timeout 20 --speed-limit 2048 --speed-time 20 --progress-bar "https://github.com/nuclio/nuclio/releases/download/1.15.9/nuctl-1.15.9-linux-amd64" -o services/worker-cvat/nuctl && chmod +x services/worker-cvat/nuctl',
+    labels=['4-cvat-app'],
 )
 
 # ── Worker processes (host) ─────────────────────────────────────────────────
@@ -392,25 +460,36 @@ local_resource('worker-preprocessing',
     labels=['2-app'],
 )
 
-# CVAT-queue worker (host): consumes the `cvat` stream, runs step.human_review
-# (pushes the review batch into CVAT, parks the run at the gate) and, on a CVAT
-# completion webhook, pulls reviewed annotations back and resumes the run.
-# worker_cvat hardcodes its stream name to `cvat`, so no REDIS_STREAM here.
-# CVAT_URL hits traefik on the host's published :8080.
-#
-# CVAT_WEBHOOK_TARGET is intentionally unset: CVAT 2.x dropped task-scoped
-# webhooks, so auto-resume via webhook can't work. Completion is driven manually
-# from the run page ("Sync from CVAT & complete" → POST .../gates/{step}/sync).
+# CVAT-queue worker (host): consumes the `cvat` stream and serves :8001. One
+# process now covers both folded-in roles:
+#   • step.human_review — pushes the review batch into CVAT, parks the run at the
+#     gate; a {kind: cvat_sync} doorbell pulls reviewed annotations back and
+#     resumes the run (sync path, via cvat-client).
+#   • step.deploy_model + GET /models, POST /deploy on :8001 (proxied by the
+#     API's cvat.py router via MODEL_DEPLOYER_URL → worker-cvat:8001) — deploys
+#     .pt models to Nuclio via nuctl (deploy path).
+# Entry point is `python -m worker_cvat` (→ __main__ → worker.main). The env is
+# the union of both roles: CVAT_URL (sync, cvat-client) + CVAT_HOST (deploy).
 worker_cvat_env = dict(api_env)
 worker_cvat_env.update({
+    'REDIS_STREAM':        'cvat',
+    'MODEL_DEPLOYER_PORT': '8001',
+    # sync path (cvat-client reads CVAT_URL, falling back to CVAT_HOST)
     'CVAT_URL':            'http://localhost:8080',
     'CVAT_PUBLIC_URL':     env.get('CVAT_PUBLIC_URL', 'http://localhost:8080'),
     'CVAT_USERNAME':       envreq('CVAT_USERNAME'),
     'CVAT_PASSWORD':       envreq('CVAT_PASSWORD'),
+    # deploy path (deployer/cvat_client read CVAT_HOST + nuctl)
+    'NUCTL_PATH':          str(local('pwd', quiet=True)).strip() + '/services/worker-cvat/nuctl',
 })
+cvat_host_raw = env.get('CVAT_HOST', 'localhost')
+worker_cvat_env['CVAT_HOST'] = cvat_host_raw if cvat_host_raw.startswith('http') else 'http://%s:8080' % cvat_host_raw
 
+# worker-cvat waits for postgres/redis/garage (its own infra deps) but is
+# intentionally NOT in the resource_deps of api/frontend/nginx — so a CVAT
+# failure never blocks the main stack.
 local_resource('worker-cvat',
-    serve_cmd='cd services/api && .venv/bin/python -m worker_cvat.main',
+    serve_cmd='cd services/api && .venv/bin/python -m worker_cvat',
     serve_env=worker_cvat_env,
     # Watch the step + cvat-client sources too — they're editable-installed into
     # the venv, so the worker must restart to pick up changes to the human_review
@@ -421,8 +500,12 @@ local_resource('worker-cvat',
         'packages/steps/src/cvops_steps',
         'packages/cvat-client/src/cvops_cvat_client',
     ],
-    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-cvat-install', 'migrate-up', 'cvat_server', 'cvat_admin_init'],
-    labels=['3-cvat'],
+    # Only its own infra — deliberately NOT gated on cvat_server / the CVAT admin
+    # bootstrap, so a slow or failing CVAT stack never blocks the worker. It
+    # connects to CVAT lazily, per review/deploy doorbell, and surfaces any CVAT
+    # error on that run instead.
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-cvat-install', 'nuctl-install', 'docker-socket-perms', 'migrate-up'],
+    labels=['4-cvat-app'],
 )
 
 # ── Quality gates ───────────────────────────────────────────────────────────
