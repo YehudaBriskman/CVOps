@@ -29,6 +29,11 @@ from cvops_worker_common.session import async_session_factory
 
 logger = logging.getLogger(__name__)
 
+# Worker-executed steps have no interactive user. events.actor_id is a UUID
+# column, so use the system sentinel (matches worker_cvat.sync.SYSTEM_ACTOR_ID)
+# rather than a non-UUID label like "service:worker".
+SYSTEM_ACTOR_ID = "00000000-0000-0000-0000-000000000000"
+
 
 async def run_job(job_id: str, step_type: str) -> None:
     """Entry point called by ConsumerLoop for each message. Opens its own session."""
@@ -96,7 +101,7 @@ async def _execute(
         storage=get_storage(),
         project_id=str(run.project_id),
         run_id=str(run.id),
-        actor_id="service:worker",
+        actor_id=SYSTEM_ACTOR_ID,
         emit_event=lambda **kw: emit_event(session, **kw),
     )
 
