@@ -1,0 +1,26 @@
+# Prometheus scrape config — infra metrics only (no application /metrics).
+# Targets are the exporters defined under the `observability` compose profile.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: cadvisor          # per-container CPU/mem/net/disk
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  - job_name: node-exporter     # host CPU/mem/disk/network
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: postgres-exporter
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: redis-exporter
+    static_configs:
+      - targets: ['redis-exporter:9121']
