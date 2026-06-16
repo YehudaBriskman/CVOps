@@ -14,6 +14,24 @@ function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
 
+// worker-cvat bakes the CVAT link as CVAT_PUBLIC_URL (localhost:8080 by default —
+// it has no request context). Opened from a remote dev VM, localhost won't reach
+// the VM, so rewrite a localhost host to whatever host the browser actually used
+// (mirroring how the API derives presign hosts per-request). A configured,
+// non-localhost CVAT host is left untouched.
+function browserReachableCvatUrl(stored: string | null | undefined): string | null {
+  if (!stored) return null
+  try {
+    const u = new URL(stored)
+    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      u.hostname = window.location.hostname
+    }
+    return u.toString()
+  } catch {
+    return stored
+  }
+}
+
 export default function RunView() {
   const { id } = useParams<{ id: string }>()
   const { data: detail, isLoading } = useRun(id)
@@ -56,9 +74,10 @@ export default function RunView() {
       // The coordinator nests gate data under output_refs.gate_data; fall back
       // to a top-level cvat_url for any older shape.
       cvat_url:
-        ((outputs?.gate_data as Record<string, unknown> | undefined)?.cvat_url as string) ??
-        (outputs?.cvat_url as string) ??
-        undefined,
+        browserReachableCvatUrl(
+          ((outputs?.gate_data as Record<string, unknown> | undefined)?.cvat_url as string) ??
+            (outputs?.cvat_url as string),
+        ) ?? undefined,
     }
   })
 
@@ -97,10 +116,10 @@ export default function RunView() {
         <GateResolutionBanner
           runId={id}
           stepId={waitingStep.step_id ?? waitingStep.id}
-          cvatUrl={
+          cvatUrl={browserReachableCvatUrl(
             ((asRecord(waitingStep.output_refs)?.gate_data as Record<string, unknown> | undefined)?.cvat_url
-              ?? asRecord(waitingStep.output_refs)?.cvat_url) as string ?? null
-          }
+              ?? asRecord(waitingStep.output_refs)?.cvat_url) as string,
+          )}
         />
       )}
 
