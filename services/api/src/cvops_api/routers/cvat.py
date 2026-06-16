@@ -74,6 +74,42 @@ async def list_cvat_models(
     return resp.json()
 
 
+# ── Upload a .pt file and deploy it to CVAT ───────────────────────────────────
+
+@router.post("/cvat/deploy")
+async def cvat_deploy_file(
+    model_name: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Accept a .pt upload and forward it to the CVAT worker for deployment."""
+    contents = await file.read()
+    async with httpx.AsyncClient(timeout=300) as http:
+        resp = await http.post(
+            f"{DEPLOYER_URL}/deploy",
+            data={"model_name": model_name},
+            files={"file": (file.filename or "model.pt", contents, "application/octet-stream")},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Deploy error: {resp.text}")
+    return resp.json()
+
+
+# ── Delete a deployed model from CVAT ────────────────────────────────────────
+
+@router.delete("/cvat/models/{function_id}")
+async def cvat_delete_model(
+    function_id: str,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Remove a Nuclio function from CVAT."""
+    async with httpx.AsyncClient(timeout=30) as http:
+        resp = await http.delete(f"{DEPLOYER_URL}/models/{function_id}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Delete error: {resp.text}")
+    return resp.json()
+
+
 # ── Trigger auto-annotation ───────────────────────────────────────────────────
 
 class AnnotateRequest(BaseModel):
