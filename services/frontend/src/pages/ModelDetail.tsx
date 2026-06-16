@@ -42,7 +42,7 @@ export default function ModelDetail() {
           {weightsUrl && (
             <a
               href={weightsUrl.url}
-              className="rounded-lg bg-iris px-3 py-1.5 text-xs text-white transition-colors hover:bg-iris-hover"
+              className="rounded-lg bg-iris px-3 py-1.5 text-xs text-text-onAccent transition-colors hover:bg-iris-hover"
             >
               Download weights
             </a>
@@ -70,19 +70,19 @@ export default function ModelDetail() {
           </div>
           {model.mlflow_run_id && (
             <div>
-              <dt className="text-xs text-slate-400">MLflow run</dt>
+              <dt className="text-xs text-text-muted">MLflow run</dt>
               <dd className="font-medium mt-0.5 font-mono text-xs">
                 {MLFLOW_URL ? (
                   <a
                     href={`${MLFLOW_URL}/#/experiments/0/runs/${model.mlflow_run_id}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-indigo-600 hover:text-indigo-700"
+                    className="text-iris-400 hover:text-iris-hover"
                   >
                     {model.mlflow_run_id.slice(0, 12)} ↗
                   </a>
                 ) : (
-                  <span className="text-slate-800">{model.mlflow_run_id.slice(0, 12)}</span>
+                  <span className="text-text-primary">{model.mlflow_run_id.slice(0, 12)}</span>
                 )}
               </dd>
             </div>
