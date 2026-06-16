@@ -11,8 +11,17 @@
 
 CURRENT_BRANCH=$(git symbolic-ref HEAD 2>/dev/null | sed 's!refs/heads/!!')
 
-# Branch name + protected-branch checks (shared with the jj provider).
-rules_validate_branch "$CURRENT_BRANCH" || exit 1
+# Branch name + protected-branch checks (shared with the jj provider). On
+# rejection, point at the recovery path so a bad branch isn't a dead end:
+# `git open-pr` moves the commits onto a valid feature branch and opens a PR.
+if ! rules_validate_branch "$CURRENT_BRANCH"; then
+  _rules_box '\033[36m' "recover with one command" \
+    "git open-pr -B dev          # moves commits to a feature branch, opens a PR" \
+    "" \
+    "Auto-derives the branch from your commit; add -c <issue> to link issues," \
+    "or -b <Type>/<title> to name it yourself.  See: scripts/open-pr.sh -h"
+  exit 1
+fi
 
 # ── force-push guard (git-specific — stays in the git hook) ────────────────
 while read -r local_ref local_sha remote_ref remote_sha; do
