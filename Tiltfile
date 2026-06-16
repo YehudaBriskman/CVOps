@@ -103,6 +103,13 @@ docker_compose(
     ['manifests/docker-compose.yml', 'manifests/docker-compose.override.yml'],
     env_file='manifests/.env',
     project_name='cvops',
+    # Activate the `worker` profile so worker-training (the `training` queue
+    # consumer) comes up as a container — it carries the heavy ML stack
+    # (torch/ultralytics) on its image, so it can't run as a host process like
+    # the other workers. The `worker` profile pulls ONLY worker-training, not the
+    # `app`-profile services (api/frontend/worker-cvat run on the host / are
+    # gated), so it doesn't collide with the host processes.
+    profiles=['worker'],
 )
 
 dc_resource('postgres',
@@ -169,6 +176,15 @@ dc_resource('cvat_server',
 dc_resource('cvat_ui',
     labels=['3-cvat'],
     resource_deps=['cvat_server'],
+)
+
+# Training-queue worker (container — torch/ultralytics live on its image, so it
+# can't be a host process). Consumes the `training` stream: clones the trainer
+# repo, runs it against the exported dataset, logs to MLflow, writes a
+# ModelVersion. First `tilt up` builds the image (heavy ML deps) once.
+dc_resource('worker-training',
+    labels=['2-app'],
+    resource_deps=['postgres', 'redis', 'garage-bootstrap', 'mlflow', 'migrate-up'],
 )
 
 # CVAT admin provisioning runs as the one-shot `cvat_admin_init` compose service
