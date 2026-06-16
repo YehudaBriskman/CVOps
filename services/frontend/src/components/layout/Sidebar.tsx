@@ -60,7 +60,7 @@ export function Sidebar() {
             All Projects
           </NavLink>
           <NavLink to="/cvat-models" className={navClass}>
-            Models
+            Deployed Models
           </NavLink>
         </nav>
 
