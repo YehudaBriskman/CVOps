@@ -241,15 +241,20 @@ class CommitDatasetStep(Step):
             ),
             {"id": new_id, "pid": project_id, "name": name},
         )
-        return (
-            await session.execute(
-                text(
-                    "SELECT id FROM datasets WHERE project_id = CAST(:pid AS uuid) "
-                    "AND name = :name"
-                ),
-                {"pid": project_id, "name": name},
-            )
-        ).scalar_one()
+        # str() so the id stays JSON-serializable: it flows into the step's
+        # output_refs and the branch.advanced event payload, both json.dumps'd by
+        # the coordinator/emit_event (a raw asyncpg UUID raises there).
+        return str(
+            (
+                await session.execute(
+                    text(
+                        "SELECT id FROM datasets WHERE project_id = CAST(:pid AS uuid) "
+                        "AND name = :name"
+                    ),
+                    {"pid": project_id, "name": name},
+                )
+            ).scalar_one()
+        )
 
     @staticmethod
     async def _lock_branch(session, dataset_id: str, branch_name: str):
