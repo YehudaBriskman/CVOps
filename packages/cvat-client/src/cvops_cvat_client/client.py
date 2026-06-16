@@ -215,7 +215,9 @@ def pull_review_task(task_id: int, frame_dims: list[tuple[int, int]]) -> dict[in
 
     by_frame: dict[int, list[dict]] = {}
     for shape in getattr(data, "shapes", []):
-        if getattr(shape, "type", None) != "rectangle":
+        # shape.type is a cvat_sdk enum (str() == "rectangle"), not a plain
+        # string — compare its string value, not the enum object.
+        if str(getattr(shape, "type", "")) != "rectangle":
             continue  # gate is detection-only for now; skip polygons/polylines
         frame = shape.frame
         if frame >= len(frame_dims):
