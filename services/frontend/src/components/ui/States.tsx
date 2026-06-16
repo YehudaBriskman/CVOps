@@ -1,6 +1,26 @@
 import { type ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 import { Button } from './Button'
+import { Spinner } from './Spinner'
+
+/** Indeterminate region loading — one consistent spinner placeholder for a panel or list. */
+export function LoadingState({
+  label = 'Loading…',
+  className,
+}: {
+  label?: string
+  className?: string
+}) {
+  return (
+    <div
+      role="status"
+      className={cn('flex items-center justify-center gap-3 py-12 text-sm text-text-muted', className)}
+    >
+      <Spinner className="h-5 w-5" />
+      {label}
+    </div>
+  )
+}
 
 /** Designed empty state — teaches the next action rather than showing a blank panel. */
 export function EmptyState({

@@ -144,6 +144,28 @@ services:
       replicas: 2   # SELECT FOR UPDATE SKIP LOCKED makes this concurrency-safe
     profiles: ["app", "all"]
 
+  worker-cvat:
+    build:
+      context: ..
+      dockerfile: services/worker-cvat/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      garage:   { condition: service_healthy }
+    environment:
+      DATABASE_URL:        postgresql+asyncpg://${POSTGRES_USER:-cvops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-cvops}
+      REDIS_URL:           redis://redis:6379/0
+      REDIS_STREAM:        cvat
+      MODEL_DEPLOYER_PORT: "8001"
+      WORKER_TOKEN:        ${WORKER_TOKEN}
+      CVAT_HOST:           ${CVAT_HOST:-http://cvat_server:8080}
+      CVAT_USERNAME:       ${CVAT_USERNAME}
+      CVAT_PASSWORD:       ${CVAT_PASSWORD}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # nuctl needs Docker to build Nuclio functions
+    profiles: ["app", "all"]
+
   worker-training:
     build:
       context: ..

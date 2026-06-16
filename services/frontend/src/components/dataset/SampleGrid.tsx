@@ -5,11 +5,12 @@ import { useImageUrl, useThumbnailUrl } from '../../api/samples'
 import { useSelectionStore } from '../../store/selection'
 import { useAnnotations } from '../../api/annotations'
 import { cn } from '../../lib/cn'
+import { LoadingState } from '../ui'
 import { BoxOverlay } from './BoxOverlay'
 
 const REVIEW_DOT: Record<string, string> = {
-  accepted: '#34D399',
-  rejected: '#FB7185',
+  accepted: 'var(--cv-success)',
+  rejected: 'var(--cv-error)',
   unreviewed: 'var(--text-muted)',
 }
 
@@ -271,7 +272,7 @@ export function SampleGrid({
   const selecting = selectable && selectMode
 
   if (isLoading) {
-    return <div className="py-12 text-center text-sm text-text-muted">Loading…</div>
+    return <LoadingState />
   }
 
   if (samples.length === 0) {

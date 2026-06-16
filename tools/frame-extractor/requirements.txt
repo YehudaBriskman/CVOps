@@ -1,3 +1,0 @@
-opencv-python>=4.8.0
-ultralytics>=8.3.0
-cvat-sdk>=2.3.0
