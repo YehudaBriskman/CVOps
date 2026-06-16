@@ -91,6 +91,22 @@ async def handle_cvat_sync(fields: dict[str, str]) -> None:
         dims = {str(sid): (w, h) for sid, w, h in dim_rows}
         frame_dims = [dims[s] for s in sample_ids]
 
+        # Fallback ontology for samples with no prior revision (e.g. reviewing
+        # unlabelled samples — nothing was auto-labelled first). annotation_revisions
+        # requires an ontology, so attach the project's default (else its latest).
+        fallback_ont = (
+            await session.execute(
+                text(
+                    "SELECT o.id, o.version FROM ontologies o "
+                    "JOIN projects p ON p.id = o.project_id "
+                    "WHERE o.project_id = CAST(:pid AS uuid) AND o.deleted_at IS NULL "
+                    "ORDER BY (p.default_ontology_id = o.id) DESC NULLS LAST, o.version DESC "
+                    "LIMIT 1"
+                ),
+                {"pid": project_id},
+            )
+        ).first()
+
         by_frame = pull_review_task(cvat_task_id, frame_dims)  # {frame: [canonical ann]}
 
         out_rev_ids: list[str] = []
@@ -108,13 +124,21 @@ async def handle_cvat_sync(fields: dict[str, str]) -> None:
                     {"s": sid},
                 )
             ).first()
-            if prev is None:
-                # No prior revision → no ontology to inherit. The working-set
-                # flow always auto_labels first, so this is rare; skip + log
-                # rather than guess an ontology.
-                logger.warning("cvat_sync: sample %s has no prior revision; skipping", sid)
+            if prev is not None:
+                prev_no, ont_id, ont_ver, parent_id = prev[0], str(prev[1]), prev[2], str(prev[3])
+                rev_no, parent = prev_no + 1, parent_id
+            elif fallback_ont is not None:
+                # From-scratch human label: first revision, project ontology.
+                ont_id, ont_ver = str(fallback_ont[0]), fallback_ont[1]
+                rev_no, parent = 1, None
+            else:
+                logger.warning(
+                    "cvat_sync: sample %s has no prior revision and project %s has no "
+                    "ontology; skipping",
+                    sid,
+                    project_id,
+                )
                 continue
-            prev_no, ont_id, ont_ver, parent_id = prev[0], str(prev[1]), prev[2], str(prev[3])
             new_id = str(uuid.uuid4())
             await session.execute(
                 text(
@@ -131,8 +155,8 @@ async def handle_cvat_sync(fields: dict[str, str]) -> None:
                     "sid": sid,
                     "oid": ont_id,
                     "ov": ont_ver,
-                    "rev": prev_no + 1,
-                    "parent": parent_id,
+                    "rev": rev_no,
+                    "parent": parent,
                     "payload": json.dumps(anns),
                     "prov": json.dumps(
                         {"source": "human", "review_status": "accepted", "author_user_id": None}

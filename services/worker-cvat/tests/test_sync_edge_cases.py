@@ -6,8 +6,9 @@ or skip rather than write a revision:
   * missing labeling_job for the task id  → warn + return, no advance
   * empty gate sample_ids                  → error + return, no advance
   * a reviewed frame index past the sample list → that frame is ignored
-  * a sample with no prior revision        → skipped (no ontology to inherit),
-    the job still completes with zero out-revisions and the gate still resumes
+  * a sample with no prior revision        → falls back to the project ontology
+    so the from-scratch label is still imported
+  * no prior revision AND no project ontology → skipped, job still completes
   * a gate run with no parent              → completes but does not chain
 
 All are DB-backed (testcontainers) and mock advance_workflow to assert chaining.
@@ -100,18 +101,71 @@ async def test_frame_index_past_samples_is_ignored(
     _patched.assert_awaited_once()
 
 
-async def test_sample_without_prior_revision_is_skipped(
+async def test_sample_without_prior_revision_uses_project_ontology(
     session_factory, _patched, fake_pull
 ):
-    """No prior revision → no ontology to inherit → sample skipped, but the job
-    still completes (zero out-revisions) and the gate resumes."""
+    """No prior revision → fall back to the project ontology, so the from-scratch
+    human label is still imported (rev 1), the job completes, and the gate resumes."""
     ids = await seed_review(session_factory, with_prior_revision=False)
 
     await sync.handle_cvat_sync({"cvat_task_id": str(ids["cvat_task_id"])})
 
-    # No revision was written for the sample (it had none to inherit from).
-    assert await _count_revisions(session_factory, ids["sample_id"]) == 0
+    async with session_factory() as s:
+        rev = (
+            await s.execute(
+                text(
+                    "SELECT revision_no, ontology_id, parent_revision_id "
+                    "FROM annotation_revisions WHERE sample_id = CAST(:s AS uuid) "
+                    "AND provenance->>'source' = 'human'"
+                ),
+                {"s": ids["sample_id"]},
+            )
+        ).first()
+        assert rev is not None
+        assert rev[0] == 1  # first revision for this sample
+        assert str(rev[1]) == ids["ontology_id"]  # project ontology attached
+        assert rev[2] is None  # no parent revision
 
+        lj = (
+            await s.execute(
+                text(
+                    "SELECT status, annotation_revision_ids_out FROM labeling_jobs "
+                    "WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": ids["labeling_job_id"]},
+            )
+        ).first()
+        assert lj[0] == "completed"
+        assert len(lj[1]) == 1
+
+        child = (
+            await s.execute(
+                text("SELECT status FROM runs WHERE id = CAST(:id AS uuid)"),
+                {"id": ids["child_id"]},
+            )
+        ).first()
+        assert child[0] == "succeeded"
+
+    _patched.assert_awaited_once()
+
+
+async def test_skips_when_no_prior_revision_and_no_ontology(
+    session_factory, _patched, fake_pull
+):
+    """If the project has no usable ontology either, the sample is skipped (no
+    ontology to attach), but the job still completes and the gate resumes."""
+    ids = await seed_review(session_factory, with_prior_revision=False)
+    # Soft-delete the project's only ontology so the pull has no fallback.
+    async with session_factory() as s:
+        await s.execute(
+            text("UPDATE ontologies SET deleted_at = now() WHERE id = CAST(:o AS uuid)"),
+            {"o": ids["ontology_id"]},
+        )
+        await s.commit()
+
+    await sync.handle_cvat_sync({"cvat_task_id": str(ids["cvat_task_id"])})
+
+    assert await _count_revisions(session_factory, ids["sample_id"]) == 0
     async with session_factory() as s:
         lj = (
             await s.execute(
@@ -123,17 +177,7 @@ async def test_sample_without_prior_revision_is_skipped(
             )
         ).first()
         assert lj[0] == "completed"
-        assert lj[1] == []  # nothing inherited, so nothing emitted
-
-        child = (
-            await s.execute(
-                text("SELECT status FROM runs WHERE id = CAST(:id AS uuid)"),
-                {"id": ids["child_id"]},
-            )
-        ).first()
-        assert child[0] == "succeeded"
-
-    # The gate still resumes downstream even with zero revisions.
+        assert lj[1] == []  # nothing attached, so nothing emitted
     _patched.assert_awaited_once()
 
 

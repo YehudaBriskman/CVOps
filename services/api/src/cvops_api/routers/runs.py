@@ -9,10 +9,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, tuple_
+from sqlalchemy import select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
+from cvops_api.core.redis_client import get_redis
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
 from cvops_api.db.models.projects import Project
@@ -293,3 +294,57 @@ async def resolve_gate(
     # Gate cleared — enqueue whatever became ready downstream.
     await advance_workflow(session, run.id, current_user.id)
     return {"status": "resumed"}
+
+
+# The cvat-queue stream worker-cvat consumes (same name as internal.py's bridge).
+CVAT_STREAM = "cvat"
+
+
+@router.post("/runs/{id}/gates/{step_id}/sync", status_code=status.HTTP_202_ACCEPTED)
+async def sync_gate(
+    id: uuid.UUID,
+    step_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Manually pull reviewed annotations from CVAT for a waiting human-review gate.
+
+    Replaces the CVAT-version-incompatible completion webhook: emits the same
+    ``cvat_sync`` doorbell the webhook bridge would, so worker-cvat pulls the
+    reviewed annotations into ``annotation_revisions``, marks the labeling job
+    complete, and resumes the run. Idempotent downstream (the worker short-circuits
+    on an already-completed job).
+    """
+    r = await session.execute(select(Run).where(Run.id == id))
+    run = r.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    await _check_project(run.project_id, current_user, session)
+
+    r_child = await session.execute(
+        select(Run).where(
+            Run.parent_run_id == run.id,
+            Run.step_id == step_id,
+            Run.status == "waiting",
+        )
+    )
+    child = r_child.scalar_one_or_none()
+    if child is None:
+        raise HTTPException(status_code=404, detail="Waiting gate step not found")
+
+    lj = (
+        await session.execute(
+            text(
+                "SELECT cvat_task_id FROM labeling_jobs WHERE run_id = CAST(:rid AS uuid) "
+                "ORDER BY created_at DESC LIMIT 1"
+            ),
+            {"rid": str(child.id)},
+        )
+    ).first()
+    if lj is None or lj[0] is None:
+        raise HTTPException(status_code=409, detail="No CVAT task recorded for this gate")
+
+    await get_redis().xadd(
+        CVAT_STREAM, {"kind": "cvat_sync", "cvat_task_id": str(lj[0])}
+    )
+    return {"status": "syncing", "cvat_task_id": int(lj[0])}

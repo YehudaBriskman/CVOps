@@ -118,6 +118,8 @@ async def seed_review(
         ont = Ontology(project_id=proj.id, name=f"o-{_uid()}")
         s.add_all([blob, src, ont])
         await s.flush()
+        proj.default_ontology_id = ont.id  # the project ontology pull falls back to
+        await s.flush()
         sample = Sample(
             project_id=proj.id, source_id=src.id, blob_hash=blob.hash, width=640, height=480
         )
@@ -189,6 +191,7 @@ async def seed_review(
             "labeling_job_id": str(lj_id),
             "prior_revision_id": prior_id,
             "cvat_task_id": cvat_task_id,
+            "ontology_id": str(ont.id),
         }
 
 
