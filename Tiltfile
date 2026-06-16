@@ -367,16 +367,17 @@ local_resource('worker-preprocessing',
 # (pushes the review batch into CVAT, parks the run at the gate) and, on a CVAT
 # completion webhook, pulls reviewed annotations back and resumes the run.
 # worker_cvat hardcodes its stream name to `cvat`, so no REDIS_STREAM here.
-# CVAT_URL hits traefik on the host's published :8080; the webhook target points
-# CVAT back at the host API via host.docker.internal (cvat_server has the
-# host-gateway alias).
+# CVAT_URL hits traefik on the host's published :8080.
+#
+# CVAT_WEBHOOK_TARGET is intentionally unset: CVAT 2.x dropped task-scoped
+# webhooks, so auto-resume via webhook can't work. Completion is driven manually
+# from the run page ("Sync from CVAT & complete" → POST .../gates/{step}/sync).
 worker_cvat_env = dict(api_env)
 worker_cvat_env.update({
     'CVAT_URL':            'http://localhost:8080',
     'CVAT_PUBLIC_URL':     env.get('CVAT_PUBLIC_URL', 'http://localhost:8080'),
     'CVAT_USERNAME':       envreq('CVAT_USERNAME'),
     'CVAT_PASSWORD':       envreq('CVAT_PASSWORD'),
-    'CVAT_WEBHOOK_TARGET': 'http://host.docker.internal:8000/api/v1/internal/cvat/webhook',
 })
 
 local_resource('worker-cvat',
@@ -387,6 +388,7 @@ local_resource('worker-cvat',
     # step or the CVAT client (Python doesn't hot-reload like uvicorn --reload).
     deps=[
         'services/worker-cvat/src',
+        'packages/worker-common/src/cvops_worker_common',
         'packages/steps/src/cvops_steps',
         'packages/cvat-client/src/cvops_cvat_client',
     ],
