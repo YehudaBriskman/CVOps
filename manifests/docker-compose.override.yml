@@ -125,10 +125,14 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.services.cvat.loadbalancer.server.port: "8080"
+      # Host-agnostic: route by path only, so CVAT is reachable from localhost, a
+      # dev VM IP, or a tailnet address alike (cvat_server's ALLOWED_HOSTS='*'
+      # lets Django accept any Host). This rule is longer than cvat-ui's, so
+      # Traefik gives it higher priority — /api etc. hit the server and the rest
+      # falls through to the UI SPA.
       traefik.http.routers.cvat.rule: >-
-        Host(`${CVAT_HOST:-localhost}`) &&
-        (PathPrefix(`/api/`) || PathPrefix(`/static/`) ||
-         PathPrefix(`/admin`) || PathPrefix(`/django-rq`))
+        PathPrefix(`/api/`) || PathPrefix(`/static/`) ||
+        PathPrefix(`/admin`) || PathPrefix(`/django-rq`)
       traefik.http.routers.cvat.entrypoints: web
     volumes: *cvat-volumes
     networks:
@@ -145,7 +149,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.http.services.cvat-ui.loadbalancer.server.port: "8000"
-      traefik.http.routers.cvat-ui.rule: Host(`${CVAT_HOST:-localhost}`)
+      traefik.http.routers.cvat-ui.rule: PathPrefix(`/`)
       traefik.http.routers.cvat-ui.entrypoints: web
     networks:
       - cvat
@@ -330,11 +334,12 @@ services:
       - ../services/cvat/components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro,z
       - type: tmpfs
         target: /vector-data-dir
-    # Analytics log shipper — bind-mounts a config file from the services/cvat
-    # submodule, which `tilt up` doesn't init. Not needed for the review flow,
-    # so gate it: Tilt skips it; start_env.sh (--profile app, inits the
-    # submodule) still runs it. Same for cvat_grafana below.
-    profiles: ["app", "all"]
+    # NOT optional, despite being "analytics": cvat_server and the workers ship
+    # events to this log sink (DJANGO_LOG_SERVER_HOST=vector). If it's absent,
+    # every event send fails DNS resolution and retries — adding ~40s to each
+    # task creation. So it runs under tilt up too (the bind-mount resolves
+    # because the Tiltfile inits the services/cvat submodule). Only the grafana
+    # dashboard UI below stays gated — nothing blocks on it.
 
   cvat_grafana:
     container_name: cvat_grafana
