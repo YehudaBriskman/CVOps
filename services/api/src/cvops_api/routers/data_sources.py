@@ -79,8 +79,13 @@ async def list_data_sources(
     r = await session.execute(
         select(DataSource)
         # Show videos and the Uploads folder; legacy per-image sources are hidden
-        # (their images live under the shared Uploads folder now).
-        .where(DataSource.project_id == project_id, DataSource.type != "image")
+        # (their images live under the shared Uploads folder now). Soft-deleted
+        # sources are excluded.
+        .where(
+            DataSource.project_id == project_id,
+            DataSource.type != "image",
+            DataSource.deleted_at == None,  # noqa: E711
+        )
         .order_by(DataSource.created_at.desc())
     )
     sources = list(r.scalars().all())
@@ -433,7 +438,12 @@ async def get_data_source(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> DataSourceOut:
-    r = await session.execute(select(DataSource).where(DataSource.id == id))
+    r = await session.execute(
+        select(DataSource).where(
+            DataSource.id == id,
+            DataSource.deleted_at == None,  # noqa: E711
+        )
+    )
     ds = r.scalar_one_or_none()
     if ds is None:
         raise HTTPException(status_code=404, detail="DataSource not found")
@@ -450,7 +460,12 @@ async def get_data_source_url(
 ) -> dict[str, str]:
     """Presigned GET URL for the source's raw blob so the browser can preview
     the original video/image directly from object storage (no bytes via API)."""
-    r = await session.execute(select(DataSource).where(DataSource.id == id))
+    r = await session.execute(
+        select(DataSource).where(
+            DataSource.id == id,
+            DataSource.deleted_at == None,  # noqa: E711
+        )
+    )
     ds = r.scalar_one_or_none()
     if ds is None:
         raise HTTPException(status_code=404, detail="DataSource not found")
@@ -469,11 +484,21 @@ async def delete_data_source(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    r = await session.execute(select(DataSource).where(DataSource.id == id))
+    r = await session.execute(
+        select(DataSource).where(
+            DataSource.id == id,
+            DataSource.deleted_at == None,  # noqa: E711
+        )
+    )
     ds = r.scalar_one_or_none()
     if ds is None:
         raise HTTPException(status_code=404, detail="DataSource not found")
     await _check_project(ds.project_id, current_user, session)
-    await session.delete(ds)
+    # Soft-delete: keep the row (and its extracted samples / ingest history)
+    # but drop it from listings. The partial unique index
+    # uq_data_sources_project_blob is scoped to `deleted_at IS NULL`, so this
+    # frees the (project, blob) slot for re-ingest and the confirm-upload 409
+    # path correctly ignores the dead source.
+    ds.deleted_at = datetime.now(UTC)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
