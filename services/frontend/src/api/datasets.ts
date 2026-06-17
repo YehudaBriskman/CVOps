@@ -21,11 +21,18 @@ export interface Dataset {
 export interface Commit {
   id: string
   dataset_id: string
+  parent_commit_id: string | null
   message: string | null
   stats: Record<string, unknown> | null
   ontology_id: string
   ontology_version: number
   created_at: string
+}
+
+export interface CommitDiff {
+  added: string[]
+  removed: string[]
+  changed: string[]
 }
 
 export function useDatasets(projectId: string | undefined) {
@@ -99,6 +106,29 @@ export function useCommitSamples(datasetId: string | undefined, commitId: string
     enabled: !!datasetId && !!commitId,
   })
 }
+
+/**
+ * The diff between two commits — sample ids added/removed/changed going from
+ * `fromCommitId` to `toCommitId`. Enabled only when both ids are present, so a
+ * first commit (null parent) can be handled by the caller without a request.
+ */
+export function useCommitDiff(
+  datasetId: string | undefined,
+  fromCommitId: string | null | undefined,
+  toCommitId: string | null | undefined,
+) {
+  return useQuery<CommitDiff>({
+    queryKey: ['commit-diff', datasetId, fromCommitId, toCommitId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ from: fromCommitId as string, to: toCommitId as string })
+      const { data } = await client.get<CommitDiff>(`/datasets/${datasetId}/diff?${params}`)
+      return data
+    },
+    enabled: !!datasetId && !!fromCommitId && !!toCommitId,
+    staleTime: Infinity,
+  })
+}
+
 export function useReviewDataset() {
   return useMutation({
     mutationFn: async (datasetId: string) => {

@@ -200,7 +200,7 @@ async def test_collection_membership_and_count(factory) -> None:
         assert got2.json()["sample_count"] == 1
 
 
-async def test_from_samples_commit_skips_unannotated(factory) -> None:
+async def test_from_samples_commit_includes_unannotated(factory) -> None:
     user, project, source, ids = await _seed(factory, n_samples=2)
 
     # Annotate exactly one sample + create an ontology + dataset.
@@ -237,8 +237,11 @@ async def test_from_samples_commit_skips_unannotated(factory) -> None:
         )
         assert res.status_code == 201, res.text
         body = res.json()
-        assert body["committed_count"] == 1
-        assert body["skipped_count"] == 1
+        # All selected samples are committed: the annotated one pins its winning
+        # revision, the raw (unannotated) one commits with a null revision — a
+        # dataset of raw images is valid, so nothing is skipped.
+        assert body["committed_count"] == 2
+        assert body["skipped_count"] == 0
 
 
 async def test_list_annotations_returns_list_payload(factory) -> None:

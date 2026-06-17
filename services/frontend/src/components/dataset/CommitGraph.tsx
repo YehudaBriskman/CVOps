@@ -10,7 +10,9 @@ interface Props {
 /**
  * Vertical commit timeline rail. Each commit is a node on a single trunk line;
  * selecting one drives the contents pane beside it. The commits endpoint returns
- * a linear history, so this renders a trunk rather than a branching DAG.
+ * a linear history newest-first, so the rail reads top (newest) → bottom (oldest)
+ * and renders a trunk rather than a branching DAG. The trunk connector is drawn
+ * below every node except the last, joining adjacent nodes top-to-bottom.
  */
 export function CommitGraph({ commits, selectedId, onSelect }: Props) {
   if (commits.length === 0) {

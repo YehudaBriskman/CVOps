@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import uuid
+from datetime import datetime
 
 import pytest_asyncio
 from fastapi import FastAPI
@@ -184,17 +185,19 @@ async def test_list_commits_dataset_404(factory) -> None:
 
 async def test_list_commits_pagination(factory) -> None:
     user, project = await _seed(factory)
+    created_ids: list[str] = []
     async with factory() as s:
         ds = await make_dataset(s, project_id=project.id)
         ont = await make_ontology(s, project_id=project.id)
         for i in range(3):
-            await make_commit(
+            commit = await make_commit(
                 s,
                 project_id=project.id,
                 dataset_id=ds.id,
                 ontology_id=ont.id,
                 message=f"c{i}",
             )
+            created_ids.append(str(commit.id))
         await s.commit()
         ds_id = ds.id
 
@@ -204,19 +207,25 @@ async def test_list_commits_pagination(factory) -> None:
         body = first.json()
         assert len(body["items"]) == 2
         assert body["next_cursor"] is not None
-        # next_cursor is a base64-encoded UUID.
-        cursor_uuid = base64.b64decode(body["next_cursor"]).decode()
-        assert uuid.UUID(cursor_uuid)
+        # next_cursor is base64 of "<iso_created_at>|<uuid>" (created_at DESC, id DESC).
+        decoded = base64.b64decode(body["next_cursor"]).decode()
+        iso_created_at, _, cursor_id = decoded.partition("|")
+        datetime.fromisoformat(iso_created_at)
+        assert uuid.UUID(cursor_id)
+        assert cursor_id == body["items"][-1]["id"]
 
-        # NOTE (product bug): the handler derives next_cursor from the (limit+1)th
-        # row but returns only the first `limit`, then page 2 filters `id > cursor`
-        # — so the boundary row is skipped and page 2 comes back empty. We pin the
-        # actual (buggy) behavior so the test is green and the bug is documented.
+        # Page 2 returns the remaining commit (the boundary row is NOT skipped —
+        # next_cursor is derived from the last returned item with strict `<`).
+        first_ids = [item["id"] for item in body["items"]]
         second = await c.get(f"/datasets/{ds_id}/commits?limit=2&cursor={body['next_cursor']}")
         assert second.status_code == 200, second.text
         body2 = second.json()
-        assert len(body2["items"]) == 0
+        assert len(body2["items"]) == 1
         assert body2["next_cursor"] is None
+        # All three commits are returned across the two pages, none duplicated.
+        all_ids = first_ids + [item["id"] for item in body2["items"]]
+        assert set(all_ids) == set(created_ids)
+        assert len(all_ids) == 3
 
 
 async def test_get_commit(factory) -> None:
@@ -481,7 +490,7 @@ async def test_diff_commits(factory) -> None:
         added_id, removed_id = only_to.id, only_from.id
 
     async with _client(factory, user) as c:
-        res = await c.get(f"/datasets/{ds_id}/diff?from_commit={from_id}&to_commit={to_id}")
+        res = await c.get(f"/datasets/{ds_id}/diff?from={from_id}&to={to_id}")
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["added"] == [str(added_id)]
@@ -499,7 +508,7 @@ async def test_diff_from_commit_not_in_dataset_404(factory) -> None:
         ds_id, to_id = ds.id, c_to.id
 
     async with _client(factory, user) as c:
-        res = await c.get(f"/datasets/{ds_id}/diff?from_commit={uuid.uuid4()}&to_commit={to_id}")
+        res = await c.get(f"/datasets/{ds_id}/diff?from={uuid.uuid4()}&to={to_id}")
     assert res.status_code == 404, res.text
 
 

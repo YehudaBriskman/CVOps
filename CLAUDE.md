@@ -153,6 +153,29 @@ jj push                                     # validates, then `jj git push`
 
 Adding a commit type (e.g. `perf`) means editing `RULES_COMMIT_TYPES` in `scripts/hooks/lib/rules.sh` once — both providers pick it up.
 
+### Parallel agents and the shared working copy
+
+A `jj`/`git` working copy has exactly **one** writer. Do **not** run multiple agents (or any concurrent processes that edit files) against the **same** working directory — `jj` snapshots the working copy on every command, so concurrent writers produce *divergent operations*, and reconciling them can silently reset the working copy and drop uncommitted edits. We hit this: two agents editing one workspace in parallel lost their changes to a `reconcile divergent operations` op (recovered only via `jj op restore <snapshot-op>` — `jj op log` is the safety net).
+
+Rules for parallel agent work:
+
+- **One workspace = one writer.** If you fan out agents that *write*, give each its own isolation (a separate `jj workspace add` directory, or the Agent tool's `isolation: "worktree"`), then merge/commit the results. Agents that only *read* can share freely.
+- If you can't isolate, run the writing agents **sequentially**, committing between them.
+- Splitting by directory (e.g. backend vs frontend) is *not* enough — `jj` snapshots the whole working copy, so disjoint file sets still collide at the operation log.
+- After any suspected collision, **don't `jj workspace update-stale` blindly** (it can reset to an empty commit). Check `jj op log` first and `jj op restore` the snapshot that holds the work.
+
+### Validating a workspace's Python against the right code
+
+Editable installs (`pip install -e services/api`) bind `import cvops_api` to a **fixed path** — usually the main checkout, not your `jj workspace`. Running `pytest` from a workspace then tests the *main* code with the *workspace* tests (and `cvops_steps` may be missing entirely), producing fake failures. The sandbox has **no network**, so a fresh `pip install` venv won't work. Instead point `PYTHONPATH` at the workspace sources so they shadow the install:
+
+```bash
+WS=/path/to/CVOps-<workspace>
+PYTHONPATH="$WS/services/api/src:$WS/packages/steps/src:$WS/packages/worker-common/src" \
+  python -m pytest tests/ -q
+```
+
+Verify with `python -c "import cvops_api, os; print(os.path.realpath(cvops_api.__file__))"` before trusting any result.
+
 ## Reference docs
 
 - `README.md` — product overview, full API table, walkthrough.

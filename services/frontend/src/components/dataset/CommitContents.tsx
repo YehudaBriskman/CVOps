@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useCommitSamples, type Commit } from '../../api/datasets'
+import { useCommitDiff, useCommitSamples, type Commit } from '../../api/datasets'
 import { useDataSources } from '../../api/data-sources'
 import { useThumbnailUrl, type Sample } from '../../api/samples'
 import { cn } from '../../lib/cn'
-import { Button, Select } from '../ui'
+import { Button, EmptyState, Select } from '../ui'
 import { CommitStats } from './CommitStats'
 import { Lightbox } from './SampleGrid'
 
 type GroupKey = 'source' | 'review' | 'annotation' | 'none'
+type ViewKey = 'files' | 'changes'
 
 const GROUP_OPTIONS: { value: GroupKey; label: string }[] = [
   { value: 'source', label: 'Group by source' },
@@ -58,6 +59,146 @@ function Chevron({ open }: { open: boolean }) {
   )
 }
 
+/** A single thumbnail in the Changes "Added" grid (no lightbox wiring). */
+function DiffThumb({ sample }: { sample: Sample }) {
+  const { data } = useThumbnailUrl(sample.id)
+  return (
+    <div className="relative aspect-square overflow-hidden rounded-md border border-success/40 bg-surface-3">
+      {data?.url ? (
+        <img src={data.url} alt={`frame ${sample.frame_index ?? ''}`} className="h-full w-full object-cover" loading="lazy" />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-border-strong border-t-text-secondary" />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * GitHub-style per-commit changeset: the diff of this commit against its parent.
+ * "Added" shows thumbnails (resolved from the commit's cumulative samples);
+ * "Removed" ids are gone from the current state, so they render as a plain list.
+ */
+function ChangesView({
+  datasetId,
+  commitId,
+  parentCommitId,
+  sampleById,
+}: {
+  datasetId: string
+  commitId: string
+  parentCommitId: string | null
+  sampleById: Map<string, Sample>
+}) {
+  const diff = useCommitDiff(datasetId, parentCommitId, commitId)
+
+  // First commit (no parent): everything is "added", so we don't need a request.
+  if (!parentCommitId) {
+    const added = [...sampleById.values()]
+    return (
+      <div className="space-y-4">
+        <EmptyState
+          title="Initial commit"
+          description={`${added.length} file${added.length === 1 ? '' : 's'} added — this commit has no parent to diff against.`}
+        />
+        {added.length > 0 && (
+          <section className="overflow-hidden rounded-xl border border-border bg-surface-2">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-success" aria-hidden="true" />
+              <span className="text-sm font-medium text-success">Added</span>
+              <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">{added.length}</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 px-4 py-4 sm:grid-cols-5 lg:grid-cols-6">
+              {added.map((s) => (
+                <DiffThumb key={s.id} sample={s} />
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    )
+  }
+
+  if (diff.isLoading) {
+    return <div className="py-12 text-center text-sm text-text-muted">Loading changes…</div>
+  }
+  if (diff.isError || !diff.data) {
+    return (
+      <EmptyState title="Could not load changes" description="The diff for this commit is unavailable." />
+    )
+  }
+
+  const { added, removed, changed } = diff.data
+  if (added.length === 0 && removed.length === 0 && changed.length === 0) {
+    return <EmptyState title="No changes" description="This commit's dataset state matches its parent." />
+  }
+
+  return (
+    <div className="space-y-4">
+      {added.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-border bg-surface-2">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-success" aria-hidden="true" />
+            <span className="text-sm font-medium text-success">Added</span>
+            <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">{added.length}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 px-4 py-4 sm:grid-cols-5 lg:grid-cols-6">
+            {added.map((id) => {
+              const s = sampleById.get(id)
+              return s ? (
+                <DiffThumb key={id} sample={s} />
+              ) : (
+                <div
+                  key={id}
+                  className="flex aspect-square items-center justify-center rounded-md border border-success/40 bg-surface-3 px-1 text-center font-mono text-[10px] text-text-muted"
+                >
+                  {id.slice(0, 8)}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {removed.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-border bg-surface-2">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-error" aria-hidden="true" />
+            <span className="text-sm font-medium text-error">Removed</span>
+            <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">{removed.length}</span>
+          </div>
+          <ul className="divide-y divide-border">
+            {removed.map((id) => (
+              <li key={id} className="flex items-center gap-2 px-4 py-2 text-sm">
+                <span className="text-error">−</span>
+                <span className="font-mono text-text-secondary">{id.slice(0, 12)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {changed.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-border bg-surface-2">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-iris" aria-hidden="true" />
+            <span className="text-sm font-medium text-text-primary">Changed</span>
+            <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">{changed.length}</span>
+          </div>
+          <ul className="divide-y divide-border">
+            {changed.map((id) => (
+              <li key={id} className="flex items-center gap-2 px-4 py-2 text-sm">
+                <span className="font-mono text-text-secondary">{id.slice(0, 12)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
 export function CommitContents({
   datasetId,
   commitId,
@@ -71,11 +212,20 @@ export function CommitContents({
 }) {
   const q = useCommitSamples(datasetId, commitId)
   const { data: sources } = useDataSources(projectId)
+  const [view, setView] = useState<ViewKey>('files')
   const [groupBy, setGroupBy] = useState<GroupKey>('source')
   const [openIndex, setOpenIndex] = useState<number | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const samples = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data])
+
+  // sample id → sample, so the Changes view can resolve thumbnails for "added"
+  // ids out of the cumulative state already loaded for this commit.
+  const sampleById = useMemo(() => {
+    const m = new Map<string, Sample>()
+    for (const s of samples) m.set(s.id, s)
+    return m
+  }, [samples])
 
   // source_id → friendly label, so "source" folders read as names not UUIDs.
   const sourceLabel = useMemo(() => {
@@ -131,7 +281,6 @@ export function CommitContents({
           <p className="mt-0.5 text-xs text-text-muted">
             <span className="font-mono">{commitId.slice(0, 10)}</span>
             {commit && ` · ${new Date(commit.created_at).toLocaleString()}`}
-            {samples.length > 0 && ` · ${samples.length} loaded`}
           </p>
         </div>
         <Link to={`/datasets/${datasetId}/commits/${commitId}`} className="shrink-0">
@@ -141,74 +290,109 @@ export function CommitContents({
         </Link>
       </div>
 
+      {/* View toggle — full dataset state ("Files") vs. diff against parent ("Changes"). */}
+      <div className="mb-4 inline-flex rounded-lg border border-border bg-surface-2 p-0.5" role="tablist" aria-label="Commit view">
+        {([
+          { key: 'files', label: 'Files' },
+          { key: 'changes', label: 'Changes' },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={view === t.key}
+            onClick={() => setView(t.key)}
+            className={cn(
+              'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+              view === t.key ? 'bg-iris/15 text-text-primary' : 'text-text-muted hover:text-text-secondary',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       {commit?.stats && (
         <div className="mb-4">
           <CommitStats stats={commit.stats} />
         </div>
       )}
 
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <Select
-          className="w-auto"
-          value={groupBy}
-          onChange={(e) => setGroupBy(e.target.value as GroupKey)}
-          aria-label="Group commit samples"
-        >
-          {GROUP_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
-        <span className="text-xs text-text-muted">{folders.length} folder{folders.length === 1 ? '' : 's'}</span>
-      </div>
-
-      {q.isLoading ? (
-        <div className="py-12 text-center text-sm text-text-muted">Loading samples…</div>
-      ) : samples.length === 0 ? (
-        <div className="rounded-xl border border-border bg-surface-2 p-10 text-center shadow-sm">
-          <p className="text-sm font-medium text-text-primary">No samples in this commit</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {folders.map(([label, indices]) => {
-            const open = !collapsed.has(label)
-            return (
-              <div key={label} className="overflow-hidden rounded-xl border border-border bg-surface-2">
-                <button
-                  type="button"
-                  onClick={() => toggleFolder(label)}
-                  aria-expanded={open}
-                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-3"
-                >
-                  <Chevron open={open} />
-                  <span className="truncate text-sm font-medium text-text-primary">{label}</span>
-                  <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">
-                    {indices.length}
-                  </span>
-                </button>
-                {open && (
-                  <div className="grid grid-cols-3 gap-2 px-4 pb-4 sm:grid-cols-5 lg:grid-cols-6">
-                    {indices.map((gi) => (
-                      <CommitThumb key={samples[gi].id} sample={samples[gi]} onOpen={() => setOpenIndex(gi)} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-
-          {q.hasNextPage && (
-            <Button
-              variant="secondary"
-              className="w-full"
-              loading={q.isFetchingNextPage}
-              onClick={() => q.fetchNextPage()}
+      {view === 'files' ? (
+        <>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <Select
+              className="w-auto"
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as GroupKey)}
+              aria-label="Group commit samples"
             >
-              Load more samples
-            </Button>
+              {GROUP_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <span className="text-xs text-text-muted">
+              {samples.length > 0 ? `${samples.length} sample${samples.length === 1 ? '' : 's'} at this commit` : ''}
+            </span>
+          </div>
+
+          {q.isLoading ? (
+            <div className="py-12 text-center text-sm text-text-muted">Loading samples…</div>
+          ) : samples.length === 0 ? (
+            <div className="rounded-xl border border-border bg-surface-2 p-10 text-center shadow-sm">
+              <p className="text-sm font-medium text-text-primary">No samples at this commit</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {folders.map(([label, indices]) => {
+                const open = !collapsed.has(label)
+                return (
+                  <div key={label} className="overflow-hidden rounded-xl border border-border bg-surface-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleFolder(label)}
+                      aria-expanded={open}
+                      className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-3"
+                    >
+                      <Chevron open={open} />
+                      <span className="truncate text-sm font-medium text-text-primary">{label}</span>
+                      <span className="ml-auto rounded-full bg-surface-3 px-2 py-0.5 text-xs text-text-muted">
+                        {indices.length}
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="grid grid-cols-3 gap-2 px-4 pb-4 sm:grid-cols-5 lg:grid-cols-6">
+                        {indices.map((gi) => (
+                          <CommitThumb key={samples[gi].id} sample={samples[gi]} onOpen={() => setOpenIndex(gi)} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {q.hasNextPage && (
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  loading={q.isFetchingNextPage}
+                  onClick={() => q.fetchNextPage()}
+                >
+                  Load more samples
+                </Button>
+              )}
+            </div>
           )}
-        </div>
+        </>
+      ) : (
+        <ChangesView
+          datasetId={datasetId}
+          commitId={commitId}
+          parentCommitId={commit?.parent_commit_id ?? null}
+          sampleById={sampleById}
+        />
       )}
 
       {openIndex !== null && (
