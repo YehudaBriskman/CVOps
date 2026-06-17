@@ -18,6 +18,7 @@ import base64
 import uuid
 from datetime import datetime
 
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient, ASGITransport
@@ -378,6 +379,37 @@ async def test_create_commit_dataset_404(factory) -> None:
             },
         )
     assert res.status_code == 404, res.text
+
+
+@pytest.mark.parametrize(
+    "split_strategy",
+    [
+        {"train_ratio": 0.8, "val_ratio": 0.5},  # sum exceeds 1.0
+        {"train_ratio": -0.1},  # negative
+        {"val_ratio": 1.5},  # above 1.0
+        {"train_ratio": "lots"},  # non-numeric
+    ],
+)
+async def test_create_commit_rejects_bad_split_ratios(factory, split_strategy) -> None:
+    """Invalid split ratios are rejected at the schema boundary with 422.
+
+    The check runs before the handler, so no dataset needs to exist — a bad
+    `split_strategy` never reaches the commit logic that would otherwise compute
+    garbage train/val counts.
+    """
+    user, _project = await _seed(factory)
+    async with _client(factory, user) as c:
+        res = await c.post(
+            f"/datasets/{uuid.uuid4()}/commits",
+            json={
+                "message": "init",
+                "sample_ids": [],
+                "annotation_revision_ids": [],
+                "ontology_id": str(uuid.uuid4()),
+                "split_strategy": split_strategy,
+            },
+        )
+    assert res.status_code == 422, res.text
 
 
 # ── refs ────────────────────────────────────────────────────────────────────

@@ -68,6 +68,18 @@ async def _check_project(
     return proj
 
 
+def _split_counts(total: int, strategy: dict[str, Any]) -> tuple[int, int]:
+    """Return (train_count, val_count) for `total` samples given a split strategy.
+
+    The ratios are validated up front on the request schema (see
+    `schemas.datasets._validate_split_strategy`), so here we only apply the
+    defaults and floor the counts; the remainder becomes the test split.
+    """
+    train_ratio = strategy.get("train_ratio", 0.7)
+    val_ratio = strategy.get("val_ratio", 0.15)
+    return int(total * train_ratio), int(total * val_ratio)
+
+
 # ── Datasets ─────────────────────────────────────────────────────────────────
 
 
@@ -403,10 +415,7 @@ async def create_commit(
 
     # Assign splits
     total = len(body.sample_ids)
-    train_ratio = body.split_strategy.get("train_ratio", 0.7)
-    val_ratio = body.split_strategy.get("val_ratio", 0.15)
-    train_count = int(total * train_ratio)
-    val_count = int(total * val_ratio)
+    train_count, val_count = _split_counts(total, body.split_strategy)
 
     for idx, (sid, arid) in enumerate(zip(body.sample_ids, body.annotation_revision_ids)):
         if idx < train_count:
@@ -541,10 +550,7 @@ async def create_commit_from_samples(
 
     # Assign splits over the new batch.
     total = len(committed)
-    train_ratio = body.split_strategy.get("train_ratio", 0.7)
-    val_ratio = body.split_strategy.get("val_ratio", 0.15)
-    train_count = int(total * train_ratio)
-    val_count = int(total * val_ratio)
+    train_count, val_count = _split_counts(total, body.split_strategy)
 
     # Cumulative state (a git "tree"): the new commit's commit_samples are the
     # parent commit's commit_samples UNION this batch. The batch wins on overlap
