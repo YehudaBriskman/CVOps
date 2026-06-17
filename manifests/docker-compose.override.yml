@@ -475,9 +475,12 @@ volumes:
   cvat_cache_db:
 
 networks:
-  # Compose-managed (was external) so `tilt up` and start_env.sh both create it
-  # without a manual `docker network create`. The Docker network name stays
-  # `cvat_cvat`, so nuctl deploys (--platform-config network: cvat_cvat) and
-  # traefik's provider network still resolve it by name.
+  # External (pre-created idempotently by the Tiltfile and start_env.sh with
+  # `docker network create cvat_cvat`). External means compose adopts the existing
+  # network as-is and does NOT manage/label it — so a network shared with nuclio
+  # (nuctl --platform-config network: cvat_cvat) and CVAT doesn't trip compose's
+  # "incorrect label com.docker.compose.network" check. The name stays `cvat_cvat`
+  # so nuctl deploys and traefik's provider network resolve it by name.
   cvat:
     name: cvat_cvat
+    external: true

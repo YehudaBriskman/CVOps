@@ -40,6 +40,27 @@ if not os.path.exists('manifests/.env'):
     print('⚠  No manifests/.env file found — copying manifests/.env.example. Edit secrets before going live.')
     local('cp manifests/.env.example manifests/.env', quiet=True)
 
+# Reconcile: append any keys present in .env.example but MISSING from an existing
+# .env. The bootstrap copy above only fires when .env is absent entirely, so a
+# dev whose .env predates a newly-added var would otherwise never receive it
+# (the symptom: "some vars aren't generated"). Newly-appended change_me
+# placeholders get filled by the generator immediately below.
+local('''
+    cd manifests
+    [ -f .env.example ] || exit 0
+    added=0
+    while IFS= read -r line; do
+        case "$line" in ''|\\#*) continue ;; *=*) ;; *) continue ;; esac
+        key=${line%%=*}
+        if ! grep -qE "^${key}=" .env; then
+            echo "$line" >> .env
+            added=1
+        fi
+    done < .env.example
+    [ "$added" = 1 ] && echo "⚠  Appended missing keys from .env.example to manifests/.env"
+    exit 0
+''', quiet=False)
+
 # Replace any leftover `change_me*` placeholders with freshly-generated secrets.
 # A copied-but-unedited .env carries `GARAGE_RPC_SECRET=change_me_rpc_secret_hex_32_bytes`,
 # which Garage rejects at startup ("Invalid RPC secret key: expected 32 bytes of
@@ -51,7 +72,7 @@ local('''
     tmp=$(mktemp)
     while IFS= read -r line; do
         case "$line" in
-            POSTGRES_PASSWORD=*|DATABASE_URL=*)
+            POSTGRES_PASSWORD=*|DATABASE_URL=*|POSTGRES_EXPORTER_DSN=*)
                 echo "$line" ;;
             GARAGE_DEFAULT_ACCESS_KEY=GKchange_me*)
                 echo "GARAGE_DEFAULT_ACCESS_KEY=GK$(openssl rand -hex 12)" ;;
@@ -123,7 +144,12 @@ docker_compose(
     profiles=['worker'],
 )
 
-# cvat_cvat must exist before Docker Compose validates the override file.
+# cvat_cvat is declared `external` in the override, so it must pre-exist before
+# compose attaches to it. Create it idempotently here (and start_env.sh does the
+# same). External means compose adopts the existing network as-is and does NOT
+# check/manage its labels — which is what lets a network created here (or by
+# nuctl/start_env) be shared across the cvops-cvat compose project, nuclio, and
+# CVAT without the "incorrect label com.docker.compose.network" conflict.
 local('docker network inspect cvat_cvat >/dev/null 2>&1 || docker network create cvat_cvat', quiet=True)
 
 docker_compose(

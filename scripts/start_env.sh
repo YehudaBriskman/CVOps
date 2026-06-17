@@ -44,6 +44,10 @@ ok "Submodules ready"
 # ── step 2: docker compose up ─────────────────────────────────────────────────
 # Compose files live under manifests/ as of the dev-stack refactor; project-name
 # pinned to `cvops` to keep volume continuity across invocations.
+# cvat_cvat is declared `external` in the override, so create it idempotently
+# first (matches the Tiltfile) — external means compose attaches without
+# re-labelling, so it's safely shared with nuclio and CVAT.
+docker network inspect cvat_cvat >/dev/null 2>&1 || docker network create cvat_cvat
 info "Starting full stack (CVOps + CVAT + Nuclio)..."
 docker compose -f "$REPO_DIR/manifests/docker-compose.yml" \
                -f "$REPO_DIR/manifests/docker-compose.override.yml" \
