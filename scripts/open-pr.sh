@@ -142,7 +142,7 @@ done
 
 BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
 [ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
-BODY=$(printf '%s\n\n— Claude-Bot on behalf of @Yehuda Briskman\n' "$BODY")
+BODY=$(printf '%s\n\n— Claude-Bot on behalf of @me\n' "$BODY")
 
 # ── open the PR, assigned to the author ─────────────────────────────────────
 if [ "$DRYRUN" -eq 1 ]; then
