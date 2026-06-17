@@ -13,7 +13,11 @@
 export async function sha256Hex(file: Blob): Promise<string> {
   const subtle = globalThis.crypto?.subtle
   if (subtle) {
-    const digest = await subtle.digest('SHA-256', await file.arrayBuffer())
+    // Wrap in a fresh Uint8Array (a current-realm TypedArray view) before
+    // digesting: a bare ArrayBuffer crossing realms — e.g. jsdom's Blob vs the
+    // Node WebCrypto in tests — is rejected as "not an instance of ArrayBuffer".
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const digest = await subtle.digest('SHA-256', bytes)
     return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
   }
 
@@ -22,11 +26,16 @@ export async function sha256Hex(file: Blob): Promise<string> {
   const { createSHA256 } = await import('hash-wasm')
   const hasher = await createSHA256()
   hasher.init()
-  const reader = file.stream().getReader()
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    hasher.update(value)
+  if (typeof file.stream === 'function') {
+    const reader = file.stream().getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      hasher.update(value)
+    }
+  } else {
+    // No streaming (very old browsers, or non-browser test envs): buffer once.
+    hasher.update(new Uint8Array(await file.arrayBuffer()))
   }
   return hasher.digest('hex')
 }

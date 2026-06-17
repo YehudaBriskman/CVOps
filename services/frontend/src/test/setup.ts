@@ -1,7 +1,32 @@
+import { webcrypto } from 'node:crypto'
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { server } from './server'
+
+// jsdom does not implement crypto.subtle, and whether the Node WebCrypto global
+// survives into each jsdom worker is non-deterministic. Pin it so the
+// secure-context hash path (lib/hash.ts) is the one tests exercise everywhere,
+// instead of falling back to file.stream() which jsdom also lacks.
+if (typeof globalThis.crypto?.subtle === 'undefined') {
+  Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
+}
+
+// Node's undici `fetch` reads a Blob/File request body by calling `.stream()`,
+// which jsdom's Blob does not implement — so `fetch(url, { body: file })`
+// (the image-upload PUT) throws "object.stream is not a function" under test.
+// Real browsers implement Blob.stream(); this only patches the jsdom gap.
+if (typeof Blob.prototype.stream !== 'function') {
+  Blob.prototype.stream = function (this: Blob): ReadableStream<Uint8Array<ArrayBuffer>> {
+    const bytes = this.arrayBuffer()
+    return new ReadableStream<Uint8Array<ArrayBuffer>>({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await bytes))
+        controller.close()
+      },
+    })
+  }
+}
 
 // jsdom 29 does not always expose localStorage as a usable global — under an
 // opaque origin it surfaces as an empty `{}` (defined, but `getItem`/`clear`
