@@ -29,7 +29,10 @@ from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine.coordinator import advance_workflow
 from cvops_api.engine.dispatch import create_workflow_run
+from cvops_api.core.annotation_import import import_annotated_images
 from cvops_api.schemas.data_sources import (
+    AnnotatedImageConfirmRequest,
+    AnnotatedImageConfirmResponse,
     ConfirmResponse,
     DataSourceCheck,
     DataSourceCheckResponse,
@@ -148,9 +151,7 @@ async def create_data_source(
     if body.type != "external_uri":
         # Sign against the host the browser used so the direct upload is reachable.
         endpoint = public_s3_endpoint(request.url.hostname)
-        put_url = await get_storage().get_presigned_put_for_upload(
-            str(ds.id), endpoint=endpoint
-        )
+        put_url = await get_storage().get_presigned_put_for_upload(str(ds.id), endpoint=endpoint)
 
     await session.commit()
     return UploadResponse(
@@ -280,25 +281,19 @@ async def confirm_upload(
         if wf is None and body.workflow_id is not None:
             raise HTTPException(status_code=404, detail="Workflow not found")
         if wf is not None:
-            run = await create_workflow_run(
-                session, wf, {"source_id": str(ds.id)}, current_user.id
-            )
+            run = await create_workflow_run(session, wf, {"source_id": str(ds.id)}, current_user.id)
             run_id = run.id
             # Synchronous, fast: creates the first child step runs and rings
             # their Redis queues. A worker picks them up out-of-process.
             await advance_workflow(session, run.id, current_user.id)
 
-    return ConfirmResponse(
-        data_source=DataSourceOut.model_validate(ds), run_id=run_id
-    )
+    return ConfirmResponse(data_source=DataSourceOut.model_validate(ds), run_id=run_id)
 
 
 # ── Direct image upload → samples (no workflow) ──────────────────────────────
 
 
-async def _get_or_create_uploads_source(
-    project_id: uuid.UUID, session: AsyncSession
-) -> DataSource:
+async def _get_or_create_uploads_source(project_id: uuid.UUID, session: AsyncSession) -> DataSource:
     """The per-project shared 'Uploads' folder that holds manual images.
 
     Query-then-insert (data_sources has no unique on (project_id, type)); a rare
@@ -427,8 +422,35 @@ async def confirm_images(
         )
     await session.commit()
 
-    return ImageConfirmResponse(
-        source_id=src.id, created=len(sample_ids), sample_ids=sample_ids
+    return ImageConfirmResponse(source_id=src.id, created=len(sample_ids), sample_ids=sample_ids)
+
+
+@router.post(
+    "/projects/{project_id}/annotated-uploads/confirm",
+    response_model=AnnotatedImageConfirmResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def confirm_annotated_images(
+    project_id: uuid.UUID,
+    body: AnnotatedImageConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> AnnotatedImageConfirmResponse:
+    """Land pre-labeled YOLO images as samples + annotation revisions.
+
+    Image bytes are uploaded via the format-agnostic `/image-uploads/presign`
+    path first; this confirm step records each image as a Sample and writes one
+    AnnotationRevision per new sample (the box payload mirrors what export_yolo
+    reads). The committed samples are then ready for the existing
+    `from-samples` commit flow, which auto-resolves the latest revision."""
+    project = await _check_project(project_id, current_user, session)
+    src = await _get_or_create_uploads_source(project_id, session)
+    return await import_annotated_images(
+        session,
+        project=project,
+        source=src,
+        body=body,
+        actor_id=current_user.id,
     )
 
 
