@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from cvops_api.core.auth import get_current_user
 from cvops_api.core.audit import emit_event
+from cvops_api.core.pagination import decode_cursor_parts, decode_cursor_uuid
 from cvops_api.core.sample_view import build_sample_outs
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
@@ -48,6 +49,7 @@ from cvops_api.schemas.runs import RunOut, TrainCommitRequest
 
 router = APIRouter()
 
+
 async def _check_project(
     project_id: uuid.UUID,
     current_user: User,
@@ -64,6 +66,18 @@ async def _check_project(
     if proj is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return proj
+
+
+def _split_counts(total: int, strategy: dict[str, Any]) -> tuple[int, int]:
+    """Return (train_count, val_count) for `total` samples given a split strategy.
+
+    The ratios are validated up front on the request schema (see
+    `schemas.datasets._validate_split_strategy`), so here we only apply the
+    defaults and floor the counts; the remainder becomes the test split.
+    """
+    train_ratio = strategy.get("train_ratio", 0.7)
+    val_ratio = strategy.get("val_ratio", 0.15)
+    return int(total * train_ratio), int(total * val_ratio)
 
 
 # ── Datasets ─────────────────────────────────────────────────────────────────
@@ -115,9 +129,7 @@ async def get_dataset(
 # ── Review in CVAT ────────────────────────────────────────────────────────────
 
 
-async def _latest_commit_id(
-    session: AsyncSession, dataset_id: uuid.UUID
-) -> uuid.UUID | None:
+async def _latest_commit_id(session: AsyncSession, dataset_id: uuid.UUID) -> uuid.UUID | None:
     """The commit whose samples make up the review set.
 
     Prefer the `main` branch ref; fall back to the most recent commit by
@@ -163,9 +175,7 @@ async def review_dataset(
 
     commit_id = await _latest_commit_id(session, dataset.id)
     if commit_id is None:
-        raise HTTPException(
-            status_code=400, detail="Dataset has no commits to review"
-        )
+        raise HTTPException(status_code=400, detail="Dataset has no commits to review")
 
     rows = (
         await session.execute(
@@ -175,9 +185,7 @@ async def review_dataset(
         )
     ).all()
     if not rows:
-        raise HTTPException(
-            status_code=400, detail="Dataset commit has no samples to review"
-        )
+        raise HTTPException(status_code=400, detail="Dataset commit has no samples to review")
 
     # Pre-labels are optional: samples without a committed annotation revision
     # have annotation_revision_id = NULL. Drop those (don't stringify None into
@@ -271,9 +279,12 @@ async def list_commits(
     # tuple/row comparison so it stays stable across ties on created_at.
     q = select(Commit).where(Commit.dataset_id == id)
     if cursor is not None:
-        cursor_created_at_raw, _, cursor_id_raw = base64.b64decode(cursor).decode().partition("|")
-        cursor_created_at = datetime.fromisoformat(cursor_created_at_raw)
-        cursor_id = uuid.UUID(cursor_id_raw)
+        cursor_created_at_raw, cursor_id_raw = decode_cursor_parts(cursor)
+        try:
+            cursor_created_at = datetime.fromisoformat(cursor_created_at_raw)
+            cursor_id = uuid.UUID(cursor_id_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
         q = q.where(tuple_(Commit.created_at, Commit.id) < (cursor_created_at, cursor_id))
     q = q.order_by(Commit.created_at.desc(), Commit.id.desc()).limit(limit + 1)
 
@@ -343,7 +354,7 @@ async def list_commit_samples(
         .where(CommitSample.commit_id == commit_id, Sample.deleted_at.is_(None))
     )
     if cursor is not None:
-        cursor_uuid = uuid.UUID(base64.b64decode(cursor).decode())
+        cursor_uuid = decode_cursor_uuid(cursor)
         q = q.where(Sample.id > cursor_uuid)
     q = q.order_by(Sample.id).limit(limit + 1)
 
@@ -404,10 +415,7 @@ async def create_commit(
 
     # Assign splits
     total = len(body.sample_ids)
-    train_ratio = body.split_strategy.get("train_ratio", 0.7)
-    val_ratio = body.split_strategy.get("val_ratio", 0.15)
-    train_count = int(total * train_ratio)
-    val_count = int(total * val_ratio)
+    train_count, val_count = _split_counts(total, body.split_strategy)
 
     for idx, (sid, arid) in enumerate(zip(body.sample_ids, body.annotation_revision_ids)):
         if idx < train_count:
@@ -542,10 +550,7 @@ async def create_commit_from_samples(
 
     # Assign splits over the new batch.
     total = len(committed)
-    train_ratio = body.split_strategy.get("train_ratio", 0.7)
-    val_ratio = body.split_strategy.get("val_ratio", 0.15)
-    train_count = int(total * train_ratio)
-    val_count = int(total * val_ratio)
+    train_count, val_count = _split_counts(total, body.split_strategy)
 
     # Cumulative state (a git "tree"): the new commit's commit_samples are the
     # parent commit's commit_samples UNION this batch. The batch wins on overlap
@@ -730,12 +735,12 @@ async def train_commit(
         "edges": [{"from": "export", "to": "train"}],
     }
 
-    run = await create_adhoc_run(
-        session, dataset.project_id, definition, {}, current_user.id
-    )
+    run = await create_adhoc_run(session, dataset.project_id, definition, {}, current_user.id)
     await advance_workflow(session, run.id, current_user.id)
     await session.refresh(run)
     return RunOut.model_validate(run)
+
+
 # ── Refs ──────────────────────────────────────────────────────────────────────
 
 
