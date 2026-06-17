@@ -117,3 +117,43 @@ class ImageConfirmResponse(BaseModel):
     source_id: uuid.UUID
     created: int
     sample_ids: list[uuid.UUID]
+
+
+# ── Annotated (pre-labeled YOLO) image upload ────────────────────────────────
+
+
+class YoloBox(BaseModel):
+    # YOLO index into the request's ordered `class_names`; mapped server-side to
+    # a LabelClass.class_key. Coords are normalized 0..1 (cx, cy, w, h).
+    class_id: int = Field(ge=0)
+    cx: float = Field(ge=0.0, le=1.0)
+    cy: float = Field(ge=0.0, le=1.0)
+    w: float = Field(ge=0.0, le=1.0)
+    h: float = Field(ge=0.0, le=1.0)
+    confidence: float | None = None
+
+
+class AnnotatedImageItem(BaseModel):
+    blob_hash: str
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    content_type: str | None = None
+    size_bytes: int | None = None
+    boxes: list[YoloBox] = Field(default_factory=list)
+
+
+class AnnotatedImageConfirmRequest(BaseModel):
+    # None → use the project's default ontology.
+    ontology_id: uuid.UUID | None = None
+    # Ordered class names from the upload's classes.txt / data.yaml `names`.
+    class_names: list[str] = Field(..., min_length=1)
+    group: str | None = None
+    items: list[AnnotatedImageItem] = Field(..., max_length=1000)
+
+
+class AnnotatedImageConfirmResponse(BaseModel):
+    source_id: uuid.UUID
+    created: int
+    # How many of the created samples got an annotation revision attached.
+    annotated: int
+    sample_ids: list[uuid.UUID]
