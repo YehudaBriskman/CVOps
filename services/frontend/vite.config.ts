@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Test config lives in vitest.config.ts (jsdom + MSW harness), kept separate so
+// this dev-server config stays focused on the edge/proxy wiring below.
 export default defineConfig({
   plugins: [react()],
   server: {

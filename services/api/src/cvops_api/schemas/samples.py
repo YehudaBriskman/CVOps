@@ -101,7 +101,9 @@ class AnnotationRevisionOut(BaseModel):
     ontology_id: uuid.UUID
     ontology_version: int
     revision_no: int
-    payload: dict[str, Any]
+    # payload is the list of annotation objects ([{class_key, geometry}, ...]),
+    # not a dict — typing it as a dict made response validation 500.
+    payload: list[dict[str, Any]]
     provenance: dict[str, Any] | None = None
     created_at: datetime
 

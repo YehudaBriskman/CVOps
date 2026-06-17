@@ -8,6 +8,7 @@ export interface TrainCommitRequest {
   entry_point?: string
   branch?: string | null
   hyperparams?: Record<string, string | number | boolean> | null
+  training_container_id?: string
 }
 
 export interface Dataset {
@@ -20,11 +21,18 @@ export interface Dataset {
 export interface Commit {
   id: string
   dataset_id: string
+  parent_commit_id: string | null
   message: string | null
   stats: Record<string, unknown> | null
   ontology_id: string
   ontology_version: number
   created_at: string
+}
+
+export interface CommitDiff {
+  added: string[]
+  removed: string[]
+  changed: string[]
 }
 
 export function useDatasets(projectId: string | undefined) {
@@ -78,7 +86,10 @@ export function useCommit(datasetId: string | undefined, commitId: string | unde
   })
 }
 
-/** The samples frozen into a specific commit (cursor-paginated). */
+// The samples frozen into a specific commit (the dataset's curated, labeled
+// snapshot), cursor-paginated. Same page shape as useSamples, so it drops
+// straight into <SampleGrid>; the grid's box overlay shows each sample's latest
+// annotation revision.
 export function useCommitSamples(datasetId: string | undefined, commitId: string | null | undefined) {
   return useInfiniteQuery<CursorPage<Sample>>({
     queryKey: ['commit-samples', datasetId, commitId],
@@ -93,6 +104,28 @@ export function useCommitSamples(datasetId: string | undefined, commitId: string
     initialPageParam: null,
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     enabled: !!datasetId && !!commitId,
+  })
+}
+
+/**
+ * The diff between two commits — sample ids added/removed/changed going from
+ * `fromCommitId` to `toCommitId`. Enabled only when both ids are present, so a
+ * first commit (null parent) can be handled by the caller without a request.
+ */
+export function useCommitDiff(
+  datasetId: string | undefined,
+  fromCommitId: string | null | undefined,
+  toCommitId: string | null | undefined,
+) {
+  return useQuery<CommitDiff>({
+    queryKey: ['commit-diff', datasetId, fromCommitId, toCommitId],
+    queryFn: async () => {
+      const params = new URLSearchParams({ from: fromCommitId as string, to: toCommitId as string })
+      const { data } = await client.get<CommitDiff>(`/datasets/${datasetId}/diff?${params}`)
+      return data
+    },
+    enabled: !!datasetId && !!fromCommitId && !!toCommitId,
+    staleTime: Infinity,
   })
 }
 

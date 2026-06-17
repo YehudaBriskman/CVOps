@@ -80,7 +80,9 @@ def ctx(run_id, project_id, mock_session, mock_storage):
         storage=mock_storage,
         project_id=project_id,
         run_id=run_id,
-        actor_id="service:worker",
+        # System-sentinel UUID — events.actor_id is a UUID column, so a non-UUID
+        # label like "service:worker" fails the insert (see worker-common runner).
+        actor_id="00000000-0000-0000-0000-000000000000",
         emit_event=AsyncMock(),
     )
 

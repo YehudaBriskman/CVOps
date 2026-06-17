@@ -56,7 +56,7 @@ export function SampleEditDrawer({
       toast.success('Sample updated')
       onClose()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 
@@ -68,7 +68,7 @@ export function SampleEditDrawer({
       clear()
       onClose()
     } catch {
-      /* global handler toasts */
+      /* errors surface via the global toast handler */
     }
   }
 

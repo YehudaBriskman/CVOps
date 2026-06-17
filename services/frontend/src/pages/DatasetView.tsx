@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useDataset, useCommits, useReviewDataset } from '../api/datasets'
+import { usePinProject } from '../lib/useActiveProject'
 import { CommitGraph } from '../components/dataset/CommitGraph'
 import { CommitContents } from '../components/dataset/CommitContents'
 import { Breadcrumbs, Button, ErrorState, SkeletonList } from '../components/ui'
@@ -13,16 +14,22 @@ export default function DatasetView() {
   const commitsQuery = useCommits(id)
   const reviewDataset = useReviewDataset()
   const [reviewError, setReviewError] = useState<string | null>(null)
+  usePinProject(dataset?.project_id)
 
-  const commits = commitsQuery.data?.pages.flatMap((p) => p.items) ?? []
+  const commits = useMemo(
+    () => commitsQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [commitsQuery.data],
+  )
   const selectedId = params.get('commit')
 
-  // Default the selection to the newest commit once the list arrives, keeping
-  // the choice in the URL so a specific commit view is shareable.
+  // Default the selection to the first returned commit once the list arrives.
+  // The commits endpoint returns newest-first, so the first item is the newest.
+  // The choice is kept in the URL so a specific commit view is shareable.
   useEffect(() => {
-    if (!selectedId && commits.length > 0) {
+    const first = commits[0]
+    if (!selectedId && first) {
       const next = new URLSearchParams(params)
-      next.set('commit', commits[0].id)
+      next.set('commit', first.id)
       setParams(next, { replace: true })
     }
   }, [selectedId, commits, params, setParams])

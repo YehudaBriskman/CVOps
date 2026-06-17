@@ -39,7 +39,6 @@ from cvops_api.db.models.projects import Project
 from cvops_api.db.models.runs import Run
 from cvops_api.db.models.samples import DataSource, Sample
 from cvops_api.db.models.versioning import Commit, CommitSample, Dataset, Ref
-from cvops_api.db.models.workflows import Workflow
 from cvops_api.routers import datasets
 
 CVAT_STREAM = "cvat"
@@ -70,6 +69,18 @@ def human_review_step():  # type: ignore[no-untyped-def]
     registry._store.pop(step.type_key, None)
 
 
+@pytest.fixture
+def commit_step():  # type: ignore[no-untyped-def]
+    """Register the real CommitDatasetStep so advance_workflow can validate +
+    create the downstream commit step. Its run() never executes here."""
+    from cvops_steps.commit_dataset import CommitDatasetStep
+
+    step = CommitDatasetStep()
+    registry.register(step)
+    yield step
+    registry._store.pop(step.type_key, None)
+
+
 def _client(factory, current_user: User) -> AsyncClient:
     app = FastAPI()
     app.include_router(datasets.router)
@@ -83,7 +94,14 @@ def _client(factory, current_user: User) -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _seed(factory, *, with_commit: bool, n_samples: int = 2):
+async def _seed(
+    factory,
+    *,
+    with_commit: bool,
+    n_samples: int = 2,
+    with_revisions: bool = True,
+    with_ontology: bool = True,
+):
     """Seed org + user + project + dataset. When with_commit, also seed an
     ontology, samples, their annotation revisions, a commit, commit_samples, and
     a `main` branch ref pointing at it.
@@ -106,16 +124,18 @@ async def _seed(factory, *, with_commit: bool, n_samples: int = 2):
         await s.flush()
 
         if with_commit:
-            ont = Ontology(project_id=project.id, name=f"ont-{suffix}", version=1)
-            s.add(ont)
+            ont = None
+            if with_ontology:
+                ont = Ontology(project_id=project.id, name=f"ont-{suffix}", version=1)
+                s.add(ont)
             ds = DataSource(project_id=project.id, type="video", status="uploaded")
             s.add(ds)
             await s.flush()
             commit = Commit(
                 dataset_id=dataset.id,
                 project_id=project.id,
-                ontology_id=ont.id,
-                ontology_version=1,
+                ontology_id=ont.id if ont else None,
+                ontology_version=1 if ont else None,
                 message="seed",
                 stats={"sample_count": n_samples},
             )
@@ -143,26 +163,29 @@ async def _seed(factory, *, with_commit: bool, n_samples: int = 2):
                 )
                 s.add(sample)
                 await s.flush()
-                rev = AnnotationRevision(
-                    project_id=project.id,
-                    sample_id=sample.id,
-                    ontology_id=ont.id,
-                    ontology_version=1,
-                    revision_no=1,
-                    payload=[],
-                    provenance={"source": "model"},
-                )
-                s.add(rev)
-                await s.flush()
+                rev_id = None
+                if with_revisions and ont is not None:
+                    rev = AnnotationRevision(
+                        project_id=project.id,
+                        sample_id=sample.id,
+                        ontology_id=ont.id,
+                        ontology_version=1,
+                        revision_no=1,
+                        payload=[],
+                        provenance={"source": "model"},
+                    )
+                    s.add(rev)
+                    await s.flush()
+                    rev_id = rev.id
                 s.add(
                     CommitSample(
                         commit_id=commit.id,
                         sample_id=sample.id,
-                        annotation_revision_id=rev.id,
+                        annotation_revision_id=rev_id,
                         split="train",
                     )
                 )
-                pairs.append((sample.id, rev.id))
+                pairs.append((sample.id, rev_id))
             s.add(
                 Ref(
                     dataset_id=dataset.id,
@@ -207,22 +230,18 @@ async def test_review_dispatches_human_review_run(
         assert set(parent.input_refs["params"]["sample_ids"]) == sample_ids
         assert set(parent.input_refs["params"]["annotation_revision_ids"]) == revision_ids
 
-        # A find-or-created human_review workflow now exists for the project.
-        wf = (
-            (
-                await s.execute(
-                    select(Workflow).where(
-                        Workflow.project_id == project.id,
-                        Workflow.name == "human_review",
-                    )
-                )
-            )
-            .scalars()
-            .one()
+        # Ad-hoc DAG (no saved workflow): human_review gate → commit_dataset, so
+        # reviewed labels auto-commit when the CVAT sync resolves the gate.
+        assert parent.workflow_id is None
+        steps = parent.config["definition"]["steps"]
+        assert [s["id"] for s in steps] == ["review", "commit"]
+        assert steps[1]["type"] == "step.commit_dataset"
+        assert (
+            steps[1]["inputs"]["annotation_revision_ids"]
+            == "$steps.review.outputs.annotation_revision_ids"
         )
-        assert parent.workflow_id == wf.id
 
-        # advance_workflow froze the resolved review set onto one child step run.
+        # advance_workflow created only the gate step; commit is downstream.
         children = (
             (await s.execute(select(Run).where(Run.parent_run_id == parent.id)))
             .scalars()
@@ -246,32 +265,88 @@ async def test_review_dispatches_human_review_run(
     }
 
 
-async def test_review_reuses_existing_workflow(
-    factory, fake_redis, human_review_step
+async def test_review_gate_resolution_enqueues_commit(
+    factory, fake_redis, human_review_step, commit_step
 ) -> None:
-    user, project, dataset, _pairs = await _seed(factory, with_commit=True)
+    """The auto-commit-after-review chain: when the CVAT sync resolves the gate
+    (review child → succeeded with the reviewed revisions on output_refs),
+    advance_workflow enqueues commit_dataset with exactly those revisions."""
+    from cvops_api.engine.coordinator import advance_workflow
+
+    user, _project, dataset, pairs = await _seed(factory, with_commit=True)
+    sample_ids = {str(sid) for sid, _ in pairs}
 
     async with _client(factory, user) as c:
-        first = await c.post(f"/datasets/{dataset.id}/review")
-        second = await c.post(f"/datasets/{dataset.id}/review")
+        res = await c.post(f"/datasets/{dataset.id}/review")
+    parent_id = uuid.UUID(res.json()["run_id"])
 
-    assert first.status_code == second.status_code == 200
-
-    # Two runs, but only one human_review workflow was provisioned.
+    # Simulate handle_cvat_sync resolving the gate: the review child succeeds with
+    # the reviewed revisions written onto its output_refs.
+    reviewed = [str(uuid.uuid4()) for _ in pairs]
     async with factory() as s:
-        wfs = (
-            (
-                await s.execute(
-                    select(Workflow).where(
-                        Workflow.project_id == project.id,
-                        Workflow.name == "human_review",
-                    )
-                )
+        child = (
+            await s.execute(
+                select(Run).where(Run.parent_run_id == parent_id, Run.step_id == "review")
             )
-            .scalars()
-            .all()
-        )
-        assert len(wfs) == 1
+        ).scalar_one()
+        child.status = "succeeded"
+        child.output_refs = {"resolution": "approved", "annotation_revision_ids": reviewed}
+        await s.commit()
+
+    async with factory() as s:
+        await advance_workflow(s, parent_id, user.id)
+
+    async with factory() as s:
+        commit_child = (
+            await s.execute(
+                select(Run).where(Run.parent_run_id == parent_id, Run.step_id == "commit")
+            )
+        ).scalar_one()
+        assert commit_child.step_type == "step.commit_dataset"
+        assert commit_child.status == "pending"
+        assert set(commit_child.input_refs["sample_ids"]) == sample_ids
+        assert commit_child.input_refs["annotation_revision_ids"] == reviewed
+
+    # commit_dataset routes to the preprocessing queue (Step.queue is empty).
+    assert await fake_redis.xlen("preprocessing") == 1
+
+
+async def test_review_omits_null_revision_ids(
+    factory, fake_redis, human_review_step
+) -> None:
+    """Samples committed without a pre-label (annotation_revision_id NULL) must
+    not stringify to "None" in the dispatched params — that later fails the
+    uuid[] cast in human_review (regression: asyncpg DataError 'invalid UUID')."""
+    user, project, dataset, pairs = await _seed(
+        factory, with_commit=True, with_revisions=False
+    )
+    sample_ids = {str(sid) for sid, _ in pairs}
+
+    async with _client(factory, user) as c:
+        res = await c.post(f"/datasets/{dataset.id}/review")
+
+    assert res.status_code == 200
+    async with factory() as s:
+        parent = await s.get(Run, uuid.UUID(res.json()["run_id"]))
+        assert set(parent.input_refs["params"]["sample_ids"]) == sample_ids
+        # All samples were unlabelled → no revision ids, and crucially no "None".
+        revs = parent.input_refs["params"]["annotation_revision_ids"]
+        assert revs == []
+        assert "None" not in revs
+
+
+async def test_review_requires_project_ontology(factory, fake_redis, human_review_step) -> None:
+    """commit_dataset (and human_review) need the project ontology; review fails
+    clearly at dispatch when there is none."""
+    user, _project, dataset, _pairs = await _seed(
+        factory, with_commit=True, with_ontology=False
+    )
+
+    async with _client(factory, user) as c:
+        res = await c.post(f"/datasets/{dataset.id}/review")
+
+    assert res.status_code == 400
+    assert "ontology" in res.json()["detail"].lower()
 
 
 async def test_review_without_commit_returns_400(factory) -> None:

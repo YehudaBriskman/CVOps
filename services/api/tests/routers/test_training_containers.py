@@ -189,3 +189,29 @@ async def test_validate_valid_and_invalid(factory) -> None:
         assert bad.status_code == 200, bad.text
         assert bad.json()["valid"] is False
         assert len(bad.json()["errors"]) >= 1
+
+
+async def test_create_under_foreign_project_404(factory) -> None:
+    """Creating a container under another org's project is rejected (project
+    scoping enforced on the create path, not just reads)."""
+    _owner, project = await _seed(factory)
+    other_user, _other_project = await _seed(factory)
+
+    async with _client(factory, other_user) as c:
+        res = await c.post(
+            f"/projects/{project.id}/training-containers", json=_create_body()
+        )
+        assert res.status_code == 404, res.text
+
+
+async def test_list_cross_org_404(factory) -> None:
+    """Listing under a foreign project 404s — the list endpoint scopes on the
+    project's org, so a cross-org caller can't even enumerate."""
+    owner, project = await _seed(factory)
+    other_user, _other_project = await _seed(factory)
+    async with _client(factory, owner) as c:
+        await c.post(f"/projects/{project.id}/training-containers", json=_create_body())
+
+    async with _client(factory, other_user) as c:
+        res = await c.get(f"/projects/{project.id}/training-containers")
+        assert res.status_code == 404, res.text

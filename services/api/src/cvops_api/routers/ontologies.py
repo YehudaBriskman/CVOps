@@ -89,6 +89,26 @@ async def get_ontology(
     return OntologyOut.model_validate(ontology)
 
 
+@router.get("/ontologies/{id}/classes", response_model=list[LabelClassOut])
+async def list_label_classes(
+    id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[LabelClassOut]:
+    r = await session.execute(select(Ontology).where(Ontology.id == id))
+    ontology = r.scalar_one_or_none()
+    if ontology is None:
+        raise HTTPException(status_code=404, detail="Ontology not found")
+    await _check_project(ontology.project_id, current_user, session)
+
+    rows = await session.execute(
+        select(LabelClass)
+        .where(LabelClass.ontology_id == id)
+        .order_by(LabelClass.sort_order)
+    )
+    return [LabelClassOut.model_validate(lc) for lc in rows.scalars().all()]
+
+
 @router.post(
     "/ontologies/{id}/classes",
     response_model=LabelClassOut,

@@ -1,11 +1,16 @@
-import { NavLink, Link, useMatch } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import clsx from 'clsx'
+import { useActiveProjectId } from '../../lib/useActiveProject'
 
 function navClass({ isActive }: { isActive: boolean }) {
   return clsx(
     'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+    // Theme-aware: in light mode surface-2/3 are white, so a hardcoded
+    // text-white active/hover was invisible. The active item is an iris accent
+    // pill with the on-accent text token; inactive items resolve via the muted/
+    // primary text tokens so they stay legible in both themes.
     isActive
-      ? 'bg-surface-3 text-text-primary'
+      ? 'bg-iris text-text-onAccent'
       : 'text-text-muted hover:bg-surface-3 hover:text-text-primary',
   )
 }
@@ -19,6 +24,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
     { to: `/projects/${projectId}/workflows`,    label: 'Workflows',    end: false },
     { to: `/projects/${projectId}/runs`,         label: 'Runs',         end: false },
     { to: `/projects/${projectId}/models`,       label: 'Models',       end: false },
+    { to: `/projects/${projectId}/training-containers`, label: 'Training', end: false },
     { to: `/projects/${projectId}/settings`,     label: 'Settings',     end: false },
   ]
 
@@ -39,9 +45,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
 }
 
 export function Sidebar() {
-  const matchDeep  = useMatch('/projects/:id/*')
-  const matchExact = useMatch('/projects/:id')
-  const projectId  = (matchDeep ?? matchExact)?.params.id
+  const projectId = useActiveProjectId()
 
   return (
     <aside className="w-60 bg-surface-2 flex flex-col flex-shrink-0 overflow-hidden">

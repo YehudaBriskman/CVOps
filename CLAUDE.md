@@ -10,7 +10,7 @@ CVOps is an ML-lifecycle dashboard that collapses dataset versioning, workflow o
 |---|---|---|
 | `services/api` | Python 3.12 / FastAPI — REST API, workflow engine, DB layer | implemented |
 | `services/frontend` | TypeScript / React 18 + Vite — dashboard UI (auth, all pages, api layer, data-source/frame viewer) | implemented |
-| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo`, `train` implemented; `auto_label`, `human_review` are stubs) | partial |
+| `packages/steps` | Python — step implementations loaded by the engine (`extract_frames`, `commit_dataset`, `export_yolo`, `train`, `human_review` implemented; `auto_label` is a stub) | partial |
 | `services/worker-preprocessing` | Python — Redis-Streams worker; consumes the `preprocessing` stream and runs steps out of the API process | implemented |
 
 Standalone CLI prototypes for the same lifecycle steps live in `tools/frame-extractor/` (`extract_frames.py`, `auto_label.py`, `upload_to_cvat.py`).
@@ -24,6 +24,8 @@ Standalone CLI prototypes for the same lifecycle steps live in `tools/frame-extr
 Two distinct entry points — keep them straight:
 
 **Inner-loop dev → `tilt up`** (from repo root). Stateful infra (postgres, redis, garage) runs in containers; the API runs as a host `uvicorn --reload` and the frontend as host `npm run dev`. An nginx edge container is also brought up — it serves the placeholder `manifests/nginx/html/index.html` and proxies `/api/v1/*` to the host API (via `host.docker.internal`), reachable at `http://localhost` (and `http://<dev-vm>` for VM-based devs). The API *owns* the `/api/v1` prefix (routers are mounted under it in `main.py`), so both the nginx edge and Vite's `server.proxy` pass `/api/v1/*` through unchanged — no rewrite, prefix defined in one place. Migrations run automatically (`migrate-up`) and `packages/steps` is installed into the API venv (`steps-install`). Host prereqs: Python 3.12+, Node 20+, Docker, ffmpeg. First `tilt up` runs `pip install -e services/api[dev]` and `npm install` automatically.
+
+**Optional heavy stacks (OFF by default).** The CVAT labelling stack (~10 containers + submodule checkout + nuctl + `worker-cvat`) and the training stack (`worker-training`'s multi-GB torch/ultralytics image + MLflow) are the expensive parts, so a plain `tilt up` skips both and brings up only the core (postgres, redis, garage, api, frontend, `worker-preprocessing`, nginx, migrations). Opt in per-run with Tilt args — `tilt up -- --cvat`, `tilt up -- --training`, `tilt up -- --heavy` (both) — or persistently with env vars `CVOPS_ENABLE_CVAT=1` / `CVOPS_ENABLE_TRAINING=1` (shell env or `manifests/.env`). The toggles drive both the host resources and the compose profiles (`worker` + `mlflow`); MLflow is now profile-gated in `docker-compose.yml`, so it comes up only with training (Tilt) or `--profile app/all` (compose).
 
 **Pre-prod / integration → `docker compose` with profiles** (from `manifests/`). Everything containerised.
 
@@ -152,6 +154,29 @@ jj push                                     # validates, then `jj git push`
 ```
 
 Adding a commit type (e.g. `perf`) means editing `RULES_COMMIT_TYPES` in `scripts/hooks/lib/rules.sh` once — both providers pick it up.
+
+### Parallel agents and the shared working copy
+
+A `jj`/`git` working copy has exactly **one** writer. Do **not** run multiple agents (or any concurrent processes that edit files) against the **same** working directory — `jj` snapshots the working copy on every command, so concurrent writers produce *divergent operations*, and reconciling them can silently reset the working copy and drop uncommitted edits. We hit this: two agents editing one workspace in parallel lost their changes to a `reconcile divergent operations` op (recovered only via `jj op restore <snapshot-op>` — `jj op log` is the safety net).
+
+Rules for parallel agent work:
+
+- **One workspace = one writer.** If you fan out agents that *write*, give each its own isolation (a separate `jj workspace add` directory, or the Agent tool's `isolation: "worktree"`), then merge/commit the results. Agents that only *read* can share freely.
+- If you can't isolate, run the writing agents **sequentially**, committing between them.
+- Splitting by directory (e.g. backend vs frontend) is *not* enough — `jj` snapshots the whole working copy, so disjoint file sets still collide at the operation log.
+- After any suspected collision, **don't `jj workspace update-stale` blindly** (it can reset to an empty commit). Check `jj op log` first and `jj op restore` the snapshot that holds the work.
+
+### Validating a workspace's Python against the right code
+
+Editable installs (`pip install -e services/api`) bind `import cvops_api` to a **fixed path** — usually the main checkout, not your `jj workspace`. Running `pytest` from a workspace then tests the *main* code with the *workspace* tests (and `cvops_steps` may be missing entirely), producing fake failures. The sandbox has **no network**, so a fresh `pip install` venv won't work. Instead point `PYTHONPATH` at the workspace sources so they shadow the install:
+
+```bash
+WS=/path/to/CVOps-<workspace>
+PYTHONPATH="$WS/services/api/src:$WS/packages/steps/src:$WS/packages/worker-common/src" \
+  python -m pytest tests/ -q
+```
+
+Verify with `python -c "import cvops_api, os; print(os.path.realpath(cvops_api.__file__))"` before trusting any result.
 
 ## Reference docs
 

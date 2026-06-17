@@ -3,10 +3,12 @@ import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { server } from './server'
 
-// jsdom 29 does not always expose localStorage as a usable global. Provide a
-// minimal in-memory Storage so app code (lib/client.ts, api/auth.ts) and tests
-// can use `localStorage` unconditionally.
-if (typeof globalThis.localStorage === 'undefined') {
+// jsdom 29 does not always expose localStorage as a usable global — under an
+// opaque origin it surfaces as an empty `{}` (defined, but `getItem`/`clear`
+// are not functions) rather than undefined. Provide a minimal in-memory Storage
+// whenever the global is missing OR non-functional, so app code
+// (lib/client.ts, api/auth.ts) and tests can use `localStorage` unconditionally.
+if (typeof globalThis.localStorage?.getItem !== 'function') {
   class MemoryStorage implements Storage {
     private store = new Map<string, string>()
     get length() {

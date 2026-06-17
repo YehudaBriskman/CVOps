@@ -1,0 +1,66 @@
+name: Workers & Steps · Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/worker-preprocessing/**'
+      - 'services/worker-cvat/**'
+      - 'services/worker-training/**'
+      - 'packages/**'
+      - 'services/api/**'
+      - '.github/workflows/ci-workers.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/worker-preprocessing/**'
+      - 'services/worker-cvat/**'
+      - 'services/worker-training/**'
+      - 'packages/**'
+      - 'services/api/**'
+      - '.github/workflows/ci-workers.yml'
+
+jobs:
+  test:
+    name: pytest (workers + steps, Python 3.12)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: '**/pyproject.toml'
+
+      # Local packages are name-deps (not path/workspace deps), so they must be
+      # installed editable in dependency order before the workers that consume
+      # them — pip then sees each requirement already satisfied.
+      - name: Install local packages (editable, dependency order)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/worker-common
+          pip install -e packages/cvat-client
+          pip install -e services/api
+          pip install -e packages/steps
+          pip install -e "services/worker-preprocessing[dev]"
+          pip install -e "services/worker-cvat[dev]"
+          pip install -e "services/worker-training[dev]"
+          pip install -e "packages/steps[dev]"
+
+      - name: worker-preprocessing
+        working-directory: services/worker-preprocessing
+        run: pytest tests/ -q
+
+      - name: worker-cvat            # testcontainers — needs Docker (present on ubuntu-latest)
+        working-directory: services/worker-cvat
+        run: pytest tests/ -q
+
+      - name: worker-training
+        working-directory: services/worker-training
+        run: pytest tests/ -q
+
+      - name: steps
+        working-directory: packages/steps
+        run: pytest tests/ -q

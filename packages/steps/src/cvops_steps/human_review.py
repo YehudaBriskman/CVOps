@@ -27,7 +27,11 @@ runs on worker-cvat, which has the client installed.
 
 from __future__ import annotations
 
+import logging
+
 from cvops_api.engine.step import GateException, Step, StepContext
+
+logger = logging.getLogger(__name__)
 
 
 class HumanReviewStep(Step):
@@ -61,7 +65,14 @@ class HumanReviewStep(Step):
 
         session = ctx.session
 
-        revision_ids = [str(r) for r in inputs.get("annotation_revision_ids", [])]
+        # Pre-labels are optional. Drop null/"None" entries (samples without a
+        # committed revision) so they don't reach the uuid[] cast below — older
+        # frozen runs may carry the literal string "None".
+        revision_ids = [
+            str(r)
+            for r in inputs.get("annotation_revision_ids", [])
+            if r is not None and str(r) not in ("None", "")
+        ]
 
         # ── Resolve pre-labels: the latest provided revision per sample ──────
         # The highest revision_no wins when several revisions reference one
@@ -114,6 +125,40 @@ class HumanReviewStep(Step):
         if missing:
             raise ValueError(f"samples not found: {missing}")
 
+        # ── Label space ─────────────────────────────────────────────────────
+        # The CVAT task's label classes come from the project ontology, so
+        # reviewers annotate with the canonical set (not ad-hoc labels) and the
+        # pull maps them straight back. Required: without an ontology there is
+        # nowhere to store reviewed labels (annotation_revisions.ontology_id is
+        # NOT NULL), so fail loudly rather than create a class-less task.
+        ont_id = (
+            await session.execute(
+                text(
+                    "SELECT o.id FROM ontologies o JOIN projects p ON p.id = o.project_id "
+                    "WHERE o.project_id = CAST(:pid AS uuid) AND o.deleted_at IS NULL "
+                    "ORDER BY (p.default_ontology_id = o.id) DESC NULLS LAST, o.version DESC "
+                    "LIMIT 1"
+                ),
+                {"pid": ctx.project_id},
+            )
+        ).scalar()
+        if ont_id is None:
+            raise ValueError(
+                "human_review requires the project to have an ontology — its label "
+                "classes define what reviewers can annotate in CVAT"
+            )
+        label_names = [
+            r[0]
+            for r in (
+                await session.execute(
+                    text(
+                        "SELECT class_key FROM label_classes WHERE ontology_id = CAST(:oid AS uuid)"
+                    ),
+                    {"oid": str(ont_id)},
+                )
+            ).all()
+        ]
+
         # The gate's DAG node id — needed so the pull flow can resume this exact
         # waiting child (parent_run_id + step_id), mirroring resolve_gate.
         step_node_id = (
@@ -142,13 +187,26 @@ class HumanReviewStep(Step):
                         annotations=prelabels.get(sid, []),
                     )
                 )
-            pushed = push_review_task(task_name, images)
+            pushed = push_review_task(task_name, images, label_names=label_names)
 
         # ── Register completion webhook if configured (else poll fallback) ───
+        # Best-effort: the webhook only enables auto-resume on CVAT completion.
+        # If it fails (e.g. CVAT API drift — task-scoped webhooks were removed in
+        # newer CVAT), the gate must still be raised so the run parks at `waiting`
+        # and surfaces the "Open in CVAT" link; completion is then resolved by the
+        # poll fallback or manually. Never let it abort the push.
         target = os.environ.get("CVAT_WEBHOOK_TARGET")
         secret = os.environ.get("CVAT_WEBHOOK_SECRET")
         if target and secret:
-            register_webhook(pushed["task_id"], target, secret)
+            try:
+                register_webhook(pushed["task_id"], target, secret)
+            except Exception:
+                logger.warning(
+                    "CVAT webhook registration failed for task %s; review gate "
+                    "still opens — resolve completion via poll/manual.",
+                    pushed["task_id"],
+                    exc_info=True,
+                )
 
         # ── Record the push ─────────────────────────────────────────────────
         labeling_job_id = str(uuid.uuid4())

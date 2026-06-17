@@ -30,6 +30,7 @@ class CommitOut(BaseModel):
     model_config = {"from_attributes": True}
     id: uuid.UUID
     dataset_id: uuid.UUID
+    parent_commit_id: uuid.UUID | None = None
     message: str | None = None
     stats: dict[str, Any] | None = None
     ontology_id: uuid.UUID | None = None

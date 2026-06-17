@@ -228,10 +228,13 @@ services:
       # Placeholder static site. Swap for the frontend `dist/` build later.
       - ./nginx/html:/usr/share/nginx/html:ro,z
 
-  # ── MLflow tracking server ──────────────────────────────────────────────
-  # No profile: like nginx/garage-init, MLflow is part of the base stack so
-  # `tilt up` (which loads this compose file with no profiles) brings it up
-  # alongside the infra, and `--profile app/all` includes it too.
+  # ── MLflow tracking server (opt-in) ────────────────────────────────────
+  # Profile-gated to `mlflow`/`app`/`worker`/`all`: MLflow is only useful once
+  # training runs exist, so a bare `docker compose up` (and a default `tilt up`,
+  # which loads this file with no profiles) leaves it out — keeping the core
+  # stack light. `tilt up -- --training` activates the `worker`+`mlflow`
+  # profiles; `--profile app/all` includes it as before. worker-training
+  # depends_on mlflow, so any path that starts the trainer pulls MLflow in too.
 
   # One-shot, idempotent: create the `mlflow` database in the existing Postgres
   # so MLflow's auto-managed tables never mix with the Alembic-managed `cvops`
@@ -239,6 +242,7 @@ services:
   mlflow-init:
     image: postgres:16-alpine
     restart: "no"
+    profiles: ["mlflow", "app", "worker", "all"]
     depends_on:
       postgres: { condition: service_healthy }
     environment:
@@ -255,6 +259,7 @@ services:
       context: ../services/mlflow
       dockerfile: Dockerfile
     restart: unless-stopped
+    profiles: ["mlflow", "app", "worker", "all"]
     depends_on:
       postgres:    { condition: service_healthy }
       garage:      { condition: service_healthy }
@@ -283,13 +288,131 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── External tools (Phase 2) ────────────────────────────────────────────
-  # cvat:
-  #   image: cvat/server:v2.14.3
-  #   ... see docs/design/11-cvat-integration.md for full CVAT compose config
+  # ── Observability (opt-in via `--profile observability`) ────────────────
+  #
+  #   docker compose --profile observability up -d
+  #
+  # Logs + infra metrics only — no application /metrics. Promtail ships every
+  # container's stdout/stderr to Loki (filterable by compose service); the
+  # exporters feed Prometheus; Grafana (host port 3001) is provisioned with both
+  # datasources and the vendored dashboards. NOT brought up by Tilt. Separate
+  # from the CVAT stack's own `cvat_grafana` (ClickHouse-backed, behind traefik).
+  loki:
+    image: grafana/loki:3.1.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ./observability/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3100/ready | grep -q ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  promtail:
+    image: grafana/promtail:3.1.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    depends_on:
+      loki:
+        condition: service_started
+    volumes:
+      - ./observability/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9090/-/healthy | grep -q Healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    profiles: ["observability"]
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    profiles: ["observability"]
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN:-postgresql://cvops:change_me_postgres@postgres:5432/cvops?sslmode=disable}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-redis://redis:6379}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana-oss:11.2.0
+    restart: unless-stopped
+    profiles: ["observability"]
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+
+  # ── External tools ──────────────────────────────────────────────────────
+  # The CVAT stack (server, ui, traefik:8080, db, redis, opa, workers,
+  # analytics) + nuclio/model-deployer + the containerised worker-cvat live in
+  # docker-compose.override.yml, which Compose auto-merges. `tilt up` loads it
+  # explicitly (see Tiltfile); start_env.sh brings it up with --profile app.
 
 volumes:
   postgres_data:
   garage_meta:
   garage_data:
   redis_data:
+  loki_data:
+  prometheus_data:
+  grafana_data:

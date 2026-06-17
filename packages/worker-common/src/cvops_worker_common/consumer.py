@@ -19,7 +19,9 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select, text
 
 from cvops_api.config import settings
@@ -100,6 +102,15 @@ class ConsumerLoop:
                 )
             except asyncio.CancelledError:
                 break
+            except RedisTimeoutError:
+                # The blocking read elapsed with no message — normal idle tick,
+                # not an error. Loop straight back so delivery stays responsive
+                # (no backoff penalty, no log spam).
+                continue
+            except RedisConnectionError as exc:
+                logger.warning("Redis connection lost: %s — retrying in 2s", exc)
+                await asyncio.sleep(2)
+                continue
             except Exception as exc:
                 logger.warning("XREADGROUP error: %s — retrying in 2s", exc)
                 await asyncio.sleep(2)

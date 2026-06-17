@@ -117,27 +117,6 @@ class CommitDatasetStep(Step):
         assign = split_strategies.get(strategy_key)
         splits = assign(committed, source_of, train_ratio, val_ratio, seed)
 
-        # ── Aggregate stats (frozen on the commit) ──────────────────────────
-        by_split: Counter = Counter()
-        by_class: Counter = Counter()
-        by_review: Counter = Counter()
-        for sid in committed:
-            by_split[splits[sid]] += 1
-            rev = best_rev[sid]
-            review = (rev["provenance"] or {}).get("review_status", "unknown")
-            by_review[review] += 1
-            for ann in rev["payload"] or []:
-                key = ann.get("class_key")
-                if key is not None:
-                    by_class[key] += 1
-        stats = {
-            "sample_count": len(committed),
-            "skipped_unannotated": skipped,
-            "by_split": dict(by_split),
-            "by_class": dict(by_class),
-            "by_review_status": dict(by_review),
-        }
-
         # ── Resolve / create dataset ────────────────────────────────────────
         dataset_id = await self._get_or_create_dataset(
             session, ctx.project_id, dataset_name
@@ -147,6 +126,82 @@ class CommitDatasetStep(Step):
         parent_commit_id, ref_id = await self._lock_branch(
             session, dataset_id, branch_name
         )
+
+        # ── Cumulative state (a git "tree") ─────────────────────────────────
+        # The new commit's commit_samples = the parent commit's commit_samples
+        # UNION this batch. The batch wins on overlap (fresh revision + freshly
+        # assigned split); parent-only samples carry forward unchanged; batch-only
+        # samples are added. `merged[sample_id] = (revision_id, split)`.
+        merged: dict[str, tuple[str, str]] = {}
+        if parent_commit_id is not None:
+            parent_rows = (
+                await session.execute(
+                    text(
+                        "SELECT sample_id, annotation_revision_id, split "
+                        "FROM commit_samples WHERE commit_id = CAST(:cid AS uuid)"
+                    ),
+                    {"cid": parent_commit_id},
+                )
+            ).all()
+            for p_sid, p_rev, p_split in parent_rows:
+                merged[str(p_sid)] = (str(p_rev), p_split)
+
+        # The batch wins on overlap (and adds batch-only samples).
+        # TODO(#141): removal semantics — a future "this commit deletes sample X"
+        # would drop X from `merged` here instead of always unioning.
+        for sid in committed:
+            merged[sid] = (best_rev[sid]["revision_id"], splits[sid])
+
+        # ── Aggregate stats over the FULL cumulative set ────────────────────
+        # Carried-forward parent samples need their revision payload/provenance
+        # to contribute to by_class / by_review_status, so load any revision in
+        # the merged set that the batch didn't already provide.
+        rev_meta: dict[str, dict] = {
+            best_rev[sid]["revision_id"]: best_rev[sid] for sid in committed
+        }
+        missing_rev_ids = [
+            rid for (rid, _split) in merged.values() if rid not in rev_meta
+        ]
+        if missing_rev_ids:
+            extra_rows = (
+                await session.execute(
+                    text(
+                        "SELECT id, revision_no, payload, provenance "
+                        "FROM annotation_revisions "
+                        "WHERE id = ANY(CAST(:ids AS uuid[]))"
+                    ),
+                    {"ids": missing_rev_ids},
+                )
+            ).all()
+            for rid, rev_no, payload, provenance in extra_rows:
+                rev_meta[str(rid)] = {
+                    "revision_id": str(rid),
+                    "revision_no": rev_no,
+                    "payload": payload,
+                    "provenance": provenance,
+                }
+
+        by_split: Counter = Counter()
+        by_class: Counter = Counter()
+        by_review: Counter = Counter()
+        for rid, split in merged.values():
+            by_split[split] += 1
+            rev = rev_meta.get(rid)
+            if rev is None:
+                continue
+            review = (rev["provenance"] or {}).get("review_status", "unknown")
+            by_review[review] += 1
+            for ann in rev["payload"] or []:
+                key = ann.get("class_key")
+                if key is not None:
+                    by_class[key] += 1
+        stats = {
+            "sample_count": len(merged),
+            "skipped_unannotated": skipped,
+            "by_split": dict(by_split),
+            "by_class": dict(by_class),
+            "by_review_status": dict(by_review),
+        }
 
         # ── Create the immutable commit ─────────────────────────────────────
         commit_id = str(uuid.uuid4())
@@ -171,7 +226,7 @@ class CommitDatasetStep(Step):
             },
         )
 
-        # ── Pin each sample → (revision, split) ─────────────────────────────
+        # ── Pin each sample → (revision, split) over the cumulative set ─────
         await session.execute(
             text(
                 "INSERT INTO commit_samples "
@@ -182,10 +237,10 @@ class CommitDatasetStep(Step):
                 {
                     "cid": commit_id,
                     "sid": sid,
-                    "rid": best_rev[sid]["revision_id"],
-                    "split": splits[sid],
+                    "rid": rid,
+                    "split": split,
                 }
-                for sid in committed
+                for sid, (rid, split) in merged.items()
             ],
         )
 
@@ -241,15 +296,20 @@ class CommitDatasetStep(Step):
             ),
             {"id": new_id, "pid": project_id, "name": name},
         )
-        return (
-            await session.execute(
-                text(
-                    "SELECT id FROM datasets WHERE project_id = CAST(:pid AS uuid) "
-                    "AND name = :name"
-                ),
-                {"pid": project_id, "name": name},
-            )
-        ).scalar_one()
+        # str() so the id stays JSON-serializable: it flows into the step's
+        # output_refs and the branch.advanced event payload, both json.dumps'd by
+        # the coordinator/emit_event (a raw asyncpg UUID raises there).
+        return str(
+            (
+                await session.execute(
+                    text(
+                        "SELECT id FROM datasets WHERE project_id = CAST(:pid AS uuid) "
+                        "AND name = :name"
+                    ),
+                    {"pid": project_id, "name": name},
+                )
+            ).scalar_one()
+        )
 
     @staticmethod
     async def _lock_branch(session, dataset_id: str, branch_name: str):

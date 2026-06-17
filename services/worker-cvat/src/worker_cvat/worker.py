@@ -37,6 +37,7 @@ from cvops_api.engine.coordinator import (
 )
 
 from worker_cvat.deploy_step import DeployModelStep
+from worker_cvat.sync import handle_cvat_sync
 
 STREAM = os.getenv("REDIS_STREAM", "cvat")
 CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
@@ -83,8 +84,16 @@ async def _consume_loop(stop: asyncio.Event, sem: asyncio.Semaphore) -> None:
     inflight: set[asyncio.Task[None]] = set()
 
     async def _handle(msg_id: str, fields: dict[str, str]) -> None:
+        # Two doorbell kinds arrive on the cvat stream:
+        #   • {kind: "cvat_sync", cvat_task_id} — webhook bridge: a CVAT task is
+        #     done; the pull handler resumes the parked review gate.
+        #   • {job_id, step_type} — normal run doorbell; covers step.human_review
+        #     (pushes the task, parks at the gate) and step.deploy_model.
         try:
-            await _claim_and_run(fields["job_id"])
+            if fields.get("kind"):
+                await handle_cvat_sync(fields)
+            else:
+                await _claim_and_run(fields["job_id"])
         finally:
             await redis.xack(STREAM, GROUP, msg_id)
             sem.release()
@@ -192,6 +201,14 @@ async def _http_server_loop(stop: asyncio.Event) -> None:
 
 async def run() -> None:
     await init_redis()
+    # cvops_steps provides step.human_review (the CVAT review gate); DeployModelStep
+    # (step.deploy_model) is local to this worker. Both route to the cvat queue.
+    try:
+        from cvops_steps import register_all
+
+        register_all()
+    except ImportError:
+        print("[worker] cvops_steps not importable — human_review unavailable", flush=True)
     registry.register(DeployModelStep())
 
     await _ensure_group()

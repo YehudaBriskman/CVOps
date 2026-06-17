@@ -3,7 +3,7 @@
 Each service has its own ICD (Interface Control Document) in this directory.
 An ICD defines what a service needs, what it reads, what it writes, and what it explicitly does NOT do.
 
-**Last updated:** 2026-06-11
+**Last updated:** 2026-06-16
 
 ---
 
@@ -19,6 +19,8 @@ An ICD defines what a service needs, what it reads, what it writes, and what it 
 | [step-contract.md](./step-contract.md) | Step ABC (shared library) | Itai |
 | [redis-streams.md](./redis-streams.md) | Redis Stream message format | Yehuda |
 | [data-layer.md](./data-layer.md) | PostgreSQL + MinIO data layer (not a microservice) | Yehuda |
+| [mlflow.md](./mlflow.md) | MLflow tracking server | Ben |
+| [observability.md](./observability.md) | Logs + infra metrics (Loki/Prometheus/Grafana) — `--profile observability` | TBD |
 
 ---
 
@@ -107,6 +109,8 @@ The API is the gatekeeper (auth + authorization). MinIO is the byte store. They 
 | worker-cvat | Redis | redis-py | XREADGROUP, XACK |
 | worker-cvat | CVAT | httpx REST | push tasks, pull annotations |
 | worker-cvat | API | httpx REST | `POST /runs/{id}/gates/{step}/resolve` |
+| worker-cvat | Nuclio / Docker | `nuctl` CLI | deploy `.pt` models as CVAT auto-label functions (`step.deploy_model`, `POST /deploy` on :8001) |
+| API | worker-cvat | httpx REST | proxy model deploy/list via `MODEL_DEPLOYER_URL → worker-cvat:8001` |
 | worker-training | PostgreSQL | asyncpg | job pickup + model_version write |
 | worker-training | MinIO | boto3 | read dataset, write weights |
 | worker-training | Redis | redis-py | XREADGROUP, XACK |

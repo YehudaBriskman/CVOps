@@ -99,8 +99,7 @@ open http://localhost:8000/docs
 
 ## 9. What's NOT Done Yet
 
-- `POST /internal/cvat/webhook` — stub only; Phase 2 CVAT integration pending
-- `cvops_steps` (`packages/steps`) — `extract_frames`, `commit_dataset`, `export_yolo`, `train` are implemented; `auto_label`, `human_review` still raise `NotImplementedError`. `train` is the canonical step the `worker-training` service also imports; it routes to the `training` queue and runs a cloned trainer repo in a per-run `--system-site-packages` venv. Installed into the API env via Tilt's `steps-install` (the heavy ML stack — ultralytics/torch/mlflow — lives on the worker-training image, not in the API env).
+- `cvops_steps` (`packages/steps`) — `extract_frames`, `commit_dataset`, `export_yolo`, `train`, `human_review` are implemented; `auto_label` still raises `NotImplementedError` (the ML pre-label pass is the one remaining step stub). `train` is the canonical step the `worker-training` service also imports; it routes to the `training` queue and runs a cloned trainer repo in a per-run `--system-site-packages` venv. Installed into the API env via Tilt's `steps-install` (the heavy ML stack — ultralytics/torch/mlflow — lives on the worker-training image, not in the API env).
 - Cross-upload dedup: **exact-hash** source-video re-ingest detection is wired — the client hashes first and `POST /projects/{id}/data-sources/check` reports any org-wide copy (add-without-reupload vs. skip), with a partial unique index `uq_data_sources_project_blob` as the per-project integrity backstop. **Perceptual/near-duplicate** detection (re-encoded or trimmed videos) and cross-run perceptual dedup are still not wired.
 
 ## 10. Adding a New Step Type

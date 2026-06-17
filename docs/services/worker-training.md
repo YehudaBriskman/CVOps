@@ -57,6 +57,36 @@ No other worker has this mount.
 
 ---
 
+## Triggering a training run ("Train this commit")
+
+Training is kicked off from the commit view (`CommitDetail` → **Train** dialog),
+which POSTs to **`POST /api/v1/datasets/{id}/commits/{commit_id}/train`**
+(`routers/datasets.py::train_commit`). The handler builds a one-node workflow
+with a `step.train` node, creates the run, and calls `advance_workflow` — which
+freezes the inputs and `XADD`s onto the **`training`** queue, where this worker
+picks it up. It returns `{run_id}`; the UI navigates to the run view.
+
+Two trainer modes (one `step.train` config either way):
+
+- **Ad-hoc git trainer.** `{git_url, entry_point (default train.py), branch,
+  hyperparams}` — the trainer repo is cloned and run against the exported
+  dataset. Used in the dev loop with the bundled example trainer; no
+  pre-registration needed.
+- **Registered training container.** `{training_container_id, hyperparams}` —
+  dispatches the project's registered ICD container (see **Training Container
+  ICD** below).
+
+In both modes the trainer logs to MLflow if it calls `mlflow.start_run()` and
+emits `mlflow_run_id` in `metrics.json`; the worker stores it on
+`model_versions.mlflow_run_id` and the model page surfaces the live **MLflow
+run** link. See [`mlflow.md`](./mlflow.md) for the tracking-server side.
+
+> Storage note: the `MINIO_*` names below are historical — the stack runs
+> **Garage (S3)**; `StorageBackend` is storage-agnostic, so only the `S3_*` env
+> (endpoint/key/bucket/region) is wired in compose.
+
+---
+
 ## How Model Weights Are Written
 
 ```

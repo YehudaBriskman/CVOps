@@ -1,0 +1,36 @@
+# Promtail: discovers running Docker containers via the daemon socket and ships
+# their stdout/stderr to Loki. Relabels Compose metadata so logs are filterable
+# by `compose_service` / `compose_project` / `container` in Grafana.
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Compose service name (e.g. api, worker-training, postgres).
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+      # Compose project (cvops, cvops-cvat).
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+      # Raw container name, stripped of the leading slash.
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      # Drop containers with no compose service label (keeps the stream tidy).
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        regex: ''
+        action: drop
+      - target_label: 'job'
+        replacement: 'docker'

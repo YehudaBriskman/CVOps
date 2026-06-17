@@ -200,7 +200,7 @@ async def test_collection_membership_and_count(factory) -> None:
         assert got2.json()["sample_count"] == 1
 
 
-async def test_from_samples_commit_skips_unannotated(factory) -> None:
+async def test_from_samples_commit_includes_unannotated(factory) -> None:
     user, project, source, ids = await _seed(factory, n_samples=2)
 
     # Annotate exactly one sample + create an ontology + dataset.
@@ -237,5 +237,41 @@ async def test_from_samples_commit_skips_unannotated(factory) -> None:
         )
         assert res.status_code == 201, res.text
         body = res.json()
-        assert body["committed_count"] == 1
-        assert body["skipped_count"] == 1
+        # All selected samples are committed: the annotated one pins its winning
+        # revision, the raw (unannotated) one commits with a null revision — a
+        # dataset of raw images is valid, so nothing is skipped.
+        assert body["committed_count"] == 2
+        assert body["skipped_count"] == 0
+
+
+async def test_list_annotations_returns_list_payload(factory) -> None:
+    """GET /samples/{id}/annotations serializes the list payload (regression: the
+    schema typed payload as a dict, so any real list payload 500'd)."""
+    user, project, _source, ids = await _seed(factory, n_samples=1)
+    async with factory() as s:
+        ont = Ontology(project_id=project.id, name="default", version=1)
+        s.add(ont)
+        await s.flush()
+        s.add(
+            AnnotationRevision(
+                project_id=project.id,
+                sample_id=ids[0],
+                ontology_id=ont.id,
+                ontology_version=1,
+                revision_no=1,
+                payload=[
+                    {"class_key": "plane", "geometry": {"type": "bbox", "coords": [0.5, 0.5, 0.2, 0.2]}}
+                ],
+                provenance={"source": "human", "review_status": "accepted"},
+            )
+        )
+        await s.commit()
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/samples/{ids[0]}/annotations")
+
+    assert res.status_code == 200
+    body = res.json()
+    assert len(body) == 1
+    assert isinstance(body[0]["payload"], list)
+    assert body[0]["payload"][0]["class_key"] == "plane"

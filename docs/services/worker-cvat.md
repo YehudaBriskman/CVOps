@@ -1,13 +1,37 @@
 # ICD — Worker: CVAT
 
 **Owner:** TBD
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-16
 
 ---
 
 ## What it is
 
-Owns all annotation work and dataset export. Runs auto-labeling (model inference), manages the human-in-the-loop gate via CVAT, pulls reviewed annotations back, exports the committed dataset to YOLO format, and chains to the next worker at each stage.
+The `cvat`-queue worker. After the origin/dev integration it is a **dual-role**
+worker — one host process / container that consumes the `cvat` Redis stream and
+also serves a small HTTP API on **:8001**:
+
+1. **Human-in-the-loop review (sync role).** Runs `step.human_review`: pushes a
+   review batch into CVAT, parks the run at the gate, and — on a CVAT completion
+   doorbell — pulls reviewed annotations back into `annotation_revisions` and
+   resumes the gated run. See **Push Flow** / **Pull Flow** below.
+2. **Model deployment to CVAT (deploy/export role).** Runs `step.deploy_model`
+   and serves `POST /deploy`, `GET /models`, `DELETE /models/{id}` on :8001 —
+   deploying a trained `.pt` model to Nuclio so it appears as a CVAT auto-label
+   function. The API's `cvat.py` router proxies the dashboard to these endpoints
+   via `MODEL_DEPLOYER_URL → worker-cvat:8001`. See **Model deployment to CVAT**.
+
+> **Architecture note.** The worker no longer uses `worker-common`'s
+> `ConsumerLoop`; it runs its own consumer-group loop (`worker_cvat/worker.py`,
+> entry point `python -m worker_cvat`). Each `cvat` message is routed by shape:
+> a `{kind: "cvat_sync", cvat_task_id}` doorbell → the pull handler
+> (`handle_cvat_sync`); a `{job_id, step_type}` doorbell → `process_step`
+> (covers both `step.human_review` and `step.deploy_model`). Postgres is the
+> authority; Redis is only the doorbell. Storage is **Garage (S3)**, not MinIO.
+> Several sections below predate this and describe the original aspirational
+> design (auto_label / export_yolo as cvat steps, MinIO, advance via
+> `POST /internal`) — kept for history; the **Model deployment to CVAT** and
+> **HTTP endpoints** sections reflect current reality.
 
 ---
 
@@ -41,18 +65,24 @@ API          POST /internal/runs/{id}/advance — signal executor to chain next 
 ## Environment Variables
 
 ```
+# Core
 DATABASE_URL          postgresql+asyncpg://cvops:<password>@postgres:5432/cvops
-MINIO_ENDPOINT        http://minio:9000
-MINIO_ACCESS_KEY      <minio root user>
-MINIO_SECRET_KEY      <minio root password>
 REDIS_URL             redis://redis:6379/0
 REDIS_STREAM          cvat
-CVAT_URL              http://cvat:8080
-CVAT_USERNAME         <cvat admin user>
-CVAT_PASSWORD         <cvat admin password>
-CVAT_WEBHOOK_SECRET   <shared secret for validating incoming webhooks>
-WORKER_TOKEN          <long-lived JWT for POST /internal/*>
-CVAT_POLL_INTERVAL    300    (seconds — fallback polling, default 5 min)
+S3_ENDPOINT           http://garage:3900          # Garage (S3), not MinIO
+S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET / S3_REGION
+WORKER_TOKEN          <shared secret for POST /internal/*>
+
+# Sync role (review push/pull — read by cvops_cvat_client)
+CVAT_URL              http://cvat_server:8080     # falls back to CVAT_HOST
+CVAT_PUBLIC_URL       http://localhost:8080       # browser-reachable "Open in CVAT" base
+CVAT_USERNAME / CVAT_PASSWORD
+CVAT_WEBHOOK_SECRET   <secret CVAT signs completion webhooks with>
+
+# Deploy role (model deployment — read by the deployer / cvat_client)
+CVAT_HOST             http://cvat_server:8080
+MODEL_DEPLOYER_PORT   8001                        # HTTP API port
+NUCTL_PATH            /abs/path/to/services/worker-cvat/nuctl
 ```
 
 ---
@@ -61,9 +91,14 @@ CVAT_POLL_INTERVAL    300    (seconds — fallback polling, default 5 min)
 
 | step_type | queue | What it does |
 |---|---|---|
-| `step.auto_label` | `cvat` | Model inference on data items, writes annotation_revisions with source='model' |
-| `step.human_review` | `cvat` | Gate step — push to CVAT for human annotation, run → `waiting` |
-| `step.export_yolo` | `cvat` | Materialise committed dataset to YOLO tar.gz, upload to MinIO |
+| `step.human_review` | `cvat` | Gate step — push a batch to CVAT for human review, run → `waiting`; resumed by a `cvat_sync` doorbell. **Implemented.** |
+| `step.deploy_model` | `cvat` | Deploy a trained `.pt` model to Nuclio as a CVAT auto-label function. **Implemented** (registered locally by the worker via `DeployModelStep`). |
+| `step.auto_label` | `cvat` | Model inference writing model-sourced `annotation_revisions`. **Stub** (`cvops_steps`). |
+| `step.export_yolo` | `preprocessing` | Materialise a committed dataset to YOLO. Runs in `packages/steps`, dispatched on the `preprocessing` queue — **not** a cvat-worker step. |
+
+`step.human_review` comes from `cvops_steps` (registered via `register_all()`);
+`step.deploy_model` is registered locally by the worker. Both route to the
+`cvat` queue (`Step.queue == "cvat"`), which is why their doorbells land here.
 
 ---
 
@@ -154,6 +189,53 @@ The API receives `POST /internal/cvat/webhook`, validates `CVAT_WEBHOOK_SECRET`,
 ```
 
 Idempotent — if pull flow fires twice (webhook + poll race), `labeling_jobs.status == 'completed'` at step 1 short-circuits the second run.
+
+---
+
+## Model deployment to CVAT (export-to-CVAT)
+
+"Export to CVAT" = take a trained model and make it available **inside** CVAT as
+an auto-label function, so a reviewer can pre-annotate new tasks with it. This is
+the deploy role; it does not export a dataset.
+
+Two ways in, both ending at the worker's `/deploy` endpoint:
+
+- **Dashboard / API.** `POST /api/v1/models/{id}/cvat-deploy` (`routers/cvat.py`)
+  fetches the `ModelVersion`'s `.pt` weights and POSTs them to
+  `${MODEL_DEPLOYER_URL}/deploy` (→ `worker-cvat:8001`).
+- **Workflow.** `step.deploy_model` (`DeployModelStep`, queue `cvat`) takes a
+  `model_version_id` input + `model_name` config, downloads the weights from
+  storage, and calls the same deployer in-process.
+
+Deployer flow (`worker_cvat/deployer.py`, host process shells out to `nuctl`):
+
+```
+1. ultralytics.YOLO(pt) → extract class labels from the model
+2. Render a Nuclio function.yaml (YOLO_BASE_IMAGE, labels, CVAT serializer)
+3. nuctl deploy <func> --platform local
+     --platform-config {attributes:{network: CVAT_NETWORK}}   # join cvat_cvat net
+4. Return the Nuclio function name → CVAT lists it under "Models" / auto-annotate
+```
+
+`GET /models` lists deployed Nuclio functions (CVAT SDK); `DELETE /models/{id}`
+tears one down (`nuctl delete function`). Requires the Docker socket and `nuctl`
+on PATH (`NUCTL_PATH`); under Tilt the `nuctl-install` + `docker-socket-perms`
+resources provide them. Nuclio itself is profile-gated (`app`/`all`) — bring up
+`docker compose --profile app` for the full deploy path.
+
+---
+
+## HTTP endpoints (:8001)
+
+Served by a small FastAPI app inside the worker (`MODEL_DEPLOYER_PORT`, default
+8001). The API's `cvat.py` router is the only client, proxying via
+`MODEL_DEPLOYER_URL → http://worker-cvat:8001`.
+
+| Method & path | Purpose |
+|---|---|
+| `POST /deploy` (multipart: `model_name`, `file`) | Deploy a `.pt` to Nuclio; returns `{function_name}` |
+| `GET /models` | List deployed Nuclio/CVAT auto-label functions |
+| `DELETE /models/{function_id}` | Remove a deployed function |
 
 ---
 
