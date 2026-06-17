@@ -198,7 +198,12 @@ done
 
 BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
 [ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
-BODY=$(printf '%s\n\n— Claude-Bot on behalf of @Yehuda Briskman\n' "$BODY")
+# Sign off with the PR author's own GitHub handle (the authenticated gh user),
+# resolved at runtime — never a hardcoded name, and never the literal "@me"
+# (that's a real GitHub account, so writing it pings a stranger).
+PR_AUTHOR=$(gh api user -q .login 2>/dev/null || true)
+[ -n "$PR_AUTHOR" ] || PR_AUTHOR=$(git config user.name 2>/dev/null || echo "unknown")
+BODY=$(printf '%s\n\n— Claude-Bot on behalf of @%s\n' "$BODY" "$PR_AUTHOR")
 
 # ── open the PR, assigned to the author ─────────────────────────────────────
 if [ "$DRYRUN" -eq 1 ]; then
