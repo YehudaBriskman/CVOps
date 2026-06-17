@@ -605,3 +605,50 @@ async def test_check_cross_org_not_visible(factory) -> None:
     body = res.json()
     assert body["exists"] is False
     assert body["matches"] == []
+
+
+async def test_delete_is_soft_and_frees_reingest(factory) -> None:
+    # A confirmed source DELETEd is kept (row + deleted_at) but vanishes from
+    # listings and GET-by-id, and the same blob can be re-confirmed into the
+    # project because the partial unique index ignores soft-deleted rows.
+    user, project, ds = await _seed(factory, with_workflow=False)
+    blob = _unique_hash()
+
+    async with _client(factory, user) as c:
+        confirm = await c.post(
+            f"/data-sources/{ds.id}/confirm-upload", json={"blob_hash": blob}
+        )
+        assert confirm.status_code == 200
+
+        deleted = await c.delete(f"/data-sources/{ds.id}")
+        assert deleted.status_code == 204
+
+        # No longer fetchable by id.
+        got = await c.get(f"/data-sources/{ds.id}")
+        assert got.status_code == 404
+
+        # No longer listed.
+        listed = await c.get(f"/projects/{project.id}/data-sources")
+        assert listed.status_code == 200
+        assert all(d["id"] != str(ds.id) for d in listed.json())
+
+    # The row still exists with deleted_at set (soft, not hard).
+    async with factory() as s:
+        row = await s.get(DataSource, ds.id)
+        assert row is not None
+        assert row.deleted_at is not None
+
+    # The freed (project, blob) slot accepts a re-ingest of the same content.
+    async with factory() as s:
+        ds2 = DataSource(project_id=project.id, type="video", status="pending")
+        s.add(ds2)
+        await s.commit()
+        await s.refresh(ds2)
+        ds2_id = ds2.id
+
+    async with _client(factory, user) as c:
+        reconfirm = await c.post(
+            f"/data-sources/{ds2_id}/confirm-upload", json={"blob_hash": blob}
+        )
+    assert reconfirm.status_code == 200
+    assert reconfirm.json()["data_source"]["status"] == "uploaded"
