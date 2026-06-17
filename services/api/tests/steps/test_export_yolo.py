@@ -13,7 +13,6 @@ import io
 import json
 import tarfile
 import uuid
-from pathlib import Path
 from unittest.mock import patch
 
 from moto import mock_aws

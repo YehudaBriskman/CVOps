@@ -21,7 +21,7 @@ from cvops_api.db.models.projects import Project
 from cvops_api.db.models.workflows import Workflow
 from cvops_api.engine import coordinator
 from cvops_api.engine.coordinator import process_step
-from cvops_api.engine.step import Step, StepContext, GateException
+from cvops_api.engine.step import Step, GateException
 
 ACTOR = uuid.uuid4()
 
