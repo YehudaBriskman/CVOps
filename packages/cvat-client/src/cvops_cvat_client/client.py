@@ -39,10 +39,12 @@ def _require_env(name: str) -> str:
 # CVAT_URL is the spec name; CVAT_HOST is the legacy model-deployer name. Accept
 # either so this client drops into both contexts.
 CVAT_URL = os.environ.get("CVAT_URL") or os.environ.get("CVAT_HOST", "http://cvat_server:8080")
-CVAT_USERNAME = _require_env("CVAT_USERNAME")
-CVAT_PASSWORD = _require_env("CVAT_PASSWORD")
 # Browser-reachable base for the links we hand back to the dashboard.
 CVAT_PUBLIC_URL = os.environ.get("CVAT_PUBLIC_URL", "http://localhost:8080")
+
+# Credentials are required only when we actually open a connection (see
+# ``_client``), not at import — so the step registry can import this package
+# without CVAT env vars present (CI, unit tests, offline workers).
 
 
 @dataclass
@@ -68,7 +70,7 @@ def _client():  # noqa: ANN202 — cvat_sdk.Client, imported lazily
     # Django's USE_X_FORWARDED_HOST=True needs these when we bypass the edge proxy.
     c.api_client.set_default_header("X-Forwarded-Host", "localhost")
     c.api_client.set_default_header("X-Forwarded-Proto", "http")
-    c.login((CVAT_USERNAME, CVAT_PASSWORD))
+    c.login((_require_env("CVAT_USERNAME"), _require_env("CVAT_PASSWORD")))
     return c
 
 
