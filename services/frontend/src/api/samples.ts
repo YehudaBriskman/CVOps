@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
+import { PRESIGNED_URL_GC_MS, PRESIGNED_URL_STALE_MS } from '../lib/presign'
 
 export interface TagBrief {
   id: string
@@ -73,7 +74,8 @@ export function useThumbnailUrl(sampleId: string | undefined) {
       return data
     },
     enabled: !!sampleId,
-    staleTime: 50 * 60 * 1000,
+    staleTime: PRESIGNED_URL_STALE_MS,
+    gcTime: PRESIGNED_URL_GC_MS,
   })
 }
 
@@ -85,7 +87,8 @@ export function useImageUrl(sampleId: string | undefined) {
       return data
     },
     enabled: !!sampleId,
-    staleTime: 50 * 60 * 1000,
+    staleTime: PRESIGNED_URL_STALE_MS,
+    gcTime: PRESIGNED_URL_GC_MS,
   })
 }
 
