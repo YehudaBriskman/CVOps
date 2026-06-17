@@ -5,6 +5,7 @@ import { useProject } from '../../api/projects'
 import { useActiveProjectId } from '../../lib/useActiveProject'
 import { useUIStore } from '../../store/ui'
 import { queryClient } from '../../lib/queryClient'
+import { Menu, MenuItem } from '../ui'
 
 function getSection(pathname: string): string {
   if (pathname === '/projects')                   return 'Projects'
@@ -81,14 +82,21 @@ export function Header() {
         <ThemeIcon mode={mode} />
       </button>
 
-      <button
-        type="button"
-        onClick={handleLogout}
-        title={me?.email ?? 'Sign out'}
-        className="w-8 h-8 rounded-full bg-iris flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0 hover:opacity-80 transition-opacity"
+      <Menu
+        align="right"
+        triggerLabel="Account menu"
+        triggerContent={initial}
+        triggerClassName="w-8 h-8 rounded-full bg-iris flex items-center justify-center text-text-onAccent text-sm font-bold flex-shrink-0 hover:opacity-80 transition-opacity"
       >
-        {initial}
-      </button>
+        <div className="px-3 py-2">
+          <p className="truncate text-sm font-medium text-text-primary">{me?.email ?? 'Signed in'}</p>
+          {me?.org_id && (
+            <p className="truncate text-xs text-text-muted">Org · {me.org_id.slice(0, 8)}</p>
+          )}
+        </div>
+        <div className="my-1 border-t border-border" />
+        <MenuItem onClick={handleLogout}>Log out</MenuItem>
+      </Menu>
     </header>
   )
 }
