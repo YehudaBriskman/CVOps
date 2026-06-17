@@ -34,20 +34,23 @@ jobs:
           cache: pip
           cache-dependency-path: '**/pyproject.toml'
 
-      # Local packages are name-deps (not path/workspace deps), so they must be
-      # installed editable in dependency order before the workers that consume
-      # them — pip then sees each requirement already satisfied.
-      - name: Install local packages (editable, dependency order)
+      # Local packages are name-deps (not path/workspace deps): worker-common and
+      # steps declare `cvops-api`, which is not on PyPI. Installing them in
+      # separate `pip install` calls makes pip try to resolve that name from the
+      # index and fail. They must all be in ONE install call so pip resolves the
+      # cvops-* names from the working tree in a single resolution pass.
+      - name: Install local packages (editable, single resolution pass)
         run: |
           python -m pip install --upgrade pip
-          pip install -e packages/worker-common
-          pip install -e packages/cvat-client
-          pip install -e services/api
-          pip install -e packages/steps
-          pip install -e "services/worker-preprocessing[dev]"
-          pip install -e "services/worker-cvat[dev]"
-          pip install -e "services/worker-training[dev]"
-          pip install -e "packages/steps[dev]"
+          pip install \
+            -e services/api \
+            -e packages/worker-common \
+            -e packages/cvat-client \
+            -e packages/steps \
+            -e "services/worker-preprocessing[dev]" \
+            -e "services/worker-cvat[dev]" \
+            -e "services/worker-training[dev]" \
+            -e "packages/steps[dev]"
 
       - name: worker-preprocessing
         working-directory: services/worker-preprocessing
