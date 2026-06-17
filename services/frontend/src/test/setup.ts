@@ -1,7 +1,16 @@
+import { webcrypto } from 'node:crypto'
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { server } from './server'
+
+// jsdom does not implement crypto.subtle, and whether the Node WebCrypto global
+// survives into each jsdom worker is non-deterministic. Pin it so the
+// secure-context hash path (lib/hash.ts) is the one tests exercise everywhere,
+// instead of falling back to file.stream() which jsdom also lacks.
+if (typeof globalThis.crypto?.subtle === 'undefined') {
+  Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
+}
 
 // jsdom 29 does not always expose localStorage as a usable global — under an
 // opaque origin it surfaces as an empty `{}` (defined, but `getItem`/`clear`
