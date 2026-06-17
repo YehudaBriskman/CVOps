@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
 from cvops_api.core.audit import emit_event
+from cvops_api.core.pagination import decode_cursor_uuid
 from cvops_api.core.sample_view import build_sample_outs
 from cvops_api.core.storage import get_storage, public_s3_endpoint
 from cvops_api.db.session import get_session
@@ -144,7 +145,7 @@ async def list_samples(
         )
 
     if cursor is not None:
-        cursor_uuid = uuid.UUID(base64.b64decode(cursor).decode())
+        cursor_uuid = decode_cursor_uuid(cursor)
         q = q.where(Sample.id > cursor_uuid)
 
     q = q.order_by(Sample.id).limit(limit + 1)
