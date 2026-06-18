@@ -12,7 +12,8 @@
 # any referenced issues linked.
 #
 # Usage:
-#   scripts/open-pr.sh [-b <feature-branch>] [-B <base>] [-t <title>] [-c <issue>]... [-p] [-n]
+#   scripts/open-pr.sh [-b <feature-branch>] [-B <base>] [-t <title>] [-c <issue>]...
+#                      [-s <summary>]... [-N <note>]... [-T <test>]... [-p] [-n]
 #
 #   -b  Feature branch name. Must satisfy the branch convention. If omitted and
 #       you're not already on a valid feature branch, it's derived from your
@@ -21,6 +22,14 @@
 #   -t  PR title override (default: the latest commit subject on the head branch).
 #   -c  Issue number to reference in the PR body (repeatable). Prefix with '!'
 #       to close it, e.g. -c '!87' -> "Closes #87"; plain -c 87 -> "Relates to #87".
+#   -s  Summary / context line for the body — a short why-focused intro placed
+#       above the Changes list (repeatable; each -s is its own line). This is the
+#       "what & why" reviewers read first.
+#   -N  Note / extra information (repeatable; each becomes a bullet under a
+#       "## Notes" section). Use for caveats, follow-ups, deploy/migration steps,
+#       known gaps, or anything reviewers should be aware of.
+#   -T  Testing note — how the change was verified (repeatable; each becomes a
+#       bullet under a "## Testing" section).
 #   -p  Promote mode: open a PR for the *current* branch as-is into <base>
 #       (e.g. dev -> main). No feature-branch move, no rewind, and NO push — the
 #       head must already be on origin and not ahead of it. Use this to roll an
@@ -33,6 +42,8 @@
 #   scripts/open-pr.sh -B main -c 87                # base main, relate to #87
 #   scripts/open-pr.sh -b Claude-Bot/Feat/add-x -c '!12'
 #   scripts/open-pr.sh -p -t "Promote dev -> main" -c '!51' -c '!54'
+#   scripts/open-pr.sh -s "Why this change matters." -N "Needs a migration." \
+#                      -T "pytest tests/ -q; npm run build" -c '!74'
 set -eu
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -42,15 +53,20 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
 
 # ── parse args ─────────────────────────────────────────────────────────────
 FEATURE=""; BASE=""; DRYRUN=0; ISSUES=""; PROMOTE=0; TITLE_OVERRIDE=""
-while getopts "b:B:t:c:pnh" opt; do
+SUMMARY=""; NOTES=""; TESTS=""
+while getopts "b:B:t:c:s:N:T:pnh" opt; do
   case "$opt" in
     b) FEATURE="$OPTARG" ;;
     B) BASE="$OPTARG" ;;
     t) TITLE_OVERRIDE="$OPTARG" ;;
     c) ISSUES="$ISSUES $OPTARG" ;;
+    s) SUMMARY="$SUMMARY\n$OPTARG" ;;
+    N) NOTES="$NOTES\n- $OPTARG" ;;
+    T) TESTS="$TESTS\n- $OPTARG" ;;
     p) PROMOTE=1 ;;
     n) DRYRUN=1 ;;
-    h) sed -n '2,36p' "$0"; exit 0 ;;
+    # Print the header doc block (everything between line 2 and `set -eu`).
+    h) sed -n '2,/^set -eu/{/^set -eu/!p;}' "$0"; exit 0 ;;
     *) echo "open-pr: run with -h for usage" >&2; exit 2 ;;
   esac
 done
@@ -196,8 +212,17 @@ for _i in $ISSUES; do
   esac
 done
 
-BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
-[ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
+# Assemble the body section by section. Optional sections (summary, notes,
+# testing, related) only appear when the matching flag was given, so a bare
+# invocation still produces the minimal "## Changes" + signature body.
+if [ -n "$SUMMARY" ]; then
+  BODY=$(printf '%b\n\n## Changes\n\n%s\n' "${SUMMARY#\\n}" "$COMMITS")
+else
+  BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
+fi
+[ -n "$NOTES" ]      && BODY=$(printf '%s\n\n## Notes\n%b\n' "$BODY" "$NOTES")
+[ -n "$TESTS" ]      && BODY=$(printf '%s\n\n## Testing\n%b\n' "$BODY" "$TESTS")
+[ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
 # Sign off with the PR author's own GitHub handle (the authenticated gh user),
 # resolved at runtime — never a hardcoded name, and never the literal "@me"
 # (that's a real GitHub account, so writing it pings a stranger).
