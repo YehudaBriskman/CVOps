@@ -260,7 +260,10 @@ async def test_list_annotations_returns_list_payload(factory) -> None:
                 ontology_version=1,
                 revision_no=1,
                 payload=[
-                    {"class_key": "plane", "geometry": {"type": "bbox", "coords": [0.5, 0.5, 0.2, 0.2]}}
+                    {
+                        "class_key": "plane",
+                        "geometry": {"type": "bbox", "coords": [0.5, 0.5, 0.2, 0.2]},
+                    }
                 ],
                 provenance={"source": "human", "review_status": "accepted"},
             )
@@ -275,3 +278,19 @@ async def test_list_annotations_returns_list_payload(factory) -> None:
     assert len(body) == 1
     assert isinstance(body[0]["payload"], list)
     assert body[0]["payload"][0]["class_key"] == "plane"
+
+
+async def test_malformed_cursor_returns_400(factory) -> None:
+    """A garbage `?cursor=` is a client error (400), not a server crash (500).
+
+    The samples list uses the base64-UUID cursor shape; a non-base64 value must
+    be rejected cleanly by the shared cursor decoder rather than raising and
+    surfacing as a 500.
+    """
+    user, project, _source, _ids = await _seed(factory, n_samples=1)
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/projects/{project.id}/samples", params={"cursor": "!!notbase64!!"})
+
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Invalid pagination cursor"

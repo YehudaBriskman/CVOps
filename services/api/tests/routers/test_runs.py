@@ -132,9 +132,7 @@ async def test_child_run_excluded(factory) -> None:
 
 
 async def test_status_filter(factory) -> None:
-    user, project, _ = await _seed(
-        factory, n_parents=3, statuses=["failed", "succeeded", "failed"]
-    )
+    user, project, _ = await _seed(factory, n_parents=3, statuses=["failed", "succeeded", "failed"])
 
     async with _client(factory, user) as c:
         res = await c.get(f"/projects/{project.id}/runs", params={"status": "failed"})
@@ -171,6 +169,21 @@ async def test_cross_org_returns_404(factory) -> None:
         res = await c.get(f"/projects/{project.id}/runs")
 
     assert res.status_code == 404
+
+
+async def test_malformed_cursor_returns_400(factory) -> None:
+    """A garbage `?cursor=` is a client error (400), not a server crash (500).
+
+    The runs list uses the composite `base64("<created_at>|<id>")` cursor shape;
+    a non-base64 value must be rejected cleanly by the shared cursor decoder.
+    """
+    user, project, _ = await _seed(factory, n_parents=1)
+
+    async with _client(factory, user) as c:
+        res = await c.get(f"/projects/{project.id}/runs", params={"cursor": "!!notbase64!!"})
+
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Invalid pagination cursor"
 
 
 async def test_sync_gate_enqueues_doorbell(factory, fake_redis) -> None:

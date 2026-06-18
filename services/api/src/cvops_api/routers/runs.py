@@ -13,6 +13,7 @@ from sqlalchemy import select, text, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cvops_api.core.auth import get_current_user
+from cvops_api.core.pagination import decode_cursor_parts
 from cvops_api.core.redis_client import get_redis
 from cvops_api.db.session import get_session
 from cvops_api.db.models.auth import User
@@ -69,9 +70,12 @@ async def list_runs(
     if status is not None:
         q = q.where(Run.status == status)
     if cursor is not None:
-        ts_str, id_str = base64.b64decode(cursor).decode().split("|", 1)
-        cursor_ts = datetime.fromisoformat(ts_str)
-        cursor_id = uuid.UUID(id_str)
+        ts_str, id_str = decode_cursor_parts(cursor)
+        try:
+            cursor_ts = datetime.fromisoformat(ts_str)
+            cursor_id = uuid.UUID(id_str)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
         q = q.where(tuple_(Run.created_at, Run.id) < (cursor_ts, cursor_id))
     q = q.order_by(Run.created_at.desc(), Run.id.desc()).limit(limit + 1)
 
@@ -81,9 +85,7 @@ async def list_runs(
     next_cursor: str | None = None
     if len(items) == limit + 1:
         last = items[limit - 1]
-        next_cursor = base64.b64encode(
-            f"{last.created_at.isoformat()}|{last.id}".encode()
-        ).decode()
+        next_cursor = base64.b64encode(f"{last.created_at.isoformat()}|{last.id}".encode()).decode()
         items = items[:limit]
 
     return CursorPage(
@@ -344,7 +346,5 @@ async def sync_gate(
     if lj is None or lj[0] is None:
         raise HTTPException(status_code=409, detail="No CVAT task recorded for this gate")
 
-    await get_redis().xadd(
-        CVAT_STREAM, {"kind": "cvat_sync", "cvat_task_id": str(lj[0])}
-    )
+    await get_redis().xadd(CVAT_STREAM, {"kind": "cvat_sync", "cvat_task_id": str(lj[0])})
     return {"status": "syncing", "cvat_task_id": int(lj[0])}

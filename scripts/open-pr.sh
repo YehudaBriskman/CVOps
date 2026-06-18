@@ -12,20 +12,38 @@
 # any referenced issues linked.
 #
 # Usage:
-#   scripts/open-pr.sh [-b <feature-branch>] [-B <base>] [-c <issue>]... [-n]
+#   scripts/open-pr.sh [-b <feature-branch>] [-B <base>] [-t <title>] [-c <issue>]...
+#                      [-s <summary>]... [-N <note>]... [-T <test>]... [-p] [-n]
 #
 #   -b  Feature branch name. Must satisfy the branch convention. If omitted and
 #       you're not already on a valid feature branch, it's derived from your
 #       latest commit subject (e.g. "fix: harden X" -> Claude-Bot/Fix/harden-x).
-#   -B  PR base branch (default: dev).
+#   -B  PR base branch (default: dev, or main in promote mode).
+#   -t  PR title override (default: the latest commit subject on the head branch).
 #   -c  Issue number to reference in the PR body (repeatable). Prefix with '!'
 #       to close it, e.g. -c '!87' -> "Closes #87"; plain -c 87 -> "Relates to #87".
+#   -s  Summary / context line for the body — a short why-focused intro placed
+#       above the Changes list (repeatable; each -s is its own line). This is the
+#       "what & why" reviewers read first.
+#   -N  Note / extra information (repeatable; each becomes a bullet under a
+#       "## Notes" section). Use for caveats, follow-ups, deploy/migration steps,
+#       known gaps, or anything reviewers should be aware of.
+#   -T  Testing note — how the change was verified (repeatable; each becomes a
+#       bullet under a "## Testing" section).
+#   -p  Promote mode: open a PR for the *current* branch as-is into <base>
+#       (e.g. dev -> main). No feature-branch move, no rewind, and NO push — the
+#       head must already be on origin and not ahead of it. Use this to roll an
+#       integration branch up to main; pair with -c '!N' to close the issues the
+#       bundled work resolved (they close on merge to the default branch).
 #   -n  Dry run: print what would happen, change nothing.
 #
 # Examples:
 #   scripts/open-pr.sh                              # derive everything, base dev
 #   scripts/open-pr.sh -B main -c 87                # base main, relate to #87
 #   scripts/open-pr.sh -b Claude-Bot/Feat/add-x -c '!12'
+#   scripts/open-pr.sh -p -t "Promote dev -> main" -c '!51' -c '!54'
+#   scripts/open-pr.sh -s "Why this change matters." -N "Needs a migration." \
+#                      -T "pytest tests/ -q; npm run build" -c '!74'
 set -eu
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
@@ -34,24 +52,38 @@ ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || {
 . "$ROOT/scripts/hooks/lib/rules.sh"
 
 # ── parse args ─────────────────────────────────────────────────────────────
-FEATURE=""; BASE="dev"; DRYRUN=0; ISSUES=""
-while getopts "b:B:c:nh" opt; do
+FEATURE=""; BASE=""; DRYRUN=0; ISSUES=""; PROMOTE=0; TITLE_OVERRIDE=""
+SUMMARY=""; NOTES=""; TESTS=""
+while getopts "b:B:t:c:s:N:T:pnh" opt; do
   case "$opt" in
     b) FEATURE="$OPTARG" ;;
     B) BASE="$OPTARG" ;;
+    t) TITLE_OVERRIDE="$OPTARG" ;;
     c) ISSUES="$ISSUES $OPTARG" ;;
+    s) SUMMARY="$SUMMARY\n$OPTARG" ;;
+    N) NOTES="$NOTES\n- $OPTARG" ;;
+    T) TESTS="$TESTS\n- $OPTARG" ;;
+    p) PROMOTE=1 ;;
     n) DRYRUN=1 ;;
-    h) sed -n '2,30p' "$0"; exit 0 ;;
+    # Print the header doc block (everything between line 2 and `set -eu`).
+    h) sed -n '2,/^set -eu/{/^set -eu/!p;}' "$0"; exit 0 ;;
     *) echo "open-pr: run with -h for usage" >&2; exit 2 ;;
   esac
 done
+
+# Default base depends on mode: promotion rolls up to main, otherwise dev.
+if [ -z "$BASE" ]; then
+  if [ "$PROMOTE" -eq 1 ]; then BASE="main"; else BASE="dev"; fi
+fi
 
 run() { if [ "$DRYRUN" -eq 1 ]; then printf '  [dry-run] %s\n' "$*"; else eval "$@"; fi; }
 
 command -v gh >/dev/null 2>&1 || { echo "open-pr: gh CLI not found" >&2; exit 1; }
 
 # ── refuse to proceed with a dirty tree (branch moves would lose changes) ───
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+# Skipped in promote mode: it never moves a branch or touches the working copy
+# (it opens a PR from origin/<head> as-is), so uncommitted edits are harmless.
+if [ "$PROMOTE" -ne 1 ] && [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   _rules_box '\033[31m' "open-pr — working tree not clean" \
     "Commit or stash your changes before opening a PR."
   exit 1
@@ -78,32 +110,66 @@ derive_branch() {
 
 CURRENT=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
 
-# ── decide the feature branch ───────────────────────────────────────────────
-# If we're already on a valid (non-protected) feature branch and no -b was
-# given, reuse it. Otherwise we must create/switch to one.
+# ── decide the head branch ──────────────────────────────────────────────────
 NEED_MOVE=0
-if [ -z "$FEATURE" ]; then
-  if [ -n "$CURRENT" ] && ! rules_is_protected "$CURRENT" \
-       && printf '%s' "$CURRENT" | grep -qE "$RULES_BRANCH_PATTERN"; then
-    FEATURE="$CURRENT"
-  else
-    FEATURE=$(derive_branch) || {
-      _rules_box '\033[31m' "open-pr — could not derive a branch name" \
-        "Your latest commit subject has no recognised <type>: prefix." \
-        "Pass one explicitly:  scripts/open-pr.sh -b Claude-Bot/Fix/your-title"
-      exit 1; }
-    NEED_MOVE=1
+if [ "$PROMOTE" -eq 1 ]; then
+  # Promote: PR the current branch as-is into <base> (e.g. dev -> main). No
+  # feature-branch move, no rewind, no push — the head is a shared branch that's
+  # only ever updated through PRs, so we validate it's clean against origin and
+  # just open the PR. The branch-convention check is skipped on purpose (the
+  # head is a protected integration branch here).
+  [ -n "$CURRENT" ] || { _rules_box '\033[31m' "open-pr -p — detached HEAD" \
+      "Check out the branch you want to promote (e.g. git checkout dev)."; exit 1; }
+  if [ -n "$FEATURE" ] && [ "$FEATURE" != "$CURRENT" ]; then
+    _rules_box '\033[31m' "open-pr -p — -b conflicts with promote" \
+      "Promote uses the checked-out branch; drop -b or drop -p."; exit 1
   fi
+  FEATURE="$CURRENT"
+  if [ "$FEATURE" = "$BASE" ]; then
+    _rules_box '\033[31m' "open-pr -p — head equals base ($BASE)" \
+      "Pass -B <base> to promote into a different branch."; exit 1
+  fi
+  git show-ref --verify --quiet "refs/remotes/origin/$FEATURE" || {
+    _rules_box '\033[31m' "open-pr -p — origin/$FEATURE not found" \
+      "Promotion PRs don't push; get $FEATURE onto origin first."; exit 1; }
+  _ahead=$(git rev-list --count "origin/$FEATURE..$FEATURE" 2>/dev/null || echo 0)
+  if [ "$_ahead" -gt 0 ]; then
+    _rules_box '\033[31m' "open-pr -p — $FEATURE is $_ahead commit(s) ahead of origin" \
+      "Promotion never pushes a protected branch. Land those commits via a" \
+      "feature-branch PR first, then promote."; exit 1
+  fi
+else
+  # If we're already on a valid (non-protected) feature branch and no -b was
+  # given, reuse it. Otherwise we must create/switch to one.
+  if [ -z "$FEATURE" ]; then
+    if [ -n "$CURRENT" ] && ! rules_is_protected "$CURRENT" \
+         && printf '%s' "$CURRENT" | grep -qE "$RULES_BRANCH_PATTERN"; then
+      FEATURE="$CURRENT"
+    else
+      FEATURE=$(derive_branch) || {
+        _rules_box '\033[31m' "open-pr — could not derive a branch name" \
+          "Your latest commit subject has no recognised <type>: prefix." \
+          "Pass one explicitly:  scripts/open-pr.sh -b Claude-Bot/Fix/your-title"
+        exit 1; }
+      NEED_MOVE=1
+    fi
+  fi
+
+  # Validate whatever we ended up with (explicit -b included).
+  rules_validate_branch "$FEATURE" || exit 1
+  [ "$FEATURE" = "$CURRENT" ] || NEED_MOVE=1
 fi
 
-# Validate whatever we ended up with (explicit -b included).
-rules_validate_branch "$FEATURE" || exit 1
-[ "$FEATURE" = "$CURRENT" ] || NEED_MOVE=1
-
-printf '\n  open-pr plan\n'
-printf '  ──────────────────────────────────────────────────────\n'
-printf '  source branch : %s\n' "${CURRENT:-（detached HEAD）}"
-printf '  feature branch: %s\n' "$FEATURE"
+if [ "$PROMOTE" -eq 1 ]; then
+  printf '\n  open-pr plan (promote)\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '  promote branch: %s  (as-is, no push)\n' "$FEATURE"
+else
+  printf '\n  open-pr plan\n'
+  printf '  ──────────────────────────────────────────────────────\n'
+  printf '  source branch : %s\n' "${CURRENT:-（detached HEAD）}"
+  printf '  feature branch: %s\n' "$FEATURE"
+fi
 printf '  PR base       : %s\n' "$BASE"
 printf '  issues        : %s\n' "${ISSUES:-（none）}"
 printf '  ──────────────────────────────────────────────────────\n\n'
@@ -127,11 +193,17 @@ if [ "$NEED_MOVE" -eq 1 ]; then
 fi
 
 # ── push ────────────────────────────────────────────────────────────────────
-run "git push -u origin '$FEATURE'"
+# Promotion never pushes (the head is a protected branch already on origin);
+# the feature-branch flow pushes the moved commits.
+if [ "$PROMOTE" -eq 1 ]; then
+  printf '  promote: using origin/%s as-is (no push)\n' "$FEATURE"
+else
+  run "git push -u origin '$FEATURE'"
+fi
 
 # ── build PR body: commit list + issue refs + signature ─────────────────────
-TITLE=$(git log -1 --format=%s "$FEATURE" 2>/dev/null || git log -1 --format=%s)
-COMMITS=$(git log --format='- %s' "origin/$BASE..$FEATURE" 2>/dev/null || git log -1 --format='- %s')
+TITLE=${TITLE_OVERRIDE:-$(git log -1 --format=%s "$FEATURE" 2>/dev/null || git log -1 --format=%s)}
+COMMITS=$(git log --no-merges --format='- %s' "origin/$BASE..$FEATURE" 2>/dev/null || git log -1 --format='- %s')
 ISSUE_LINES=""
 for _i in $ISSUES; do
   case "$_i" in
@@ -140,9 +212,23 @@ for _i in $ISSUES; do
   esac
 done
 
-BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
-[ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
-BODY=$(printf '%s\n\n— Claude-Bot on behalf of @Yehuda Briskman\n' "$BODY")
+# Assemble the body section by section. Optional sections (summary, notes,
+# testing, related) only appear when the matching flag was given, so a bare
+# invocation still produces the minimal "## Changes" + signature body.
+if [ -n "$SUMMARY" ]; then
+  BODY=$(printf '%b\n\n## Changes\n\n%s\n' "${SUMMARY#\\n}" "$COMMITS")
+else
+  BODY=$(printf '## Changes\n\n%s\n' "$COMMITS")
+fi
+[ -n "$NOTES" ]      && BODY=$(printf '%s\n\n## Notes\n%b\n' "$BODY" "$NOTES")
+[ -n "$TESTS" ]      && BODY=$(printf '%s\n\n## Testing\n%b\n' "$BODY" "$TESTS")
+[ -n "$ISSUE_LINES" ] && BODY=$(printf '%s\n\n## Related\n%b\n' "$BODY" "$ISSUE_LINES")
+# Sign off with the PR author's own GitHub handle (the authenticated gh user),
+# resolved at runtime — never a hardcoded name, and never the literal "@me"
+# (that's a real GitHub account, so writing it pings a stranger).
+PR_AUTHOR=$(gh api user -q .login 2>/dev/null || true)
+[ -n "$PR_AUTHOR" ] || PR_AUTHOR=$(git config user.name 2>/dev/null || echo "unknown")
+BODY=$(printf '%s\n\n— Claude-Bot on behalf of @%s\n' "$BODY" "$PR_AUTHOR")
 
 # ── open the PR, assigned to the author ─────────────────────────────────────
 if [ "$DRYRUN" -eq 1 ]; then

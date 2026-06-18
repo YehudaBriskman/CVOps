@@ -8,10 +8,12 @@ import { cn } from '../../lib/cn'
 import { LoadingState } from '../ui'
 import { BoxOverlay } from './BoxOverlay'
 
+// Review-status dot color, by semantic token. `bg-text-muted` is the default
+// for unreviewed / unknown statuses.
 const REVIEW_DOT: Record<string, string> = {
-  accepted: 'var(--cv-success)',
-  rejected: 'var(--cv-error)',
-  unreviewed: 'var(--text-muted)',
+  accepted: 'bg-success',
+  rejected: 'bg-error',
+  unreviewed: 'bg-text-muted',
 }
 
 function CheckGlyph() {
@@ -86,8 +88,8 @@ function ThumbnailCard({
           className={cn(
             'pointer-events-none absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border transition-colors',
             selected
-              ? 'border-iris bg-iris text-white'
-              : 'border-white/70 bg-black/40 text-transparent group-hover:text-white/70',
+              ? 'border-iris bg-iris text-text-onAccent'
+              : 'border-text-onAccent/70 bg-black/40 text-transparent group-hover:text-text-onAccent/70',
           )}
         >
           <CheckGlyph />
@@ -105,14 +107,16 @@ function ThumbnailCard({
           />
         ))}
         <span
-          className="h-2 w-2 rounded-full ring-1 ring-black/30"
-          style={{ backgroundColor: REVIEW_DOT[sample.review_status] ?? 'var(--text-muted)' }}
+          className={cn(
+            'h-2 w-2 rounded-full ring-1 ring-black/30',
+            REVIEW_DOT[sample.review_status] ?? 'bg-text-muted',
+          )}
           title={sample.review_status}
         />
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity group-hover:opacity-100">
-        <p className="text-xs text-white">
+        <p className="text-xs text-text-onAccent">
           {sample.width}×{sample.height}
           {sample.frame_index != null && ` · f${sample.frame_index}`}
         </p>
@@ -166,7 +170,7 @@ export function Lightbox({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={onClose}>
       <button
         onClick={onClose}
-        className="absolute right-5 top-4 text-2xl leading-none text-white/70 hover:text-white"
+        className="absolute right-5 top-4 text-2xl leading-none text-text-onAccent/70 hover:text-text-onAccent"
         aria-label="Close"
       >
         ×
@@ -178,7 +182,7 @@ export function Lightbox({
             e.stopPropagation()
             onNavigate(index - 1)
           }}
-          className="absolute left-4 px-2 text-4xl text-white/60 hover:text-white"
+          className="absolute left-4 px-2 text-4xl text-text-onAccent/60 hover:text-text-onAccent"
           aria-label="Previous"
         >
           ‹
@@ -187,7 +191,7 @@ export function Lightbox({
 
       <div className="flex max-h-[85vh] max-w-5xl flex-col items-center" onClick={(e) => e.stopPropagation()}>
         {isLoading || !data?.url ? (
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-text-onAccent/30 border-t-text-onAccent" />
         ) : (
           <div className="relative inline-block">
             <img src={data.url} alt={`frame ${sample.frame_index ?? ''}`} className="max-h-[80vh] max-w-full object-contain rounded-lg" />
@@ -200,15 +204,15 @@ export function Lightbox({
             <select
               value={selectedRevId ?? ''}
               onChange={e => setSelectedRevId(e.target.value)}
-              className="bg-white/10 text-white text-xs rounded-md px-2 py-1 border border-white/20 focus:outline-none"
+              className="bg-surface-3 text-text-primary text-xs rounded-md px-2 py-1 border border-border-strong focus:outline-none"
             >
               {revisions.map(r => (
-                <option key={r.id} value={r.id} className="text-slate-800">
+                <option key={r.id} value={r.id} className="bg-surface-3 text-text-primary">
                   rev {r.revision_no} · {String(r.provenance?.source ?? 'unknown')}
                 </option>
               ))}
             </select>
-            <label className="flex items-center gap-1.5 text-white/70 text-xs cursor-pointer">
+            <label className="flex items-center gap-1.5 text-text-onAccent/70 text-xs cursor-pointer">
               <input
                 type="checkbox"
                 checked={showBoxes}
@@ -219,7 +223,7 @@ export function Lightbox({
           </div>
         )}
 
-        <p className="text-white/70 text-xs mt-3">
+        <p className="text-text-onAccent/70 text-xs mt-3">
           {sample.width}×{sample.height}
           {sample.frame_index != null && ` · frame ${sample.frame_index}`}
           {` · ${index + 1} / ${samples.length}`}
@@ -232,7 +236,7 @@ export function Lightbox({
             e.stopPropagation()
             onNavigate(index + 1)
           }}
-          className="absolute right-4 px-2 text-4xl text-white/60 hover:text-white"
+          className="absolute right-4 px-2 text-4xl text-text-onAccent/60 hover:text-text-onAccent"
           aria-label="Next"
         >
           ›

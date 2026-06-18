@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { client } from '../lib/client'
+import { PRESIGNED_URL_GC_MS, PRESIGNED_URL_STALE_MS } from '../lib/presign'
 
 export interface ModelVersion {
   id: string
@@ -44,6 +45,7 @@ export function useWeightsUrl(id: string | undefined) {
       return data
     },
     enabled: !!id,
-    staleTime: 50 * 60 * 1000,
+    staleTime: PRESIGNED_URL_STALE_MS,
+    gcTime: PRESIGNED_URL_GC_MS,
   })
 }
