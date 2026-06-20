@@ -316,11 +316,10 @@ if ENABLE_CVAT:
     dc_resource('cvat_worker_quality_reports', labels=['3-cvat'])
     dc_resource('cvat_worker_chunks',          labels=['3-cvat'])
     dc_resource('cvat_worker_consensus',       labels=['3-cvat'])
-    # nuclio (auto-label serving) and cvat_grafana (CVAT's ClickHouse analytics UI)
-    # are profile-gated to `app`/`all` in the override, so the Tilt inner loop skips
-    # them — no dc_resource here (dc_resource on an unloaded service errors). They
-    # come up under `docker compose --profile app`. cvat_vector is profile-less, so
-    # it loads and is labelled.
+    # nuclio is required for YOLO model deployment; cvat_grafana (analytics UI) is
+    # still profile-gated to `app`/`all` and skipped by the Tilt inner loop.
+    # cvat_vector is profile-less, so it loads and is labelled.
+    dc_resource('nuclio',              labels=['3-cvat'], resource_deps=['cvat-network', 'cvat-submodule'])
     dc_resource('cvat_vector',         labels=['3-cvat'], resource_deps=['cvat-submodule'])
 
 # Training-queue worker (container — torch/ultralytics live on its image, so it
@@ -560,6 +559,16 @@ local_resource('worker-preprocessing',
 # Entry point is `python -m worker_cvat` (→ __main__ → worker.main). The env is
 # the union of both roles: CVAT_URL (sync, cvat-client) + CVAT_HOST (deploy).
 if ENABLE_CVAT:
+    # Pre-build the YOLO Nuclio base image so function deploys skip the heavy
+    # pip install step. Built once on first `tilt up --cvat`; rebuilt only when
+    # the Dockerfile changes. YOLO_BASE_IMAGE points worker-cvat at this image.
+    local_resource('yolo-base-image',
+        cmd='docker build -t cvops/yolo-nuclio-base:latest -f services/worker-cvat/yolo-base.Dockerfile services/worker-cvat',
+        deps=['services/worker-cvat/yolo-base.Dockerfile'],
+        labels=['3-cvat'],
+        resource_deps=['cvat-network'],
+    )
+
     worker_cvat_env = dict(api_env)
     worker_cvat_env.update({
         'REDIS_STREAM':        'cvat',
@@ -571,6 +580,8 @@ if ENABLE_CVAT:
         'CVAT_PASSWORD':       envreq('CVAT_PASSWORD'),
         # deploy path (deployer/cvat_client read CVAT_HOST + nuctl)
         'NUCTL_PATH':          str(local('pwd', quiet=True)).strip() + '/services/worker-cvat/nuctl',
+        # pre-built base image — avoids pip install on every function deploy
+        'YOLO_BASE_IMAGE':     'cvops/yolo-nuclio-base:latest',
     })
     cvat_host_raw = env.get('CVAT_HOST', 'localhost')
     worker_cvat_env['CVAT_HOST'] = cvat_host_raw if cvat_host_raw.startswith('http') else 'http://%s:8080' % cvat_host_raw
@@ -594,7 +605,7 @@ if ENABLE_CVAT:
         # bootstrap, so a slow or failing CVAT stack never blocks the worker. It
         # connects to CVAT lazily, per review/deploy doorbell, and surfaces any CVAT
         # error on that run instead.
-        resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-cvat-install', 'nuctl-install', 'docker-socket-perms', 'migrate-up'],
+        resource_deps=['postgres', 'redis', 'garage-bootstrap', 'steps-install', 'worker-cvat-install', 'nuctl-install', 'docker-socket-perms', 'migrate-up', 'yolo-base-image'],
         labels=['4-cvat-app'],
     )
 
