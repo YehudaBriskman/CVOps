@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { client } from '../lib/client'
 import { sha256Hex } from '../lib/hash'
+import type { YoloBox } from '../lib/yolo'
 
 export interface DataSource {
   id: string
@@ -185,6 +186,89 @@ export function useUploadImages(projectId: string | undefined) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
       qc.invalidateQueries({ queryKey: ['samples', projectId] })
+    },
+  })
+}
+
+// ── Annotated (pre-labeled YOLO) image upload ────────────────────────────────
+
+export interface AnnotatedImagePair {
+  image: File
+  boxes: YoloBox[]
+}
+
+export interface AnnotatedUploadResult {
+  source_id: string
+  created: number
+  annotated: number
+  sample_ids: string[]
+}
+
+/**
+ * Upload pre-labeled YOLO images: presign + PUT each image, then POST the
+ * parsed boxes to `/annotated-uploads/confirm` which creates Samples with
+ * AnnotationRevision entries in one server-side transaction.
+ */
+export function useUploadAnnotatedImages(projectId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      pairs: AnnotatedImagePair[]
+      classNames: string[]
+      ontologyId?: string
+      group?: string
+    }): Promise<AnnotatedUploadResult> => {
+      const metas = await Promise.all(
+        vars.pairs.map(async ({ image, boxes }) => ({
+          file: image,
+          boxes,
+          blob_hash: `sha256:${await sha256Hex(image)}`,
+          ...(await readImageSize(image)),
+        })),
+      )
+      const byHash = new Map(metas.map((m) => [m.blob_hash, m.file]))
+
+      const { data: presign } = await client.post<{ items: PresignItem[] }>(
+        `/projects/${projectId}/image-uploads/presign`,
+        {
+          items: metas.map((m) => ({
+            filename: m.file.name,
+            content_type: m.file.type || 'image/jpeg',
+            sha256: m.blob_hash,
+          })),
+        },
+      )
+
+      await Promise.all(
+        presign.items.map(async (it) => {
+          const file = byHash.get(it.blob_hash)
+          if (!file) return
+          const put = await fetch(it.put_url, { method: 'PUT', body: file })
+          if (!put.ok) throw new Error(`Storage upload failed (${put.status}) for ${file.name}`)
+        }),
+      )
+
+      const { data } = await client.post<AnnotatedUploadResult>(
+        `/projects/${projectId}/annotated-uploads/confirm`,
+        {
+          ontology_id: vars.ontologyId ?? null,
+          class_names: vars.classNames,
+          group: vars.group ?? null,
+          items: metas.map((m) => ({
+            blob_hash: m.blob_hash,
+            width: m.width,
+            height: m.height,
+            content_type: m.file.type || 'image/jpeg',
+            size_bytes: m.file.size,
+            boxes: m.boxes,
+          })),
+        },
+      )
+      return data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['samples', projectId] })
+      qc.invalidateQueries({ queryKey: ['data-sources', projectId] })
     },
   })
 }

@@ -19,6 +19,7 @@ import {
   useDeleteDataSource,
   useUploadImages,
 } from '../api/data-sources'
+import { AnnotatedUploadModal } from '../components/data-sources/AnnotatedUploadModal'
 
 function errMessage(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -223,6 +224,7 @@ export default function DataSources() {
     matches: DataSourceMatch[]
     inCurrentProject: boolean
   } | null>(null)
+  const [showAnnotatedModal, setShowAnnotatedModal] = useState(false)
 
   const { data: sources, isLoading } = useDataSources(projectId)
   const { data: project } = useProject(projectId)
@@ -383,6 +385,17 @@ export default function DataSources() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      {showAnnotatedModal && projectId && (
+        <AnnotatedUploadModal
+          projectId={projectId}
+          onClose={() => setShowAnnotatedModal(false)}
+          onDone={({ created, annotated }) => {
+            setShowAnnotatedModal(false)
+            toast.success(`Imported ${created} image${created === 1 ? '' : 's'}, ${annotated} annotated`)
+          }}
+        />
+      )}
+
       {dupPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="bg-surface-2 rounded-xl border border-border shadow-xl max-w-md w-full p-6 flex flex-col gap-4">
@@ -525,6 +538,12 @@ export default function DataSources() {
                     }}
                   />
                 </label>
+                <button
+                  onClick={() => setShowAnnotatedModal(true)}
+                  className="cursor-pointer bg-surface-3 text-text-primary border border-border px-4 py-2 rounded-lg text-sm font-medium hover:bg-surface-1 transition-colors whitespace-nowrap"
+                >
+                  + Labeled Data
+                </button>
               </>
             )}
           </div>
