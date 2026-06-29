@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from cvops_api.config import settings
+from cvops_api.config import settings, validate_secrets
 from cvops_api.db.session import engine
 from cvops_api.routers import (
     auth,
@@ -30,6 +30,7 @@ from cvops_api.routers import (
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from cvops_api.core.redis_client import init_redis, close_redis
 
+    validate_secrets(settings)
     await init_redis()
     try:
         from cvops_steps import register_all
